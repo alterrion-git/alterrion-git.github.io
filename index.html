@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Workout">
+    <meta name="theme-color" content="#111827">
+    <link rel="manifest" href="manifest.json">
+    <title>Workout Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #111827;
+            color: white;
+            overflow-x: hidden;
+        }
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+            appearance: textfield;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script>
+        // Register service worker for PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(() => {
+                    console.log('Service worker registration failed');
+                });
+            });
+        }
+
+        const { useState, useEffect } = React;
+        const e = React.createElement;
+
+        const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+        // Lucide React icons as inline SVG components
+        const Plus = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+            e('line', { x1: 12, y1: 5, x2: 12, y2: 19 }),
+            e('line', { x1: 5, y1: 12, x2: 19, y2: 12 })
+        );
+
+        const Settings = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+            e('circle', { cx: 12, cy: 12, r: 3 }),
+            e('path', { d: 'M12 1v6m0 6v6m-9-9h6m6 0h6' })
+        );
+
+        const ArrowLeft = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+            e('line', { x1: 19, y1: 12, x2: 5, y2: 12 }),
+            e('polyline', { points: '12 19 5 12 12 5' })
+        );
+
+        const ArrowRight = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+            e('line', { x1: 5, y1: 12, x2: 19, y2: 12 }),
+            e('polyline', { points: '12 5 19 12 12 19' })
+        );
+
+        const Check = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+            e('polyline', { points: '20 6 9 17 4 12' })
+        );
+
+        function WorkoutApp() {
+            const [view, setView] = useState('landing');
+            const [workouts, setWorkouts] = useState({});
+            const [editingDay, setEditingDay] = useState(null);
+            const [editingWorkout, setEditingWorkout] = useState(null);
+            const [liveWorkout, setLiveWorkout] = useState(null);
+            const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+            const [currentSetIndex, setCurrentSetIndex] = useState(0);
+            const [workoutStartTime, setWorkoutStartTime] = useState(null);
+            const [setStartTime, setSetStartTime] = useState(null);
+            const [totalElapsedTime, setTotalElapsedTime] = useState(0);
+            const [currentSetTime, setCurrentSetTime] = useState(0);
+            const [completedSets, setCompletedSets] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+
+            useEffect(() => {
+                try {
+                    const savedData = localStorage.getItem('workout-tracker-data');
+                    if (savedData) {
+                        setWorkouts(JSON.parse(savedData));
+                    }
+                } catch (error) {
+                    console.log('No saved workouts found');
+                } finally {
+                    setIsLoading(false);
+                }
+            }, []);
+
+            useEffect(() => {
+                if (!isLoading && Object.keys(workouts).length > 0) {
+                    try {
+                        localStorage.setItem('workout-tracker-data', JSON.stringify(workouts));
+                    } catch (error) {
+                        console.error('Failed to save workouts:', error);
+                    }
+                }
+            }, [workouts, isLoading]);
+
+            useEffect(() => {
+                let interval;
+                if (workoutStartTime && view === 'live') {
+                    interval = setInterval(() => {
+                        setTotalElapsedTime(Math.floor((Date.now() - workoutStartTime) / 1000));
+                    }, 1000);
+                }
+                return () => clearInterval(interval);
+            }, [workoutStartTime, view]);
+
+            useEffect(() => {
+                let interval;
+                if (setStartTime && view === 'live') {
+                    interval = setInterval(() => {
+                        setCurrentSetTime(Math.floor((Date.now() - setStartTime) / 1000));
+                    }, 1000);
+                }
+                return () => clearInterval(interval);
+            }, [setStartTime, view]);
+
+            const formatTime = (seconds) => {
+                const mins = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            };
+
+            const startNewWorkout = () => {
+                setEditingWorkout({
+                    name: '',
+                    exercises: [{
+                        name: '',
+                        sets: [
+                            { reps: 0, weight: 0 },
+                            { reps: 0, weight: 0 }
+                        ]
+                    }]
+                });
+                setView('edit');
+            };
+
+            const addExercise = () => {
+                setEditingWorkout({
+                    ...editingWorkout,
+                    exercises: [
+                        ...editingWorkout.exercises,
+                        {
+                            name: '',
+                            sets: [
+                                { reps: 0, weight: 0 },
+                                { reps: 0, weight: 0 }
+                            ]
+                        }
+                    ]
+                });
+            };
+
+            const addSet = (exerciseIndex) => {
+                const newExercises = [...editingWorkout.exercises];
+                newExercises[exerciseIndex].sets.push({ reps: 0, weight: 0 });
+                setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+            };
+
+            const updateExerciseName = (exerciseIndex, name) => {
+                const newExercises = [...editingWorkout.exercises];
+                newExercises[exerciseIndex].name = name;
+                setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+            };
+
+            const updateSet = (exerciseIndex, setIndex, field, value) => {
+                const newExercises = [...editingWorkout.exercises];
+                newExercises[exerciseIndex].sets[setIndex][field] = parseFloat(value) || 0;
+                setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+            };
+
+            const removeSet = (exerciseIndex, setIndex) => {
+                const newExercises = [...editingWorkout.exercises];
+                if (newExercises[exerciseIndex].sets.length > 1) {
+                    newExercises[exerciseIndex].sets.splice(setIndex, 1);
+                    setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+                }
+            };
+
+            const removeExercise = (exerciseIndex) => {
+                const newExercises = [...editingWorkout.exercises];
+                if (newExercises.length > 1) {
+                    newExercises.splice(exerciseIndex, 1);
+                    setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+                }
+            };
+
+            const saveWorkout = () => {
+                if (editingWorkout.name && editingWorkout.exercises.every(ex => ex.name)) {
+                    const newWorkouts = { ...workouts };
+                    newWorkouts[editingDay] = {
+                        ...editingWorkout,
+                        progress: null
+                    };
+                    setWorkouts(newWorkouts);
+                    setView('landing');
+                    setEditingDay(null);
+                    setEditingWorkout(null);
+                }
+            };
+
+            const startWorkout = (day) => {
+                const workout = workouts[day];
+                const progress = workout.progress;
+
+                if (progress) {
+                    setCurrentExerciseIndex(progress.currentExerciseIndex);
+                    setCurrentSetIndex(progress.currentSetIndex);
+                    setWorkoutStartTime(progress.startTime);
+                    setCompletedSets(progress.completedSets || []);
+                    setSetStartTime(progress.setStartTime || Date.now());
+                } else {
+                    setCurrentExerciseIndex(0);
+                    setCurrentSetIndex(0);
+                    setWorkoutStartTime(Date.now());
+                    setCompletedSets([]);
+                    setSetStartTime(Date.now());
+                }
+
+                setLiveWorkout({ ...workout, day });
+                setView('live');
+            };
+
+            const getTotalSetsRemaining = () => {
+                if (!liveWorkout) return 0;
+                let total = 0;
+                for (let i = currentExerciseIndex; i < liveWorkout.exercises.length; i++) {
+                    const exercise = liveWorkout.exercises[i];
+                    if (i === currentExerciseIndex) {
+                        total += exercise.sets.length - currentSetIndex;
+                    } else {
+                        total += exercise.sets.length;
+                    }
+                }
+                return total;
+            };
+
+            const updateLiveSet = (field, value) => {
+                const newWorkout = { ...liveWorkout };
+                newWorkout.exercises[currentExerciseIndex].sets[currentSetIndex][field] = parseFloat(value) || 0;
+                setLiveWorkout(newWorkout);
+            };
+
+            const nextSet = () => {
+                const setTime = currentSetTime;
+                const newCompletedSets = [...completedSets, setTime];
+                setCompletedSets(newCompletedSets);
+
+                const updatedWorkouts = { ...workouts };
+                updatedWorkouts[liveWorkout.day] = {
+                    ...liveWorkout,
+                    progress: {
+                        currentExerciseIndex,
+                        currentSetIndex: currentSetIndex + 1,
+                        startTime: workoutStartTime,
+                        setStartTime: Date.now(),
+                        completedSets: newCompletedSets
+                    }
+                };
+
+                const currentExercise = liveWorkout.exercises[currentExerciseIndex];
+
+                if (currentSetIndex + 1 < currentExercise.sets.length) {
+                    setCurrentSetIndex(currentSetIndex + 1);
+                    setSetStartTime(Date.now());
+                    setCurrentSetTime(0);
+                    updatedWorkouts[liveWorkout.day].progress.currentSetIndex = currentSetIndex + 1;
+                    updatedWorkouts[liveWorkout.day].progress.setStartTime = Date.now();
+                } else if (currentExerciseIndex + 1 < liveWorkout.exercises.length) {
+                    setCurrentExerciseIndex(currentExerciseIndex + 1);
+                    setCurrentSetIndex(0);
+                    setSetStartTime(Date.now());
+                    setCurrentSetTime(0);
+                    updatedWorkouts[liveWorkout.day].progress.currentExerciseIndex = currentExerciseIndex + 1;
+                    updatedWorkouts[liveWorkout.day].progress.currentSetIndex = 0;
+                    updatedWorkouts[liveWorkout.day].progress.setStartTime = Date.now();
+                } else {
+                    updatedWorkouts[liveWorkout.day].progress = null;
+                    setWorkouts(updatedWorkouts);
+                    setView('complete');
+                    return;
+                }
+
+                setWorkouts(updatedWorkouts);
+            };
+
+            const finishWorkout = () => {
+                setView('landing');
+                setLiveWorkout(null);
+                setCurrentExerciseIndex(0);
+                setCurrentSetIndex(0);
+                setWorkoutStartTime(null);
+                setSetStartTime(null);
+                setTotalElapsedTime(0);
+                setCurrentSetTime(0);
+                setCompletedSets([]);
+            };
+
+            if (isLoading) {
+                return e('div', { className: 'min-h-screen bg-gray-900 text-white flex items-center justify-center' },
+                    e('div', { className: 'text-xl' }, 'Loading workouts...')
+                );
+            }
+
+            if (view === 'edit') {
+                return e('div', { className: 'min-h-screen bg-gray-900 text-white p-6' },
+                    e('div', { className: 'max-w-4xl mx-auto' },
+                        e('div', { className: 'flex items-center justify-between mb-6' },
+                            e('button', {
+                                onClick: () => {
+                                    setView('landing');
+                                    setEditingWorkout(null);
+                                    setEditingDay(null);
+                                },
+                                className: 'flex items-center gap-2 text-gray-400 hover:text-white'
+                            }, e(ArrowLeft, { size: 20 }), 'Back'),
+                            e('h1', { className: 'text-2xl font-bold' }, editingDay),
+                            e('button', {
+                                onClick: saveWorkout,
+                                className: 'px-4 py-2 bg-blue-600 rounded hover:bg-blue-700',
+                                disabled: !editingWorkout?.name || !editingWorkout?.exercises.every(ex => ex.name)
+                            }, 'Save')
+                        ),
+                        e('div', { className: 'mb-6' },
+                            e('label', { className: 'block mb-2 text-sm' }, 'Workout Name'),
+                            e('input', {
+                                type: 'text',
+                                value: editingWorkout?.name || '',
+                                onChange: (ev) => setEditingWorkout({ ...editingWorkout, name: ev.target.value }),
+                                className: 'w-full p-3 bg-gray-800 rounded border border-gray-700 focus:border-blue-500 outline-none',
+                                placeholder: 'e.g., Push Day'
+                            })
+                        ),
+                        editingWorkout?.exercises.map((exercise, exIdx) =>
+                            e('div', { key: exIdx, className: 'mb-6 p-4 bg-gray-800 rounded' },
+                                e('div', { className: 'flex items-center justify-between mb-4' },
+                                    e('input', {
+                                        type: 'text',
+                                        value: exercise.name,
+                                        onChange: (ev) => updateExerciseName(exIdx, ev.target.value),
+                                        className: 'flex-1 p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
+                                        placeholder: 'Exercise name'
+                                    }),
+                                    e('button', {
+                                        onClick: () => removeExercise(exIdx),
+                                        className: 'ml-2 px-3 py-2 bg-red-600 rounded hover:bg-red-700 text-sm'
+                                    }, 'Remove')
+                                ),
+                                e('div', { className: 'space-y-2' },
+                                    exercise.sets.map((set, setIdx) =>
+                                        e('div', { key: setIdx, className: 'flex items-center gap-3' },
+                                            e('span', { className: 'text-gray-400 w-12' }, `Set ${setIdx + 1}`),
+                                            e('input', {
+                                                type: 'number',
+                                                value: set.reps,
+                                                onChange: (ev) => updateSet(exIdx, setIdx, 'reps', ev.target.value),
+                                                className: 'w-20 p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
+                                                placeholder: 'Reps'
+                                            }),
+                                            e('input', {
+                                                type: 'number',
+                                                step: '0.01',
+                                                value: set.weight,
+                                                onChange: (ev) => updateSet(exIdx, setIdx, 'weight', ev.target.value),
+                                                className: 'w-24 p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
+                                                placeholder: 'Weight'
+                                            }),
+                                            e('span', { className: 'text-gray-400' }, 'kg'),
+                                            e('button', {
+                                                onClick: () => removeSet(exIdx, setIdx),
+                                                className: 'ml-auto px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 text-sm'
+                                            }, '✕')
+                                        )
+                                    )
+                                ),
+                                e('button', {
+                                    onClick: () => addSet(exIdx),
+                                    className: 'mt-3 px-3 py-1 bg-gray-700 rounded hover:bg-gray-600 text-sm'
+                                }, '+ Add Set')
+                            )
+                        ),
+                        e('button', {
+                            onClick: addExercise,
+                            className: 'w-full py-3 bg-gray-800 rounded hover:bg-gray-700 flex items-center justify-center gap-2'
+                        }, e(Plus, { size: 20 }), 'Add Exercise')
+                    )
+                );
+            }
+
+            if (view === 'live') {
+                const currentExercise = liveWorkout.exercises[currentExerciseIndex];
+                const currentSet = currentExercise.sets[currentSetIndex];
+
+                return e('div', { className: 'h-screen bg-gray-900 text-white flex items-center justify-center p-4' },
+                    e('div', { className: 'w-full max-w-6xl flex flex-col h-full justify-center' },
+                        e('div', { className: 'flex items-center justify-between mb-8' },
+                            e('button', {
+                                onClick: finishWorkout,
+                                className: 'p-2 hover:bg-gray-800 rounded'
+                            }, e(ArrowLeft, { size: 24 })),
+                            e('div', { className: 'flex items-center gap-12' },
+                                e('div', null,
+                                    e('div', { className: 'text-2xl font-bold' }, liveWorkout.day),
+                                    e('div', { className: 'text-lg text-gray-400' }, liveWorkout.name)
+                                ),
+                                e('div', { className: 'text-sm text-gray-400' }, `Total: ${formatTime(totalElapsedTime)}`)
+                            ),
+                            e('div', { className: 'text-right' },
+                                e('div', { className: 'text-sm text-gray-400' }, 'Sets Left'),
+                                e('div', { className: 'text-2xl font-bold' }, getTotalSetsRemaining())
+                            )
+                        ),
+                        e('div', { className: 'text-center mb-8' },
+                            e('div', { className: 'text-4xl font-bold mb-2' }, currentExercise.name),
+                            e('div', { className: 'text-2xl text-gray-400' }, `Set ${currentSetIndex + 1} of ${currentExercise.sets.length}`)
+                        ),
+                        e('div', { className: 'flex items-center justify-center gap-8' },
+                            e('div', { className: 'text-center' },
+                                e('div', { className: 'text-lg text-gray-400 mb-2' }, 'Reps'),
+                                e('input', {
+                                    type: 'number',
+                                    value: currentSet.reps,
+                                    onChange: (ev) => updateLiveSet('reps', ev.target.value),
+                                    className: 'w-28 h-28 text-4xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none'
+                                })
+                            ),
+                            e('div', { className: 'text-center' },
+                                e('div', { className: 'text-lg text-gray-400 mb-2' }, 'Weight (kg)'),
+                                e('input', {
+                                    type: 'number',
+                                    step: '0.01',
+                                    value: currentSet.weight,
+                                    onChange: (ev) => updateLiveSet('weight', ev.target.value),
+                                    className: 'w-28 h-28 text-4xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none'
+                                })
+                            ),
+                            e('button', {
+                                onClick: nextSet,
+                                className: 'p-6 bg-blue-600 rounded-full hover:bg-blue-700 mt-8'
+                            }, e(ArrowRight, { size: 40 }))
+                        ),
+                        e('div', { className: 'text-center text-xl text-gray-400 mt-8 h-8' }, `Set: ${formatTime(currentSetTime)}`),
+                        e('div', { className: 'mt-4 text-center text-sm text-gray-500 h-6' },
+                            completedSets.length > 0 && `Previous: ${completedSets.map(t => formatTime(t)).join(', ')}`
+                        )
+                    )
+                );
+            }
+
+            if (view === 'complete') {
+                return e('div', { className: 'h-screen bg-gray-900 text-white flex items-center justify-center' },
+                    e('div', { className: 'text-center' },
+                        e('div', { className: 'mb-6' }, e(Check, { size: 80, className: 'mx-auto text-green-500' })),
+                        e('h1', { className: 'text-5xl font-bold mb-4' }, 'Workout Complete!'),
+                        e('div', { className: 'text-3xl text-gray-400 mb-8' }, `Total Time: ${formatTime(totalElapsedTime)}`),
+                        e('button', {
+                            onClick: finishWorkout,
+                            className: 'px-8 py-4 bg-blue-600 rounded text-2xl hover:bg-blue-700'
+                        }, 'Back to Home')
+                    )
+                );
+            }
+
+            const today = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
+            const currentDate = new Date().toLocaleDateString('en-GB', {
+                day: '2-digit',
+                month: 'long',
+                year: 'numeric'
+            });
+
+            return e('div', { className: 'min-h-screen bg-gray-900 text-white p-6' },
+                e('div', { className: 'max-w-6xl mx-auto' },
+                    e('h1', { className: 'text-3xl font-bold mb-8 text-center' }, 'Weekly Workout Schedule'),
+                    e('div', { className: 'grid grid-cols-2 gap-4' },
+                        DAYS.map((day) => {
+                            const workout = workouts[day];
+                            const isToday = day === today;
+                            const hasProgress = workout?.progress;
+
+                            return e('div', {
+                                key: day,
+                                className: `p-6 rounded-lg ${isToday ? 'bg-blue-900 border-2 border-blue-500' : 'bg-gray-800'}`
+                            },
+                                e('div', { className: 'flex items-center justify-between mb-3' },
+                                    e('div', { className: 'flex-1' },
+                                        e('div', { className: 'flex items-center gap-3' },
+                                            e('h2', { className: 'text-xl font-bold' }, day),
+                                            isToday && e('span', { className: 'px-2 py-1 bg-blue-500 rounded text-xs' }, 'Today')
+                                        ),
+                                        e('div', { className: 'text-gray-400 text-sm mt-1' }, workout ? workout.name : 'Rest'),
+                                        e('div', { className: 'text-gray-500 text-xs mt-1 h-4' }, isToday ? currentDate : '')
+                                    )
+                                ),
+                                e('div', { className: 'flex items-center gap-2 justify-end' },
+                                    workout ? [
+                                        e('button', {
+                                            key: 'start',
+                                            onClick: () => startWorkout(day),
+                                            className: 'px-4 py-2 bg-green-600 rounded hover:bg-green-700 text-sm'
+                                        }, hasProgress ? 'Continue' : 'Start'),
+                                        e('button', {
+                                            key: 'settings',
+                                            onClick: () => {
+                                                setEditingDay(day);
+                                                setEditingWorkout(workout);
+                                                setView('edit');
+                                            },
+                                            className: 'p-2 bg-gray-700 rounded hover:bg-gray-600'
+                                        }, e(Settings, { size: 18 }))
+                                    ] : e('button', {
+                                        onClick: () => {
+                                            setEditingDay(day);
+                                            startNewWorkout();
+                                        },
+                                        className: 'flex items-center gap-2 px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 text-sm'
+                                    }, e(Plus, { size: 18 }), 'Add')
+                                )
+                            );
+                        })
+                    )
+                )
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(e(WorkoutApp));
+    </script>
+</body>
+</html>
