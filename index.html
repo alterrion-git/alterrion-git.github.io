@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -21,7 +21,43 @@
             background: #111827;
             color: white;
             overflow-x: hidden;
+            position: fixed;
+            width: 100%;
+            height: 100vh;
+            overscroll-behavior: none;
         }
+        
+        /* Camera cutout styling for Samsung Z Flip 7 cover screen */
+        #root {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            clip-path: polygon(
+                0 0,
+                100% 0,
+                100% 3%,
+                97% 3%,
+                97% 8%,
+                100% 8%,
+                100% 100%,
+                0 100%
+            );
+        }
+        
+        /* Camera cutout indicator */
+        .camera-cutout-indicator {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 3%;
+            height: 8%;
+            border: 2px solid rgba(59, 130, 246, 0.3);
+            border-left: none;
+            border-top: none;
+            pointer-events: none;
+            z-index: 9999;
+        }
+        
         input[type="number"]::-webkit-outer-spin-button,
         input[type="number"]::-webkit-inner-spin-button {
             -webkit-appearance: none;
@@ -31,12 +67,58 @@
             -moz-appearance: textfield;
             appearance: textfield;
         }
+        
+        /* Scroll wheel modal */
+        .scroll-wheel-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        }
+        
+        .scroll-wheel-container {
+            background: #1f2937;
+            border-radius: 20px;
+            padding: 20px;
+            width: 300px;
+            text-align: center;
+        }
+        
+        .scroll-wheel {
+            height: 200px;
+            overflow-y: scroll;
+            scroll-snap-type: y mandatory;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        .scroll-wheel-item {
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            scroll-snap-align: center;
+            cursor: pointer;
+        }
+        
+        .scroll-wheel-item.active {
+            font-size: 32px;
+            font-weight: bold;
+            color: #3b82f6;
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body>
+    <div class="camera-cutout-indicator"></div>
     <div id="root"></div>
     
     <script>
@@ -48,8 +130,15 @@
                 });
             });
         }
+        
+        // Hide address bar on scroll
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                window.scrollTo(0, 1);
+            }, 100);
+        });
 
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
         const e = React.createElement;
 
         const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -78,6 +167,148 @@
         const Check = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
             e('polyline', { points: '20 6 9 17 4 12' })
         );
+
+        // Scroll wheel component
+        function ScrollWheel({ value, onChange, onClose, label, step = 1, min = 0, max = 500 }) {
+            const [items] = useState(() => {
+                const arr = [];
+                for (let i = min; i <= max; i += step) {
+                    arr.push(i);
+                }
+                return arr;
+            });
+            const wheelRef = useRef(null);
+            const [selectedValue, setSelectedValue] = useState(value);
+
+            useEffect(() => {
+                if (wheelRef.current) {
+                    const index = items.indexOf(value);
+                    if (index !== -1) {
+                        wheelRef.current.scrollTop = index * 50 - 75;
+                    }
+                }
+            }, []);
+
+            const handleScroll = () => {
+                if (wheelRef.current) {
+                    const scrollTop = wheelRef.current.scrollTop;
+                    const index = Math.round((scrollTop + 75) / 50);
+                    if (index >= 0 && index < items.length) {
+                        setSelectedValue(items[index]);
+                    }
+                }
+            };
+
+            return e('div', { className: 'scroll-wheel-overlay', onClick: onClose },
+                e('div', { className: 'scroll-wheel-container', onClick: (ev) => ev.stopPropagation() },
+                    e('div', { className: 'text-xl mb-4' }, label),
+                    e('div', { 
+                        ref: wheelRef,
+                        className: 'scroll-wheel',
+                        onScroll: handleScroll
+                    },
+                        e('div', { style: { height: '75px' } }),
+                        items.map((item) =>
+                            e('div', {
+                                key: item,
+                                className: `scroll-wheel-item ${item === selectedValue ? 'active' : ''}`,
+                                onClick: () => {
+                                    setSelectedValue(item);
+                                    onChange(item);
+                                    onClose();
+                                }
+                            }, step === 1 ? item : item.toFixed(1))
+                        ),
+                        e('div', { style: { height: '75px' } })
+                    ),
+                    e('div', { className: 'flex gap-4 mt-4' },
+                        e('button', {
+                            onClick: onClose,
+                            className: 'flex-1 px-4 py-2 bg-gray-600 rounded hover:bg-gray-700'
+                        }, 'Cancel'),
+                        e('button', {
+                            onClick: () => {
+                                onChange(selectedValue);
+                                onClose();
+                            },
+                            className: 'flex-1 px-4 py-2 bg-blue-600 rounded hover:bg-blue-700'
+                        }, 'Set')
+                    )
+                )
+            );
+        }
+
+        // Custom number input component
+        function CustomNumberInput({ value, onChange, label, step = 1 }) {
+            const [showWheel, setShowWheel] = useState(false);
+            const [isLongPress, setIsLongPress] = useState(false);
+            const [tempValue, setTempValue] = useState('');
+            const longPressTimer = useRef(null);
+
+            const handleTouchStart = () => {
+                longPressTimer.current = setTimeout(() => {
+                    setIsLongPress(true);
+                    setTempValue(value.toString());
+                }, 500);
+            };
+
+            const handleTouchEnd = () => {
+                if (longPressTimer.current) {
+                    clearTimeout(longPressTimer.current);
+                }
+                if (!isLongPress) {
+                    setShowWheel(true);
+                }
+            };
+
+            const handleManualChange = (val) => {
+                setTempValue(val);
+            };
+
+            const handleManualBlur = () => {
+                const num = parseFloat(tempValue);
+                if (!isNaN(num)) {
+                    onChange(num);
+                } else if (tempValue === '') {
+                    onChange(0);
+                }
+                setIsLongPress(false);
+            };
+
+            if (isLongPress) {
+                return e('div', { className: 'text-center' },
+                    e('div', { className: 'text-lg text-gray-400 mb-2' }, label),
+                    e('input', {
+                        type: 'number',
+                        step: step,
+                        value: tempValue,
+                        onChange: (ev) => handleManualChange(ev.target.value),
+                        onBlur: handleManualBlur,
+                        autoFocus: true,
+                        className: 'w-28 h-28 text-4xl font-bold text-center bg-gray-800 rounded-full border-4 border-green-600 outline-none'
+                    })
+                );
+            }
+
+            return e('div', { className: 'text-center' },
+                showWheel && e(ScrollWheel, {
+                    value: value,
+                    onChange: onChange,
+                    onClose: () => setShowWheel(false),
+                    label: label,
+                    step: step,
+                    max: label.includes('Weight') ? 200 : 100
+                }),
+                e('div', { className: 'text-lg text-gray-400 mb-2' }, label),
+                e('div', {
+                    onTouchStart: handleTouchStart,
+                    onTouchEnd: handleTouchEnd,
+                    onMouseDown: handleTouchStart,
+                    onMouseUp: handleTouchEnd,
+                    className: 'w-28 h-28 text-4xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none flex items-center justify-center cursor-pointer select-none'
+                }, value)
+            );
+        }
 
         function WorkoutApp() {
             const [view, setView] = useState('landing');
@@ -437,25 +668,18 @@
                             e('div', { className: 'text-2xl text-gray-400' }, `Set ${currentSetIndex + 1} of ${currentExercise.sets.length}`)
                         ),
                         e('div', { className: 'flex items-center justify-center gap-8' },
-                            e('div', { className: 'text-center' },
-                                e('div', { className: 'text-lg text-gray-400 mb-2' }, 'Reps'),
-                                e('input', {
-                                    type: 'number',
-                                    value: currentSet.reps,
-                                    onChange: (ev) => updateLiveSet('reps', ev.target.value),
-                                    className: 'w-28 h-28 text-4xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none'
-                                })
-                            ),
-                            e('div', { className: 'text-center' },
-                                e('div', { className: 'text-lg text-gray-400 mb-2' }, 'Weight (kg)'),
-                                e('input', {
-                                    type: 'number',
-                                    step: '0.01',
-                                    value: currentSet.weight,
-                                    onChange: (ev) => updateLiveSet('weight', ev.target.value),
-                                    className: 'w-28 h-28 text-4xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none'
-                                })
-                            ),
+                            e(CustomNumberInput, {
+                                value: currentSet.reps,
+                                onChange: (val) => updateLiveSet('reps', val),
+                                label: 'Reps',
+                                step: 1
+                            }),
+                            e(CustomNumberInput, {
+                                value: currentSet.weight,
+                                onChange: (val) => updateLiveSet('weight', val),
+                                label: 'Weight (kg)',
+                                step: 0.5
+                            }),
                             e('button', {
                                 onClick: nextSet,
                                 className: 'p-6 bg-blue-600 rounded-full hover:bg-blue-700 mt-8'
