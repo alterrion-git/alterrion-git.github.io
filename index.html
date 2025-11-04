@@ -21,41 +21,39 @@
             background: #111827;
             color: white;
             overflow-x: hidden;
-            position: fixed;
-            width: 100%;
-            height: 100vh;
-            overscroll-behavior: none;
+            overflow-y: auto;
         }
         
-        /* Camera cutout styling for Samsung Z Flip 7 cover screen */
+        /* Camera cutout styling for Samsung Z Flip 7 cover screen - BOTTOM RIGHT */
         #root {
             position: relative;
             width: 100%;
-            height: 100%;
+            min-height: 100vh;
             clip-path: polygon(
                 0 0,
                 100% 0,
-                100% 3%,
-                97% 3%,
-                97% 8%,
-                100% 8%,
+                100% 92%,
+                97% 92%,
+                97% 97%,
+                100% 97%,
                 100% 100%,
                 0 100%
             );
         }
         
-        /* Camera cutout indicator */
+        /* Camera cutout indicator - BOTTOM RIGHT */
         .camera-cutout-indicator {
             position: fixed;
-            top: 0;
+            bottom: 0;
             right: 0;
             width: 3%;
             height: 8%;
-            border: 2px solid rgba(59, 130, 246, 0.3);
+            border: 2px solid rgba(59, 130, 246, 0.5);
             border-left: none;
-            border-top: none;
+            border-bottom: none;
             pointer-events: none;
             z-index: 9999;
+            background: rgba(59, 130, 246, 0.1);
         }
         
         input[type="number"]::-webkit-outer-spin-button,
@@ -244,21 +242,37 @@
             const [isLongPress, setIsLongPress] = useState(false);
             const [tempValue, setTempValue] = useState('');
             const longPressTimer = useRef(null);
+            const touchStartTime = useRef(null);
 
-            const handleTouchStart = () => {
+            const handleTouchStart = (e) => {
+                touchStartTime.current = Date.now();
                 longPressTimer.current = setTimeout(() => {
                     setIsLongPress(true);
                     setTempValue(value.toString());
                 }, 500);
             };
 
-            const handleTouchEnd = () => {
+            const handleTouchEnd = (e) => {
+                const touchDuration = Date.now() - touchStartTime.current;
+                
                 if (longPressTimer.current) {
                     clearTimeout(longPressTimer.current);
                 }
-                if (!isLongPress) {
+                
+                if (!isLongPress && touchDuration < 500) {
+                    // Only show wheel if it was a quick tap (not a long press that got cancelled)
                     setShowWheel(true);
                 }
+            };
+
+            const handleIncrement = (e) => {
+                e.stopPropagation();
+                onChange(value + step);
+            };
+
+            const handleDecrement = (e) => {
+                e.stopPropagation();
+                onChange(Math.max(0, value - step));
             };
 
             const handleManualChange = (val) => {
@@ -290,7 +304,7 @@
                 );
             }
 
-            return e('div', { className: 'text-center' },
+            return e('div', { className: 'text-center relative' },
                 showWheel && e(ScrollWheel, {
                     value: value,
                     onChange: onChange,
@@ -300,13 +314,23 @@
                     max: label.includes('Weight') ? 200 : 100
                 }),
                 e('div', { className: 'text-lg text-gray-400 mb-2' }, label),
-                e('div', {
-                    onTouchStart: handleTouchStart,
-                    onTouchEnd: handleTouchEnd,
-                    onMouseDown: handleTouchStart,
-                    onMouseUp: handleTouchEnd,
-                    className: 'w-28 h-28 text-4xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none flex items-center justify-center cursor-pointer select-none'
-                }, value)
+                e('div', { className: 'relative' },
+                    e('button', {
+                        onClick: handleIncrement,
+                        className: 'absolute -top-8 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center hover:bg-gray-600 z-10'
+                    }, '▲'),
+                    e('div', {
+                        onTouchStart: handleTouchStart,
+                        onTouchEnd: handleTouchEnd,
+                        onMouseDown: handleTouchStart,
+                        onMouseUp: handleTouchEnd,
+                        className: 'w-28 h-28 text-4xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none flex items-center justify-center cursor-pointer select-none'
+                    }, value),
+                    e('button', {
+                        onClick: handleDecrement,
+                        className: 'absolute -bottom-8 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center hover:bg-gray-600 z-10'
+                    }, '▼')
+                )
             );
         }
 
@@ -667,7 +691,7 @@
                             e('div', { className: 'text-4xl font-bold mb-2' }, currentExercise.name),
                             e('div', { className: 'text-2xl text-gray-400' }, `Set ${currentSetIndex + 1} of ${currentExercise.sets.length}`)
                         ),
-                        e('div', { className: 'flex items-center justify-center gap-8' },
+                        e('div', { className: 'flex items-center justify-center gap-8 my-16' },
                             e(CustomNumberInput, {
                                 value: currentSet.reps,
                                 onChange: (val) => updateLiveSet('reps', val),
