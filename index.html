@@ -32,11 +32,9 @@
             clip-path: polygon(
                 0 0,
                 100% 0,
-                100% 92%,
-                97% 92%,
-                97% 97%,
-                100% 97%,
-                100% 100%,
+                100% 90%,
+                50% 90%,
+                50% 100%,
                 0 100%
             );
         }
@@ -46,10 +44,10 @@
             position: fixed;
             bottom: 0;
             right: 0;
-            width: 3%;
-            height: 8%;
+            width: 50%;
+            height: 10%;
             border: 2px solid rgba(59, 130, 246, 0.5);
-            border-left: none;
+            border-right: none;
             border-bottom: none;
             pointer-events: none;
             z-index: 9999;
@@ -238,14 +236,11 @@
 
         // Custom number input component
         function CustomNumberInput({ value, onChange, label, step = 1 }) {
-            const [showWheel, setShowWheel] = useState(false);
             const [isLongPress, setIsLongPress] = useState(false);
             const [tempValue, setTempValue] = useState('');
             const longPressTimer = useRef(null);
-            const touchStartTime = useRef(null);
 
             const handleTouchStart = (e) => {
-                touchStartTime.current = Date.now();
                 longPressTimer.current = setTimeout(() => {
                     setIsLongPress(true);
                     setTempValue(value.toString());
@@ -253,15 +248,8 @@
             };
 
             const handleTouchEnd = (e) => {
-                const touchDuration = Date.now() - touchStartTime.current;
-                
                 if (longPressTimer.current) {
                     clearTimeout(longPressTimer.current);
-                }
-                
-                if (!isLongPress && touchDuration < 500) {
-                    // Only show wheel if it was a quick tap (not a long press that got cancelled)
-                    setShowWheel(true);
                 }
             };
 
@@ -305,30 +293,22 @@
             }
 
             return e('div', { className: 'text-center relative' },
-                showWheel && e(ScrollWheel, {
-                    value: value,
-                    onChange: onChange,
-                    onClose: () => setShowWheel(false),
-                    label: label,
-                    step: step,
-                    max: label.includes('Weight') ? 200 : 100
-                }),
                 e('div', { className: 'text-lg text-gray-400 mb-2' }, label),
-                e('div', { className: 'relative' },
+                e('div', { className: 'relative flex flex-col items-center' },
                     e('button', {
                         onClick: handleIncrement,
-                        className: 'absolute -top-8 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center hover:bg-gray-600 z-10'
+                        className: 'w-20 h-8 bg-gray-700 rounded-full flex items-center justify-center hover:bg-gray-600 z-10 mb-1 text-sm'
                     }, '▲'),
                     e('div', {
                         onTouchStart: handleTouchStart,
                         onTouchEnd: handleTouchEnd,
                         onMouseDown: handleTouchStart,
                         onMouseUp: handleTouchEnd,
-                        className: 'w-28 h-28 text-4xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none flex items-center justify-center cursor-pointer select-none'
+                        className: 'w-28 h-28 text-4xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none flex items-center justify-center select-none'
                     }, value),
                     e('button', {
                         onClick: handleDecrement,
-                        className: 'absolute -bottom-8 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center hover:bg-gray-600 z-10'
+                        className: 'w-20 h-8 bg-gray-700 rounded-full flex items-center justify-center hover:bg-gray-600 z-10 mt-1 text-sm'
                     }, '▼')
                 )
             );
@@ -668,9 +648,9 @@
                 const currentExercise = liveWorkout.exercises[currentExerciseIndex];
                 const currentSet = currentExercise.sets[currentSetIndex];
 
-                return e('div', { className: 'h-screen bg-gray-900 text-white flex items-center justify-center p-4' },
-                    e('div', { className: 'w-full max-w-6xl flex flex-col h-full justify-center' },
-                        e('div', { className: 'flex items-center justify-between mb-8' },
+                return e('div', { className: 'min-h-screen bg-gray-900 text-white flex items-center justify-center p-4' },
+                    e('div', { className: 'w-full max-w-6xl flex flex-col justify-center' },
+                        e('div', { className: 'flex items-center justify-between mb-6' },
                             e('button', {
                                 onClick: finishWorkout,
                                 className: 'p-2 hover:bg-gray-800 rounded'
@@ -687,11 +667,11 @@
                                 e('div', { className: 'text-2xl font-bold' }, getTotalSetsRemaining())
                             )
                         ),
-                        e('div', { className: 'text-center mb-8' },
+                        e('div', { className: 'text-center mb-6' },
                             e('div', { className: 'text-4xl font-bold mb-2' }, currentExercise.name),
                             e('div', { className: 'text-2xl text-gray-400' }, `Set ${currentSetIndex + 1} of ${currentExercise.sets.length}`)
                         ),
-                        e('div', { className: 'flex items-center justify-center gap-8 my-16' },
+                        e('div', { className: 'flex items-center justify-center gap-8' },
                             e(CustomNumberInput, {
                                 value: currentSet.reps,
                                 onChange: (val) => updateLiveSet('reps', val),
@@ -709,7 +689,7 @@
                                 className: 'p-6 bg-blue-600 rounded-full hover:bg-blue-700 mt-8'
                             }, e(ArrowRight, { size: 40 }))
                         ),
-                        e('div', { className: 'text-center text-xl text-gray-400 mt-8 h-8' }, `Set: ${formatTime(currentSetTime)}`),
+                        e('div', { className: 'text-center text-xl text-gray-400 mt-6 h-8' }, `Set: ${formatTime(currentSetTime)}`),
                         e('div', { className: 'mt-4 text-center text-sm text-gray-500 h-6' },
                             completedSets.length > 0 && `Previous: ${completedSets.map(t => formatTime(t)).join(', ')}`
                         )
