@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.alt.workout",
+        "sha256_cert_fingerprints": ["C6:1D:A4:F4:58:EC:FB:B2:7D:BE:F0:27:FE:21:64:02:09:AB:61:13:C9:F6:E8:77:64:81:AF:70:8C:9C:9B:6D"]
+      }
+    }]
