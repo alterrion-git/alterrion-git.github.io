@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover, minimal-ui">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Workout">
     <meta name="theme-color" content="#111827">
     <link rel="manifest" href="manifest.json">
@@ -15,6 +15,15 @@
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        html {
+            height: 100%;
+            height: 100dvh;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -27,6 +36,7 @@
             height: 100vh;
             height: 100dvh;
             font-size: 18px;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
         }
         
         #root {
@@ -274,7 +284,7 @@
                             }
                         },
                         autoFocus: true,
-                        className: 'w-40 h-40 text-5xl font-bold text-center bg-gray-800 rounded-full border-4 border-green-600 outline-none'
+                        className: 'w-44 h-44 text-5xl font-bold text-center bg-gray-800 rounded-full border-4 border-green-600 outline-none'
                     })
                 );
             }
@@ -287,7 +297,7 @@
                     onTouchEnd: handleTouchEnd,
                     onMouseDown: handleTouchStart,
                     onMouseUp: handleTouchEnd,
-                    className: 'w-40 h-40 text-5xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none flex flex-col items-center justify-center select-none cursor-pointer relative overflow-hidden'
+                    className: 'w-44 h-44 text-5xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none flex flex-col items-center justify-center select-none cursor-pointer relative overflow-hidden'
                 },
                     e('div', { 
                         className: 'absolute top-0 left-0 right-0 h-1/3 flex items-center justify-center text-2xl text-gray-400',
@@ -699,10 +709,7 @@
                                 className: 'p-6 bg-blue-600 rounded-full hover:bg-blue-700 mt-8'
                             }, e(ArrowRight, { size: 40 }))
                         ),
-                        e('div', { className: 'text-left text-xl text-gray-400 mt-4 h-8 pl-4' }, `Set: ${formatTime(currentSetTime)}`),
-                        e('div', { className: 'mt-4 text-center text-sm text-gray-500 h-6' },
-                            completedSets.length > 0 && `Previous: ${completedSets.map(t => formatTime(t)).join(', ')}`
-                        )
+                        e('div', { className: 'text-left text-xl text-gray-400 mt-4 h-8 pl-4' }, `Set: ${formatTime(currentSetTime)}`)
                     )
                 );
             }
