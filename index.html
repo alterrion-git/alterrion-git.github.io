@@ -568,7 +568,7 @@
                                         type: 'text',
                                         value: exercise.name,
                                         onChange: (ev) => updateExerciseName(exIdx, ev.target.value),
-                                        className: 'flex-1 max-w-xs p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
+                                        className: 'flex-1 max-w-[60%] p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
                                         placeholder: 'Exercise name'
                                     }),
                                     e('button', {
@@ -623,13 +623,13 @@
 
                 return e('div', { className: 'min-h-screen bg-gray-900 text-white flex items-center justify-center p-4' },
                     e('div', { className: 'w-full max-w-6xl flex flex-col justify-center' },
-                        e('div', { className: 'bg-blue-900 bg-opacity-20 p-3 rounded-lg mb-4' },
-                            e('div', { className: 'flex items-center justify-between' },
+                        e('div', { className: 'bg-blue-900 bg-opacity-20 p-3 rounded-lg mb-4 w-full relative' },
+                            e('div', { className: 'flex items-center justify-between w-full px-12' },
                                 e('button', {
                                     onClick: finishWorkout,
                                     className: 'p-2 hover:bg-gray-800 rounded absolute left-2'
                                 }, e(ArrowLeft, { size: 24 })),
-                                e('div', { className: 'flex-1 flex items-center justify-center gap-12' },
+                                e('div', { className: 'flex-1 flex items-center justify-center gap-8' },
                                     e('div', { className: 'text-center' },
                                         e('div', { className: 'text-2xl font-bold' }, liveWorkout.day),
                                         e('div', { className: 'text-lg text-gray-400' }, liveWorkout.name)
@@ -646,7 +646,7 @@
                             e('div', { className: 'text-3xl font-bold mb-1' }, currentExercise.name),
                             e('div', { className: 'text-xl text-gray-400' }, `Set ${currentSetIndex + 1} of ${currentExercise.sets.length}`)
                         ),
-                        e('div', { className: 'flex items-center justify-center gap-3' },
+                        e('div', { className: 'flex items-center justify-center gap-2' },
                             e(CustomNumberInput, {
                                 value: currentSet.reps,
                                 onChange: (val) => updateLiveSet('reps', val),
@@ -673,15 +673,15 @@
             }
 
             if (view === 'complete') {
-                return e('div', { className: 'h-screen bg-gray-900 text-white flex items-center justify-center' },
+                return e('div', { className: 'h-screen bg-gray-900 text-white flex items-center justify-center relative' },
+                    e('button', {
+                        onClick: finishWorkout,
+                        className: 'absolute top-4 right-4 px-6 py-3 bg-blue-600 rounded text-lg hover:bg-blue-700'
+                    }, 'Home'),
                     e('div', { className: 'text-center' },
                         e('div', { className: 'mb-6' }, e(Check, { size: 80, className: 'mx-auto text-green-500' })),
                         e('h1', { className: 'text-5xl font-bold mb-4' }, 'Workout Complete!'),
-                        e('div', { className: 'text-3xl text-gray-400 mb-8' }, `Total Time: ${formatTime(totalElapsedTime)}`),
-                        e('button', {
-                            onClick: finishWorkout,
-                            className: 'px-8 py-4 bg-blue-600 rounded text-2xl hover:bg-blue-700'
-                        }, 'Back to Home')
+                        e('div', { className: 'text-3xl text-gray-400 mb-8' }, `Total Time: ${formatTime(totalElapsedTime)}`)
                     )
                 );
             }
