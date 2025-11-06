@@ -2,7 +2,7 @@
       "relation": ["delegate_permission/common.handle_all_urls"],
       "target": {
         "namespace": "android_app",
-        "package_name": "com.alt.work2",
-        "sha256_cert_fingerprints": ["C7:F8:BE:7A:5E:00:CA:BC:91:19:60:4C:A0:F7:AB:AA:23:65:3A:69:5E:29:39:05:99:88:70:A9:5B:6D:13:07"]
+        "package_name": "com.alt.work",
+        "sha256_cert_fingerprints": ["8C:6C:62:47:D0:33:65:9E:94:17:95:BB:92:4E:97:FF:3F:E7:C3:77:D0:C0:11:A5:37:CE:DA:79:D2:34:D7:F4"]
       }
     }]
