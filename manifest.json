@@ -3,11 +3,11 @@
   "short_name": "Workout Tracker",
   "description": "Personal workout tracking app",
   "start_url": "/index.html",
-  "scope": "/",
+  "scope": "/index.html",
   "display": "fullscreen",
   "background_color": "#111827",
   "theme_color": "#111827",
-  "orientation": "landscape",
+  "orientation": "portrait",
   "icons": [
     {
       "src": "icon-192.png",
