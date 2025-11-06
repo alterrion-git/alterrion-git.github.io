@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Workout">
+    <meta name="theme-color" content="#111827">
+    <link rel="manifest" href="manifest.json">
+    <title>Workout Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        html {
+            height: 100%;
+            height: 100dvh;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #111827;
+            color: white;
+            overflow-x: hidden;
+            overflow-y: auto;
+            position: fixed;
+            width: 100%;
+            height: 100vh;
+            height: 100dvh;
+            font-size: 22px;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        }
+        
+        #root {
+            height: 100%;
+            overflow-y: auto;
+        }
+        
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+            appearance: textfield;
+        }
+        
+        /* Scroll wheel modal */
+        .scroll-wheel-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        }
+        
+        .scroll-wheel-container {
+            background: #1f2937;
+            border-radius: 20px;
+            padding: 20px;
+            width: 300px;
+            text-align: center;
+        }
+        
+        .scroll-wheel {
+            height: 200px;
+            overflow-y: scroll;
+            scroll-snap-type: y mandatory;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        .scroll-wheel-item {
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            scroll-snap-align: center;
+            cursor: pointer;
+        }
+        
+        .scroll-wheel-item.active {
+            font-size: 32px;
+            font-weight: bold;
+            color: #3b82f6;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script>
+        // Register service worker for PWA
+        const APP_VERSION = '2.2.0'; // Update this with each new version!
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
+                    console.log('Service worker registration failed');
+                });
+            });
+        }
+        
+        // Hide address bar on load
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                window.scrollTo(0, 1);
+            }, 100);
+        });
+
+        const { useState, useEffect, useRef } = React;
+        const e = React.createElement;
+
+        const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+        // Lucide React icons as inline SVG components
+        const Plus = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+            e('line', { x1: 12, y1: 5, x2: 12, y2: 19 }),
+            e('line', { x1: 5, y1: 12, x2: 19, y2: 12 })
+        );
+
+        const Settings = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+            e('path', { d: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z' }),
+            e('circle', { cx: 12, cy: 12, r: 3 })
+        );
+
+        const ArrowLeft = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+            e('line', { x1: 19, y1: 12, x2: 5, y2: 12 }),
+            e('polyline', { points: '12 19 5 12 12 5' })
+        );
+
+        const ArrowRight = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+            e('line', { x1: 5, y1: 12, x2: 19, y2: 12 }),
+            e('polyline', { points: '12 5 19 12 12 19' })
+        );
+
+        const Check = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+            e('polyline', { points: '20 6 9 17 4 12' })
+        );
+
+        // Scroll wheel component
+        function ScrollWheel({ value, onChange, onClose, label, step = 1, min = 0, max = 500 }) {
+            const [items] = useState(() => {
+                const arr = [];
+                for (let i = min; i <= max; i += step) {
+                    arr.push(i);
+                }
+                return arr;
+            });
+            const wheelRef = useRef(null);
+            const [selectedValue, setSelectedValue] = useState(value);
+
+            useEffect(() => {
+                if (wheelRef.current) {
+                    const index = items.indexOf(value);
+                    if (index !== -1) {
+                        wheelRef.current.scrollTop = index * 50 - 75;
+                    }
+                }
+            }, []);
+
+            const handleScroll = () => {
+                if (wheelRef.current) {
+                    const scrollTop = wheelRef.current.scrollTop;
+                    const index = Math.round((scrollTop + 75) / 50);
+                    if (index >= 0 && index < items.length) {
+                        setSelectedValue(items[index]);
+                    }
+                }
+            };
+
+            return e('div', { className: 'scroll-wheel-overlay', onClick: onClose },
+                e('div', { className: 'scroll-wheel-container', onClick: (ev) => ev.stopPropagation() },
+                    e('div', { className: 'text-xl mb-4' }, label),
+                    e('div', { 
+                        ref: wheelRef,
+                        className: 'scroll-wheel',
+                        onScroll: handleScroll
+                    },
+                        e('div', { style: { height: '75px' } }),
+                        items.map((item) =>
+                            e('div', {
+                                key: item,
+                                className: `scroll-wheel-item ${item === selectedValue ? 'active' : ''}`,
+                                onClick: () => {
+                                    setSelectedValue(item);
+                                    onChange(item);
+                                    onClose();
+                                }
+                            }, step === 1 ? item : item.toFixed(1))
+                        ),
+                        e('div', { style: { height: '75px' } })
+                    ),
+                    e('div', { className: 'flex gap-4 mt-4' },
+                        e('button', {
+                            onClick: onClose,
+                            className: 'flex-1 px-4 py-2 bg-gray-600 rounded hover:bg-gray-700'
+                        }, 'Cancel'),
+                        e('button', {
+                            onClick: () => {
+                                onChange(selectedValue);
+                                onClose();
+                            },
+                            className: 'flex-1 px-4 py-2 bg-blue-600 rounded hover:bg-blue-700'
+                        }, 'Set')
+                    )
+                )
+            );
+        }
+
+        // Custom number input component
+        function CustomNumberInput({ value, onChange, label, step = 1 }) {
+            const [isLongPress, setIsLongPress] = useState(false);
+            const [tempValue, setTempValue] = useState('');
+            const longPressTimer = useRef(null);
+
+            const handleTouchStart = (e) => {
+                longPressTimer.current = setTimeout(() => {
+                    setIsLongPress(true);
+                    setTempValue(value.toString());
+                }, 500);
+            };
+
+            const handleTouchEnd = (e) => {
+                if (longPressTimer.current) {
+                    clearTimeout(longPressTimer.current);
+                }
+            };
+
+            const handleBubbleClick = (e, isTop) => {
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                const y = e.clientY - rect.top;
+                const halfHeight = rect.height / 2;
+                
+                if (y < halfHeight) {
+                    onChange(value + step);
+                } else {
+                    onChange(Math.max(0, value - step));
+                }
+            };
+
+            const handleManualChange = (val) => {
+                setTempValue(val);
+            };
+
+            const handleManualBlur = () => {
+                const num = parseFloat(tempValue);
+                if (!isNaN(num)) {
+                    onChange(num);
+                } else if (tempValue === '') {
+                    onChange(0);
+                }
+                setIsLongPress(false);
+            };
+
+            if (isLongPress) {
+                return e('div', { className: 'text-center' },
+                    e('div', { className: 'text-xl text-gray-400 mb-2' }, label),
+                    e('input', {
+                        type: 'number',
+                        step: step,
+                        value: tempValue,
+                        onChange: (ev) => handleManualChange(ev.target.value),
+                        onBlur: handleManualBlur,
+                        onKeyDown: (ev) => {
+                            if (ev.key === 'Enter') {
+                                ev.target.blur();
+                            }
+                        },
+                        autoFocus: true,
+                        className: 'w-52 h-52 text-6xl font-bold text-center bg-gray-800 rounded-full border-4 border-green-600 outline-none'
+                    })
+                );
+            }
+
+            return e('div', { className: 'text-center' },
+                e('div', { className: 'text-xl text-gray-400 mb-2' }, label),
+                e('div', {
+                    onClick: handleBubbleClick,
+                    onTouchStart: handleTouchStart,
+                    onTouchEnd: handleTouchEnd,
+                    onMouseDown: handleTouchStart,
+                    onMouseUp: handleTouchEnd,
+                    className: 'w-52 h-52 text-6xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none flex flex-col items-center justify-center select-none cursor-pointer relative overflow-hidden'
+                },
+                    e('div', { 
+                        className: 'absolute top-0 left-0 right-0 h-1/3 flex items-center justify-center text-2xl text-gray-400',
+                        style: { paddingTop: '8px' }
+                    }, '▲'),
+                    e('div', { className: 'text-6xl font-bold' }, value),
+                    e('div', { 
+                        className: 'absolute bottom-0 left-0 right-0 h-1/3 flex items-center justify-center text-2xl text-gray-400',
+                        style: { paddingBottom: '8px' }
+                    }, '▼')
+                )
+            );
+        }
+
+        function WorkoutApp() {
+            const [view, setView] = useState('landing');
+            const [workouts, setWorkouts] = useState({});
+            const [editingDay, setEditingDay] = useState(null);
+            const [editingWorkout, setEditingWorkout] = useState(null);
+            const [liveWorkout, setLiveWorkout] = useState(null);
+            const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+            const [currentSetIndex, setCurrentSetIndex] = useState(0);
+            const [workoutStartTime, setWorkoutStartTime] = useState(null);
+            const [setStartTime, setSetStartTime] = useState(null);
+            const [totalElapsedTime, setTotalElapsedTime] = useState(0);
+            const [currentSetTime, setCurrentSetTime] = useState(0);
+            const [completedSets, setCompletedSets] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+
+            useEffect(() => {
+                try {
+                    const savedData = localStorage.getItem('workout-tracker-data');
+                    if (savedData) {
+                        setWorkouts(JSON.parse(savedData));
+                    }
+                } catch (error) {
+                    console.log('No saved workouts found');
+                } finally {
+                    setIsLoading(false);
+                }
+            }, []);
+
+            useEffect(() => {
+                if (!isLoading && Object.keys(workouts).length > 0) {
+                    try {
+                        localStorage.setItem('workout-tracker-data', JSON.stringify(workouts));
+                    } catch (error) {
+                        console.error('Failed to save workouts:', error);
+                    }
+                }
+            }, [workouts, isLoading]);
+
+            useEffect(() => {
+                let interval;
+                if (workoutStartTime && view === 'live') {
+                    interval = setInterval(() => {
+                        setTotalElapsedTime(Math.floor((Date.now() - workoutStartTime) / 1000));
+                    }, 1000);
+                }
+                return () => clearInterval(interval);
+            }, [workoutStartTime, view]);
+
+            useEffect(() => {
+                let interval;
+                if (setStartTime && view === 'live') {
+                    interval = setInterval(() => {
+                        setCurrentSetTime(Math.floor((Date.now() - setStartTime) / 1000));
+                    }, 1000);
+                }
+                return () => clearInterval(interval);
+            }, [setStartTime, view]);
+
+            const formatTime = (seconds) => {
+                const mins = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            };
+
+            const startNewWorkout = () => {
+                setEditingWorkout({
+                    name: '',
+                    exercises: [{
+                        name: '',
+                        sets: [
+                            { reps: 0, weight: 0 },
+                            { reps: 0, weight: 0 }
+                        ]
+                    }]
+                });
+                setView('edit');
+            };
+
+            const addExercise = () => {
+                setEditingWorkout({
+                    ...editingWorkout,
+                    exercises: [
+                        ...editingWorkout.exercises,
+                        {
+                            name: '',
+                            sets: [
+                                { reps: 0, weight: 0 },
+                                { reps: 0, weight: 0 }
+                            ]
+                        }
+                    ]
+                });
+            };
+
+            const addSet = (exerciseIndex) => {
+                const newExercises = [...editingWorkout.exercises];
+                newExercises[exerciseIndex].sets.push({ reps: 0, weight: 0 });
+                setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+            };
+
+            const updateExerciseName = (exerciseIndex, name) => {
+                const newExercises = [...editingWorkout.exercises];
+                newExercises[exerciseIndex].name = name;
+                setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+            };
+
+            const updateSet = (exerciseIndex, setIndex, field, value) => {
+                const newExercises = [...editingWorkout.exercises];
+                // Allow empty string and convert to 0 only when needed
+                const parsedValue = value === '' ? 0 : parseFloat(value);
+                newExercises[exerciseIndex].sets[setIndex][field] = isNaN(parsedValue) ? 0 : parsedValue;
+                setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+            };
+
+            const removeSet = (exerciseIndex, setIndex) => {
+                const newExercises = [...editingWorkout.exercises];
+                if (newExercises[exerciseIndex].sets.length > 1) {
+                    newExercises[exerciseIndex].sets.splice(setIndex, 1);
+                    setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+                }
+            };
+
+            const removeExercise = (exerciseIndex) => {
+                const newExercises = [...editingWorkout.exercises];
+                if (newExercises.length > 1) {
+                    newExercises.splice(exerciseIndex, 1);
+                    setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+                }
+            };
+
+            const saveWorkout = () => {
+                if (editingWorkout.name && editingWorkout.exercises.every(ex => ex.name)) {
+                    const newWorkouts = { ...workouts };
+                    newWorkouts[editingDay] = {
+                        ...editingWorkout,
+                        progress: null
+                    };
+                    setWorkouts(newWorkouts);
+                    setView('landing');
+                    setEditingDay(null);
+                    setEditingWorkout(null);
+                }
+            };
+
+            const startWorkout = (day) => {
+                const workout = workouts[day];
+                const progress = workout.progress;
+
+                if (progress) {
+                    setCurrentExerciseIndex(progress.currentExerciseIndex);
+                    setCurrentSetIndex(progress.currentSetIndex);
+                    setWorkoutStartTime(progress.startTime);
+                    setCompletedSets(progress.completedSets || []);
+                    setSetStartTime(progress.setStartTime || Date.now());
+                } else {
+                    setCurrentExerciseIndex(0);
+                    setCurrentSetIndex(0);
+                    setWorkoutStartTime(Date.now());
+                    setCompletedSets([]);
+                    setSetStartTime(Date.now());
+                }
+
+                setLiveWorkout({ ...workout, day });
+                setView('live');
+            };
+
+            const getTotalSetsRemaining = () => {
+                if (!liveWorkout) return 0;
+                let total = 0;
+                for (let i = currentExerciseIndex; i < liveWorkout.exercises.length; i++) {
+                    const exercise = liveWorkout.exercises[i];
+                    if (i === currentExerciseIndex) {
+                        total += exercise.sets.length - currentSetIndex;
+                    } else {
+                        total += exercise.sets.length;
+                    }
+                }
+                return total;
+            };
+
+            const updateLiveSet = (field, value) => {
+                const newWorkout = { ...liveWorkout };
+                newWorkout.exercises[currentExerciseIndex].sets[currentSetIndex][field] = parseFloat(value) || 0;
+                setLiveWorkout(newWorkout);
+            };
+
+            const nextSet = () => {
+                const setTime = currentSetTime;
+                const newCompletedSets = [...completedSets, setTime];
+                setCompletedSets(newCompletedSets);
+
+                const updatedWorkouts = { ...workouts };
+                updatedWorkouts[liveWorkout.day] = {
+                    ...liveWorkout,
+                    progress: {
+                        currentExerciseIndex,
+                        currentSetIndex: currentSetIndex + 1,
+                        startTime: workoutStartTime,
+                        setStartTime: Date.now(),
+                        completedSets: newCompletedSets
+                    }
+                };
+
+                const currentExercise = liveWorkout.exercises[currentExerciseIndex];
+
+                if (currentSetIndex + 1 < currentExercise.sets.length) {
+                    setCurrentSetIndex(currentSetIndex + 1);
+                    setSetStartTime(Date.now());
+                    setCurrentSetTime(0);
+                    updatedWorkouts[liveWorkout.day].progress.currentSetIndex = currentSetIndex + 1;
+                    updatedWorkouts[liveWorkout.day].progress.setStartTime = Date.now();
+                } else if (currentExerciseIndex + 1 < liveWorkout.exercises.length) {
+                    setCurrentExerciseIndex(currentExerciseIndex + 1);
+                    setCurrentSetIndex(0);
+                    setSetStartTime(Date.now());
+                    setCurrentSetTime(0);
+                    updatedWorkouts[liveWorkout.day].progress.currentExerciseIndex = currentExerciseIndex + 1;
+                    updatedWorkouts[liveWorkout.day].progress.currentSetIndex = 0;
+                    updatedWorkouts[liveWorkout.day].progress.setStartTime = Date.now();
+                } else {
+                    updatedWorkouts[liveWorkout.day].progress = null;
+                    setWorkouts(updatedWorkouts);
+                    setView('complete');
+                    return;
+                }
+
+                setWorkouts(updatedWorkouts);
+            };
+
+            const finishWorkout = () => {
+                setView('landing');
+                setLiveWorkout(null);
+                setCurrentExerciseIndex(0);
+                setCurrentSetIndex(0);
+                setWorkoutStartTime(null);
+                setSetStartTime(null);
+                setTotalElapsedTime(0);
+                setCurrentSetTime(0);
+                setCompletedSets([]);
+            };
+
+            if (isLoading) {
+                return e('div', { className: 'min-h-screen bg-gray-900 text-white flex items-center justify-center' },
+                    e('div', { className: 'text-xl' }, 'Loading workouts...')
+                );
+            }
+
+            if (view === 'edit') {
+                return e('div', { className: 'min-h-screen bg-gray-900 text-white p-6' },
+                    e('div', { className: 'max-w-4xl mx-auto' },
+                        e('div', { className: 'flex items-center justify-between mb-6' },
+                            e('button', {
+                                onClick: () => {
+                                    setView('landing');
+                                    setEditingWorkout(null);
+                                    setEditingDay(null);
+                                },
+                                className: 'flex items-center gap-2 text-gray-400 hover:text-white'
+                            }, e(ArrowLeft, { size: 20 }), 'Back'),
+                            e('h1', { className: 'text-2xl font-bold' }, editingDay),
+                            e('button', {
+                                onClick: saveWorkout,
+                                className: 'px-4 py-2 bg-blue-600 rounded hover:bg-blue-700',
+                                disabled: !editingWorkout?.name || !editingWorkout?.exercises.every(ex => ex.name)
+                            }, 'Save')
+                        ),
+                        e('div', { className: 'mb-6' },
+                            e('label', { className: 'block mb-2 text-sm' }, 'Workout Name'),
+                            e('input', {
+                                type: 'text',
+                                value: editingWorkout?.name || '',
+                                onChange: (ev) => setEditingWorkout({ ...editingWorkout, name: ev.target.value }),
+                                className: 'w-full p-3 bg-gray-800 rounded border border-gray-700 focus:border-blue-500 outline-none',
+                                placeholder: 'e.g., Push Day'
+                            })
+                        ),
+                        editingWorkout?.exercises.map((exercise, exIdx) =>
+                            e('div', { key: exIdx, className: 'mb-6 p-4 bg-gray-800 rounded' },
+                                e('div', { className: 'flex items-center justify-between mb-4 gap-2' },
+                                    e('input', {
+                                        type: 'text',
+                                        value: exercise.name,
+                                        onChange: (ev) => updateExerciseName(exIdx, ev.target.value),
+                                        onKeyDown: (ev) => {
+                                            if (ev.key === 'Enter') {
+                                                ev.target.blur();
+                                            }
+                                        },
+                                        className: 'flex-1 max-w-[60%] p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
+                                        placeholder: 'Exercise name'
+                                    }),
+                                    e('button', {
+                                        onClick: () => removeExercise(exIdx),
+                                        className: 'ml-2 px-3 py-2 bg-red-600 rounded hover:bg-red-700 text-sm'
+                                    }, 'Remove')
+                                ),
+                                e('div', { className: 'space-y-2' },
+                                    exercise.sets.map((set, setIdx) =>
+                                        e('div', { key: setIdx, className: 'flex items-center gap-3' },
+                                            e('span', { className: 'text-gray-400 w-12' }, `Set ${setIdx + 1}`),
+                                            e('input', {
+                                                type: 'number',
+                                                value: set.reps || '',
+                                                onChange: (ev) => updateSet(exIdx, setIdx, 'reps', ev.target.value),
+                                                onKeyDown: (ev) => {
+                                                    if (ev.key === 'Enter') {
+                                                        ev.target.blur();
+                                                    }
+                                                },
+                                                className: 'w-20 p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
+                                                placeholder: 'Reps'
+                                            }),
+                                            e('input', {
+                                                type: 'number',
+                                                step: '0.01',
+                                                value: set.weight || '',
+                                                onChange: (ev) => updateSet(exIdx, setIdx, 'weight', ev.target.value),
+                                                onKeyDown: (ev) => {
+                                                    if (ev.key === 'Enter') {
+                                                        ev.target.blur();
+                                                    }
+                                                },
+                                                className: 'w-24 p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
+                                                placeholder: 'Weight'
+                                            }),
+                                            e('span', { className: 'text-gray-400' }, 'kg'),
+                                            e('button', {
+                                                onClick: () => removeSet(exIdx, setIdx),
+                                                className: 'ml-auto px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 text-sm'
+                                            }, '✕')
+                                        )
+                                    )
+                                ),
+                                e('button', {
+                                    onClick: () => addSet(exIdx),
+                                    className: 'mt-3 px-3 py-1 bg-gray-700 rounded hover:bg-gray-600 text-sm'
+                                }, '+ Add Set')
+                            )
+                        ),
+                        e('button', {
+                            onClick: addExercise,
+                            className: 'w-[47%] py-3 bg-gray-800 rounded hover:bg-gray-700 flex items-center justify-center gap-2'
+                        }, e(Plus, { size: 20 }), 'Add Exercise')
+                    )
+                );
+            }
+
+            if (view === 'live') {
+                const currentExercise = liveWorkout.exercises[currentExerciseIndex];
+                const currentSet = currentExercise.sets[currentSetIndex];
+
+                return e('div', { className: 'h-full bg-gray-900 text-white flex flex-col p-0' },
+                    e('div', { className: 'bg-blue-900 bg-opacity-20 p-2 relative w-full' },
+                        e('div', { className: 'flex items-center justify-between w-full' },
+                            e('button', {
+                                onClick: finishWorkout,
+                                className: 'p-2 hover:bg-gray-800 rounded absolute left-2'
+                            }, e(ArrowLeft, { size: 28 })),
+                            e('div', { className: 'flex-1 flex items-center justify-center gap-8' },
+                                e('div', { className: 'text-center' },
+                                    e('div', { className: 'text-2xl font-bold' }, liveWorkout.day),
+                                    e('div', { className: 'text-xl text-gray-400' }, liveWorkout.name)
+                                ),
+                                e('div', { className: 'text-xl text-gray-400' }, `Total: ${formatTime(totalElapsedTime)}`)
+                            ),
+                            e('div', { className: 'text-right pr-2' },
+                                e('div', { className: 'text-base text-gray-400' }, 'Sets Left'),
+                                e('div', { className: 'text-2xl font-bold' }, getTotalSetsRemaining())
+                            )
+                        )
+                    ),
+                    e('div', { className: 'flex-1 flex flex-col justify-center px-4 pb-4' },
+                        e('div', { className: 'flex items-start justify-between mb-2' },
+                            e('div', { className: 'text-left pl-4' },
+                                e('div', { className: 'text-3xl font-bold' }, currentExercise.name),
+                                e('div', { className: 'text-xl text-gray-400' }, `Set ${currentSetIndex + 1} of ${currentExercise.sets.length}`)
+                            ),
+                            e('div', { className: 'text-right pr-4 pt-1' },
+                                e('div', { className: 'text-xl text-gray-400' }, `Set: ${formatTime(currentSetTime)}`)
+                            )
+                        ),
+                        e('div', { className: 'flex items-center justify-center gap-2' },
+                            e(CustomNumberInput, {
+                                value: currentSet.reps,
+                                onChange: (val) => updateLiveSet('reps', val),
+                                label: 'Reps',
+                                step: 1
+                            }),
+                            e(CustomNumberInput, {
+                                value: currentSet.weight,
+                                onChange: (val) => updateLiveSet('weight', val),
+                                label: 'Weight (kg)',
+                                step: 0.5
+                            }),
+                            e('button', {
+                                onClick: nextSet,
+                                className: 'p-6 bg-blue-600 rounded-full hover:bg-blue-700 mt-8'
+                            }, e(ArrowRight, { size: 40 }))
+                        )
+                    )
+                );
+            }
+
+            if (view === 'complete') {
+                return e('div', { className: 'h-screen bg-gray-900 text-white flex items-center justify-center relative' },
+                    e('button', {
+                        onClick: finishWorkout,
+                        className: 'absolute top-4 right-4 px-6 py-3 bg-blue-600 rounded text-lg hover:bg-blue-700'
+                    }, 'Home'),
+                    e('div', { className: 'text-center' },
+                        e('div', { className: 'mb-6' }, e(Check, { size: 80, className: 'mx-auto text-green-500' })),
+                        e('h1', { className: 'text-5xl font-bold mb-4' }, 'Workout Complete!'),
+                        e('div', { className: 'text-3xl text-gray-400 mb-8' }, `Total Time: ${formatTime(totalElapsedTime)}`)
+                    )
+                );
+            }
+
+            const today = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
+            const currentDate = new Date();
+            
+            const getDateForDay = (dayName) => {
+                const todayIndex = DAYS.indexOf(today);
+                const targetIndex = DAYS.indexOf(dayName);
+                const dayDiff = targetIndex - todayIndex;
+                const targetDate = new Date(currentDate);
+                targetDate.setDate(currentDate.getDate() + dayDiff);
+                const day = targetDate.getDate().toString().padStart(2, '0');
+                const month = (targetDate.getMonth() + 1).toString().padStart(2, '0');
+                return `${day}/${month}`;
+            };
+
+            return e('div', { className: 'min-h-screen bg-gray-900 text-white p-6' },
+                e('div', { className: 'max-w-6xl mx-auto' },
+                    e('div', { className: 'grid grid-cols-2 gap-4' },
+                        DAYS.map((day) => {
+                            const workout = workouts[day];
+                            const isToday = day === today;
+                            const hasProgress = workout?.progress;
+
+                            return e('div', {
+                                key: day,
+                                className: `p-6 rounded-lg relative ${isToday ? 'bg-blue-900 border-2 border-blue-500' : 'bg-gray-800'}`
+                            },
+                                e('div', { className: 'absolute top-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-white text-gray-900 rounded text-xs font-bold' }, 
+                                    getDateForDay(day)
+                                ),
+                                e('div', { className: 'flex items-center justify-between mt-6' },
+                                    e('div', { className: 'flex-1' },
+                                        e('h2', { className: 'text-xl font-bold' }, day),
+                                        e('div', { className: 'text-gray-400 text-sm mt-1' }, workout ? workout.name : 'Rest')
+                                    )
+                                ),
+                                e('div', { className: 'flex items-center gap-2 justify-end' },
+                                    workout ? [
+                                        e('button', {
+                                            key: 'start',
+                                            onClick: () => startWorkout(day),
+                                            className: 'px-4 py-2 bg-green-600 rounded hover:bg-green-700 text-sm'
+                                        }, hasProgress ? 'Continue' : 'Start'),
+                                        e('button', {
+                                            key: 'settings',
+                                            onClick: () => {
+                                                setEditingDay(day);
+                                                setEditingWorkout(workout);
+                                                setView('edit');
+                                            },
+                                            className: 'p-2 bg-gray-700 rounded hover:bg-gray-600'
+                                        }, e(Settings, { size: 18 }))
+                                    ] : e('button', {
+                                        onClick: () => {
+                                            setEditingDay(day);
+                                            startNewWorkout();
+                                        },
+                                        className: 'flex items-center gap-2 px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 text-sm'
+                                    }, e(Plus, { size: 18 }), 'Add')
+                                )
+                            );
+                        })
+                    )
+                )
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(e(WorkoutApp));
+    </script>
+</body>
+</html>
