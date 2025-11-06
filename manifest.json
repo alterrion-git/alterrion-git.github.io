@@ -2,6 +2,7 @@
   "name": "Workout Tracker",
   "short_name": "Workout Tracker",
   "description": "Personal workout tracking app",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#111827",
