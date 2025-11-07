@@ -110,7 +110,7 @@
     
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '2.6.3'; // Update this with each new version!
+        const APP_VERSION = '2.6.4'; // Update this with each new version!
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -1002,10 +1002,10 @@
                             e('div', { className: 'flex-1' },
                                 e(WorkoutScoreGauge, { score: totalScore, maxScore: maxScore })
                             ),
-                            e('div', { className: 'flex-1 flex flex-col items-center justify-center' },
-                                e('div', { className: 'mb-3' }, e(Check, { size: 60, className: 'mx-auto text-green-500' })),
-                                e('h1', { className: 'text-3xl font-bold mb-1' }, 'Workout Complete!'),
-                                e('div', { className: 'text-xl text-gray-400' }, `Total Time: ${formatTime(totalElapsedTime)}`)
+                            e('div', { className: 'flex-1 flex flex-col items-center justify-start' },
+                                e('div', { className: 'mb-3 flex justify-center' }, e(Check, { size: 60, className: 'text-green-500' })),
+                                e('h1', { className: 'text-3xl font-bold mb-1 text-center' }, 'Workout Complete!'),
+                                e('div', { className: 'text-xl text-gray-400 text-center' }, `Total Time: ${formatTime(totalElapsedTime)}`)
                             ),
                             e('div', { className: 'flex-1' }) // Spacer for balance
                         ),

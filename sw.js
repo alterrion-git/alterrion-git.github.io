@@ -1,5 +1,5 @@
 // Service Worker with Cache Versioning
-const CACHE_VERSION = 'v2.6.3'; // UPDATE THIS WITH EACH NEW VERSION!
+const CACHE_VERSION = 'v2.6.4'; // UPDATE THIS WITH EACH NEW VERSION!
 const CACHE_NAME = `workout-tracker-${CACHE_VERSION}`;
 
 const urlsToCache = [
