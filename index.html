@@ -110,7 +110,7 @@
     
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '2.5.1'; // Update this with each new version!
+        const APP_VERSION = '2.6.3'; // Update this with each new version!
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -205,6 +205,115 @@
         const Check = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
             e('polyline', { points: '20 6 9 17 4 12' })
         );
+
+        // Workout Score Gauge Component
+        function WorkoutScoreGauge({ score, maxScore }) {
+            const scoreLevel = Math.round((score / maxScore) * 5);
+            const clampedScore = Math.max(1, Math.min(5, scoreLevel));
+            
+            // Calculate percentage for continuous fill
+            const percentage = clampedScore / 5;
+            const fillAngle = 180 * percentage; // 0 to 180 degrees
+            
+            // Color for the score box based on level
+            const colors = [
+                '#6B7280', // gray-500 - 1/5
+                '#9CA3AF', // gray-400 - 2/5
+                '#60A5FA', // blue-400 - 3/5
+                '#3B82F6', // blue-500 - 4/5
+                '#2563EB'  // blue-600 - 5/5
+            ];
+            
+            return e('div', { className: 'flex flex-col items-center' },
+                e('div', { className: 'text-sm text-gray-400 mb-2' }, 'Workout Score'),
+                e('div', { className: 'relative' },
+                    // Speedometer
+                    e('svg', { width: 120, height: 70, viewBox: '0 0 120 70' },
+                        // Define gradient along the path
+                        e('defs', {},
+                            e('linearGradient', { id: 'scoreGradient', x1: '0%', y1: '0%', x2: '100%', y2: '0%', gradientUnits: 'userSpaceOnUse' },
+                                e('stop', { offset: '0%', style: { stopColor: '#4B5563', stopOpacity: 1 } }), // darker gray at start (left)
+                                e('stop', { offset: '20%', style: { stopColor: '#6B7280', stopOpacity: 1 } }), // gray
+                                e('stop', { offset: '40%', style: { stopColor: '#9CA3AF', stopOpacity: 1 } }), // light gray
+                                e('stop', { offset: '60%', style: { stopColor: '#60A5FA', stopOpacity: 1 } }), // light blue
+                                e('stop', { offset: '80%', style: { stopColor: '#3B82F6', stopOpacity: 1 } }), // blue
+                                e('stop', { offset: '100%', style: { stopColor: '#2563EB', stopOpacity: 1 } }) // dark blue at end (right)
+                            ),
+                            // Create a gradient that follows the arc path
+                            e('linearGradient', { id: 'arcGradient', gradientUnits: 'userSpaceOnUse', x1: '10', y1: '60', x2: '110', y2: '60' },
+                                e('stop', { offset: '0%', style: { stopColor: '#4B5563', stopOpacity: 1 } }),
+                                e('stop', { offset: '20%', style: { stopColor: '#6B7280', stopOpacity: 1 } }),
+                                e('stop', { offset: '40%', style: { stopColor: '#9CA3AF', stopOpacity: 1 } }),
+                                e('stop', { offset: '60%', style: { stopColor: '#60A5FA', stopOpacity: 1 } }),
+                                e('stop', { offset: '80%', style: { stopColor: '#3B82F6', stopOpacity: 1 } }),
+                                e('stop', { offset: '100%', style: { stopColor: '#2563EB', stopOpacity: 1 } })
+                            )
+                        ),
+                        // Background arc (gray)
+                        (() => {
+                            const startAngle = 180;
+                            const endAngle = 360;
+                            const startRad = (startAngle * Math.PI) / 180;
+                            const endRad = (endAngle * Math.PI) / 180;
+                            const radius = 50;
+                            const cx = 60;
+                            const cy = 60;
+                            
+                            const x1 = cx + radius * Math.cos(startRad);
+                            const y1 = cy + radius * Math.sin(startRad);
+                            const x2 = cx + radius * Math.cos(endRad);
+                            const y2 = cy + radius * Math.sin(endRad);
+                            
+                            return e('path', {
+                                d: `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${x2} ${y2}`,
+                                stroke: '#374151',
+                                strokeWidth: 10,
+                                fill: 'none',
+                                strokeLinecap: 'round'
+                            });
+                        })(),
+                        // Foreground arc with gradient (fills based on score)
+                        (() => {
+                            const startAngle = 180;
+                            const endAngle = 180 + fillAngle;
+                            const startRad = (startAngle * Math.PI) / 180;
+                            const endRad = (endAngle * Math.PI) / 180;
+                            const radius = 50;
+                            const cx = 60;
+                            const cy = 60;
+                            
+                            const x1 = cx + radius * Math.cos(startRad);
+                            const y1 = cy + radius * Math.sin(startRad);
+                            const x2 = cx + radius * Math.cos(endRad);
+                            const y2 = cy + radius * Math.sin(endRad);
+                            
+                            const largeArcFlag = fillAngle > 180 ? 1 : 0;
+                            
+                            return e('path', {
+                                d: `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}`,
+                                stroke: 'url(#arcGradient)',
+                                strokeWidth: 10,
+                                fill: 'none',
+                                strokeLinecap: 'round'
+                            });
+                        })()
+                    ),
+                    // Score display
+                    e('div', { 
+                        className: 'absolute bottom-0 left-1/2 transform -translate-x-1/2 text-center',
+                        style: { marginBottom: '-8px' }
+                    },
+                        e('div', { 
+                            className: 'px-4 py-1 rounded-lg font-bold text-2xl',
+                            style: { 
+                                backgroundColor: colors[clampedScore - 1],
+                                color: 'white'
+                            }
+                        }, `${clampedScore}/5`)
+                    )
+                )
+            );
+        }
 
         // Scroll wheel component
         function ScrollWheel({ value, onChange, onClose, label, step = 1, min = 0, max = 500 }) {
@@ -626,9 +735,10 @@
             };
 
             const calculateWorkoutSummary = () => {
-                if (!initialWorkoutSnapshot || !liveWorkout) return [];
+                if (!initialWorkoutSnapshot || !liveWorkout) return { summary: [], totalScore: 0, maxScore: 0 };
 
                 const summary = [];
+                let totalScore = 0;
                 
                 liveWorkout.exercises.forEach((exercise, exIdx) => {
                     const initialExercise = initialWorkoutSnapshot.exercises[exIdx];
@@ -637,6 +747,7 @@
                     let totalRepsIncrease = 0;
                     let maxWeightIncrease = 0;
                     let hasChanges = false;
+                    let points = 0;
 
                     exercise.sets.forEach((set, setIdx) => {
                         const initialSet = initialExercise.sets[setIdx];
@@ -656,6 +767,17 @@
                         }
                     });
 
+                    // Calculate points: 0 if no change, 1 if +1 rep, 2 if +2 reps or weight increase
+                    if (maxWeightIncrease > 0) {
+                        points = 2;
+                    } else if (totalRepsIncrease >= 2) {
+                        points = 2;
+                    } else if (totalRepsIncrease === 1) {
+                        points = 1;
+                    }
+
+                    totalScore += points;
+
                     let changeText = 'No change';
                     if (totalRepsIncrease > 0 && maxWeightIncrease > 0) {
                         changeText = `Increased reps by ${totalRepsIncrease} and weight by ${maxWeightIncrease}kg`;
@@ -668,11 +790,14 @@
                     summary.push({
                         name: exercise.name,
                         change: changeText,
-                        hasChanges: hasChanges
+                        hasChanges: hasChanges,
+                        points: points
                     });
                 });
 
-                return summary;
+                const maxScore = liveWorkout.exercises.length * 2; // Each exercise can score max 2 points
+
+                return { summary, totalScore, maxScore };
             };
 
             if (isLoading) {
@@ -865,7 +990,7 @@
             }
 
             if (view === 'complete') {
-                const workoutSummary = calculateWorkoutSummary();
+                const { summary: workoutSummary, totalScore, maxScore } = calculateWorkoutSummary();
 
                 return e('div', { className: 'h-screen bg-gray-900 text-white flex flex-col relative overflow-y-auto' },
                     e('button', {
@@ -873,18 +998,35 @@
                         className: 'absolute top-4 right-4 px-6 py-3 bg-blue-600 rounded text-lg hover:bg-blue-700 z-10'
                     }, 'Home'),
                     e('div', { className: 'flex-1 flex flex-col items-center justify-start pt-12 px-6 pb-24' },
-                        e('div', { className: 'mb-4' }, e(Check, { size: 60, className: 'mx-auto text-green-500' })),
-                        e('h1', { className: 'text-4xl font-bold mb-2' }, 'Workout Complete!'),
-                        e('div', { className: 'text-2xl text-gray-400 mb-8' }, `Total Time: ${formatTime(totalElapsedTime)}`),
-                        e('div', { className: 'w-full max-w-2xl' },
-                            e('h2', { className: 'text-2xl font-bold mb-4 text-center' }, 'Summary'),
+                        e('div', { className: 'w-full max-w-2xl flex items-start justify-between mb-6' },
+                            e('div', { className: 'flex-1' },
+                                e(WorkoutScoreGauge, { score: totalScore, maxScore: maxScore })
+                            ),
+                            e('div', { className: 'flex-1 flex flex-col items-center justify-center' },
+                                e('div', { className: 'mb-3' }, e(Check, { size: 60, className: 'mx-auto text-green-500' })),
+                                e('h1', { className: 'text-3xl font-bold mb-1' }, 'Workout Complete!'),
+                                e('div', { className: 'text-xl text-gray-400' }, `Total Time: ${formatTime(totalElapsedTime)}`)
+                            ),
+                            e('div', { className: 'flex-1' }) // Spacer for balance
+                        ),
+                        e('div', { className: 'w-full max-w-2xl mt-4' },
+                            e('h2', { className: 'text-2xl font-bold mb-4 text-center' }, 'Exercise Summary'),
                             e('div', { className: 'space-y-3' },
                                 workoutSummary.map((item, idx) =>
                                     e('div', { 
                                         key: idx, 
                                         className: 'bg-gray-800 p-4 rounded-lg'
                                     },
-                                        e('div', { className: 'font-bold text-lg mb-1' }, item.name),
+                                        e('div', { className: 'flex items-center justify-between mb-1' },
+                                            e('div', { className: 'font-bold text-lg' }, item.name),
+                                            e('div', { 
+                                                className: 'text-sm px-2 py-1 rounded',
+                                                style: { 
+                                                    backgroundColor: item.points === 2 ? '#2563EB' : item.points === 1 ? '#60A5FA' : '#374151',
+                                                    color: 'white'
+                                                }
+                                            }, `+${item.points} pts`)
+                                        ),
                                         e('div', { 
                                             className: item.hasChanges ? 'text-green-400' : 'text-gray-400'
                                         }, item.change)
