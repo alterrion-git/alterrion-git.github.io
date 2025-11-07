@@ -110,7 +110,7 @@
     
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '2.6.4'; // Update this with each new version!
+        const APP_VERSION = '2.6.5'; // Update this with each new version!
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -998,18 +998,19 @@
                         className: 'absolute top-4 right-4 px-6 py-3 bg-blue-600 rounded text-lg hover:bg-blue-700 z-10'
                     }, 'Home'),
                     e('div', { className: 'flex-1 flex flex-col items-center justify-start pt-12 px-6 pb-24' },
-                        e('div', { className: 'w-full max-w-2xl flex items-start justify-between mb-6' },
-                            e('div', { className: 'flex-1' },
+                        e('div', { className: 'w-full max-w-2xl relative mb-6' },
+                            // Workout Score Gauge - positioned absolutely on the left
+                            e('div', { className: 'absolute left-0 top-0' },
                                 e(WorkoutScoreGauge, { score: totalScore, maxScore: maxScore })
                             ),
-                            e('div', { className: 'flex-1 flex flex-col items-center justify-start' },
-                                e('div', { className: 'mb-3 flex justify-center' }, e(Check, { size: 60, className: 'text-green-500' })),
-                                e('h1', { className: 'text-3xl font-bold mb-1 text-center' }, 'Workout Complete!'),
-                                e('div', { className: 'text-xl text-gray-400 text-center' }, `Total Time: ${formatTime(totalElapsedTime)}`)
-                            ),
-                            e('div', { className: 'flex-1' }) // Spacer for balance
+                            // Center content - fully centered without flex layout
+                            e('div', { className: 'flex flex-col items-center justify-start w-full px-32' },
+                                e('div', { className: 'mb-3 flex justify-center w-full' }, e(Check, { size: 60, className: 'text-green-500' })),
+                                e('h1', { className: 'text-3xl font-bold mb-1 text-center w-full' }, 'Workout Complete!'),
+                                e('div', { className: 'text-xl text-gray-400 text-center w-full' }, `Total Time: ${formatTime(totalElapsedTime)}`)
+                            )
                         ),
-                        e('div', { className: 'w-full max-w-2xl mt-4' },
+                        e('div', { className: 'w-full max-w-2xl mt-12' },
                             e('h2', { className: 'text-2xl font-bold mb-4 text-center' }, 'Exercise Summary'),
                             e('div', { className: 'space-y-3' },
                                 workoutSummary.map((item, idx) =>
