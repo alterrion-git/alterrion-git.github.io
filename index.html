@@ -391,10 +391,10 @@
                 { id: 'stats', icon: 'bar_chart', label: 'Stats' },
             ];
 
-            // Detect narrow cover screen (flip phones typically < 320px wide)
-            const [isCover, setIsCover] = useState(window.innerWidth < 320);
+            // Detect narrow cover screen (flip phones: nearly square or landscape aspect)
+            const [isCover, setIsCover] = useState(window.innerHeight < window.innerWidth * 1.2);
             useEffect(() => {
-                const check = () => setIsCover(window.innerWidth < 320);
+                const check = () => setIsCover(window.innerHeight < window.innerWidth * 1.2);
                 window.addEventListener('resize', check);
                 return () => window.removeEventListener('resize', check);
             }, []);
