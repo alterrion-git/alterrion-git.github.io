@@ -6,11 +6,13 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Workout">
-    <meta name="theme-color" content="#111827">
+    <meta name="apple-mobile-web-app-title" content="CWA">
+    <meta name="theme-color" content="#0b0e11">
     <meta name="screen-orientation" content="portrait">
     <link rel="manifest" href="manifest.json">
-    <title>Workout Tracker</title>
+    <title>CWA - Workout Tracker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -26,10 +28,42 @@
             position: fixed;
             width: 100%;
         }
+
+        :root {
+            --void: #0b0e11;
+            --surface: #0b0e11;
+            --surface-container-lowest: #000000;
+            --surface-container-low: #101417;
+            --surface-container: #161a1e;
+            --surface-container-high: #1c2024;
+            --surface-container-highest: #22262b;
+            --surface-bright: #282d31;
+            --surface-variant: #22262b;
+            --primary: #f4ffc6;
+            --primary-container: #d1fc00;
+            --primary-dim: #c7ef00;
+            --primary-fixed: #d1fc00;
+            --primary-fixed-dim: #c4ec00;
+            --on-primary: #546600;
+            --on-primary-container: #4c5d00;
+            --on-surface: #f8f9fe;
+            --on-surface-variant: #a9abaf;
+            --on-background: #f8f9fe;
+            --outline: #737679;
+            --outline-variant: #45484c;
+            --secondary: #efe754;
+            --secondary-container: #656100;
+            --on-secondary-container: #fffac3;
+            --tertiary: #ffeb9c;
+            --error: #ff7351;
+            --error-container: #b92902;
+            --on-error-container: #ffd2c8;
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #111827;
-            color: white;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--void);
+            color: var(--on-surface);
             overflow-x: hidden;
             overflow-y: auto;
             position: fixed;
@@ -38,7 +72,7 @@
             height: 100dvh;
             font-size: 22px;
             padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-            touch-action: manipulation; /* Prevents double-tap zoom */
+            touch-action: manipulation;
         }
         
         #root {
@@ -55,7 +89,11 @@
             -moz-appearance: textfield;
             appearance: textfield;
         }
-        
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
         /* Scroll wheel modal */
         .scroll-wheel-overlay {
             position: fixed;
@@ -63,7 +101,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(0, 0, 0, 0.85);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -71,7 +109,7 @@
         }
         
         .scroll-wheel-container {
-            background: #1f2937;
+            background: var(--surface-container-high);
             border-radius: 20px;
             padding: 20px;
             width: 300px;
@@ -93,24 +131,75 @@
             font-size: 24px;
             scroll-snap-align: center;
             cursor: pointer;
+            color: var(--on-surface-variant);
         }
         
         .scroll-wheel-item.active {
             font-size: 32px;
             font-weight: bold;
-            color: #3b82f6;
+            color: var(--primary-container);
+        }
+
+        /* Kinetic gradient for primary CTAs */
+        .kinetic-gradient {
+            background: linear-gradient(45deg, #d1fc00, #c4ec00);
+        }
+
+        /* Ghost border utility */
+        .ghost-border {
+            border: 1px solid rgba(69, 72, 76, 0.15);
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        "void": "#0b0e11",
+                        "surface": "#0b0e11",
+                        "surface-container-lowest": "#000000",
+                        "surface-container-low": "#101417",
+                        "surface-container": "#161a1e",
+                        "surface-container-high": "#1c2024",
+                        "surface-container-highest": "#22262b",
+                        "surface-bright": "#282d31",
+                        "surface-variant": "#22262b",
+                        "primary": "#f4ffc6",
+                        "primary-container": "#d1fc00",
+                        "primary-dim": "#c7ef00",
+                        "primary-fixed": "#d1fc00",
+                        "primary-fixed-dim": "#c4ec00",
+                        "on-primary": "#546600",
+                        "on-primary-container": "#4c5d00",
+                        "on-surface": "#f8f9fe",
+                        "on-surface-variant": "#a9abaf",
+                        "on-background": "#f8f9fe",
+                        "outline": "#737679",
+                        "outline-variant": "#45484c",
+                        "secondary": "#efe754",
+                        "secondary-container": "#656100",
+                        "on-secondary-container": "#fffac3",
+                        "tertiary": "#ffeb9c",
+                        "error": "#ff7351",
+                        "error-container": "#b92902",
+                        "on-error-container": "#ffd2c8",
+                    },
+                    fontFamily: {
+                        "inter": ["Inter", "sans-serif"],
+                    },
+                },
+            },
+        }
+    </script>
 </head>
 <body>
     <div id="root"></div>
-    
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '2.6.5'; // Update this with each new version!
+        const APP_VERSION = '3.0.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -119,61 +208,78 @@
             });
         }
         
-        // Hide address bar on load
         window.addEventListener('load', () => {
-            setTimeout(() => {
-                window.scrollTo(0, 1);
-            }, 100);
+            setTimeout(() => { window.scrollTo(0, 1); }, 100);
         });
 
-        // Track initial dimensions to detect screen changes
         let lastWidth = window.innerWidth;
         let lastHeight = window.innerHeight;
 
-        // Comprehensive screen change handler for foldable devices
         const handleScreenChange = () => {
             const currentWidth = window.innerWidth;
             const currentHeight = window.innerHeight;
-            
-            // Check if there's a significant dimension change (indicating screen change)
             const widthDiff = Math.abs(currentWidth - lastWidth);
             const heightDiff = Math.abs(currentHeight - lastHeight);
-            
-            // If significant change (more than 100px in any dimension), force reload
             if (widthDiff > 100 || heightDiff > 100) {
-                console.log('Screen change detected, reloading...');
                 lastWidth = currentWidth;
                 lastHeight = currentHeight;
                 window.location.reload();
                 return;
             }
-            
-            // Otherwise just reset viewport
             const viewport = document.querySelector('meta[name=viewport]');
             viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover');
             window.scrollTo(0, 0);
-            
             lastWidth = currentWidth;
             lastHeight = currentHeight;
         };
 
-        // Handle orientation changes
-        window.addEventListener('orientationchange', () => {
-            setTimeout(handleScreenChange, 100);
-        });
-
-        // Handle resize events
+        window.addEventListener('orientationchange', () => { setTimeout(handleScreenChange, 100); });
         let resizeTimeout;
         window.addEventListener('resize', () => {
             clearTimeout(resizeTimeout);
             resizeTimeout = setTimeout(handleScreenChange, 150);
         });
 
-        // Additional check for screen changes (cover screen open/close)
         if (window.screen && window.screen.orientation) {
-            window.screen.orientation.addEventListener('change', () => {
-                setTimeout(handleScreenChange, 100);
-            });
+            window.screen.orientation.addEventListener('change', () => { setTimeout(handleScreenChange, 100); });
+        }
+
+        // ============================================
+        // FIREBASE CLOUD SYNC
+        // ============================================
+        // Paste your Firebase Realtime Database URL below before uploading.
+        // Get it from: Firebase Console > Realtime Database > URL at the top.
+        const FIREBASE_DB_URL = 'https://workout-app-423a6-default-rtdb.europe-west1.firebasedatabase.app'; // e.g. 'https://your-project-default-rtdb.europe-west1.firebasedatabase.app'
+
+        const cloudEnabled = () => FIREBASE_DB_URL.length > 0;
+
+        async function hashPassword(password) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(password + '_cwa_salt_2024');
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async function cloudGet(path) {
+            if (!cloudEnabled()) return null;
+            try {
+                const res = await fetch(`${FIREBASE_DB_URL}/${path}.json`);
+                if (!res.ok) return null;
+                return await res.json();
+            } catch (err) { console.error('Cloud get error:', err); return null; }
+        }
+
+        async function cloudSet(path, data) {
+            if (!cloudEnabled()) return false;
+            try {
+                const res = await fetch(`${FIREBASE_DB_URL}/${path}.json`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                return res.ok;
+            } catch (err) { console.error('Cloud set error:', err); return false; }
         }
 
         const { useState, useEffect, useRef } = React;
@@ -181,7 +287,7 @@
 
         const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-        // Lucide React icons as inline SVG components
+        // --- Icon Components (inline SVG) ---
         const Plus = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
             e('line', { x1: 12, y1: 5, x2: 12, y2: 19 }),
             e('line', { x1: 5, y1: 12, x2: 19, y2: 12 })
@@ -206,122 +312,189 @@
             e('polyline', { points: '20 6 9 17 4 12' })
         );
 
-        // Workout Score Gauge Component
+        // Material icon helper
+        const MIcon = ({ icon, fill = false, className = '', style = {} }) => e('span', {
+            className: `material-symbols-outlined ${className}`,
+            style: { fontVariationSettings: fill ? "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24" : "'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24", ...style }
+        }, icon);
+
+        // Mini sparkline graph for exercise history
+        function Sparkline({ data, width = 120, height = 32, color = '#c4ec00' }) {
+            if (!data || data.length < 2) {
+                return e('div', {
+                    className: 'flex items-center justify-center text-xs',
+                    style: { width, height, color: 'var(--outline)', opacity: 0.5 }
+                }, 'No history');
+            }
+            const vals = data.map(d => d.maxWeight);
+            const min = Math.min(...vals);
+            const max = Math.max(...vals);
+            const range = max - min || 1;
+            const pad = 3;
+            const gw = width - pad * 2;
+            const gh = height - pad * 2;
+            const points = vals.map((v, i) => {
+                const x = pad + (i / (vals.length - 1)) * gw;
+                const y = pad + gh - ((v - min) / range) * gh;
+                return `${x},${y}`;
+            });
+            const isUp = vals[vals.length - 1] >= vals[0];
+            const lineColor = isUp ? color : 'var(--error)';
+            const fillPoints = `${pad},${pad + gh} ${points.join(' ')} ${pad + gw},${pad + gh}`;
+            const repColor = '#00e5ff'; // bright cyan for rep increases
+            return e('svg', { width, height, viewBox: `0 0 ${width} ${height}`, style: { display: 'block' } },
+                e('polygon', { points: fillPoints, fill: lineColor, fillOpacity: 0.1 }),
+                e('polyline', { points: points.join(' '), fill: 'none', stroke: lineColor, strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+                vals.map((v, i) => {
+                    const x = pad + (i / (vals.length - 1)) * gw;
+                    const y = pad + gh - ((v - min) / range) * gh;
+                    const isLast = i === vals.length - 1;
+                    const repsUp = data[i] && data[i].repsUp;
+                    const dotColor = repsUp ? repColor : (isLast ? lineColor : 'var(--surface-container-highest)');
+                    const strokeC = repsUp ? repColor : lineColor;
+                    const r = isLast ? 3 : (repsUp ? 3 : 2);
+                    return e('circle', { key: i, cx: x, cy: y, r, fill: dotColor, stroke: strokeC, strokeWidth: repsUp ? 1.5 : 1 });
+                })
+            );
+        }
+
+        // --- TopAppBar ---
+        function TopAppBar({ title, leftAction, rightAction }) {
+            return e('header', {
+                className: 'fixed top-0 left-0 w-full z-50 h-16 px-5 flex justify-between items-center',
+                style: { background: 'var(--surface-container-low)' }
+            },
+                // Left: CWA branding or back button
+                e('div', { className: 'flex items-center min-w-[60px]' },
+                    leftAction || e('span', {
+                        className: 'font-black italic text-xl tracking-tighter',
+                        style: { color: 'var(--primary-container)' }
+                    }, 'CWA')
+                ),
+                // Center: screen title
+                e('h1', {
+                    className: 'font-black uppercase tracking-tighter text-lg',
+                    style: { color: 'var(--primary-container)' }
+                }, title || ''),
+                // Right: action buttons
+                e('div', { className: 'flex items-center min-w-[60px] justify-end' },
+                    rightAction || null
+                )
+            );
+        }
+
+        // --- BottomNavBar ---
+        function BottomNavBar({ activeTab, onTabChange }) {
+            const tabs = [
+                { id: 'calendar', icon: 'calendar_today', label: 'Calendar' },
+                { id: 'workout', icon: 'fitness_center', label: 'Workout' },
+                { id: 'stats', icon: 'bar_chart', label: 'Stats' },
+            ];
+
+            return e('nav', {
+                className: 'fixed bottom-0 left-0 w-full z-50 flex items-end px-8 pt-3',
+                style: {
+                    background: 'rgba(16, 20, 23, 0.85)',
+                    backdropFilter: 'blur(20px)',
+                    WebkitBackdropFilter: 'blur(20px)',
+                    paddingBottom: 'max(env(safe-area-inset-bottom), 12px)',
+                    borderTop: '1px solid rgba(69, 72, 76, 0.1)'
+                }
+            },
+                tabs.map(tab => {
+                    const isActive = activeTab === tab.id;
+                    // Each tab gets equal width, content centered
+                    return e('div', {
+                        key: tab.id,
+                        className: 'flex-1 flex justify-center',
+                        style: { height: '56px', alignItems: 'flex-start' }
+                    },
+                        e('button', {
+                            onClick: () => onTabChange(tab.id),
+                            className: 'flex items-center justify-center rounded-full transition-all duration-300 active:scale-90',
+                            style: isActive ? {
+                                width: '52px',
+                                height: '52px',
+                                background: 'linear-gradient(45deg, #d1fc00, #c4ec00)',
+                                color: 'var(--void)',
+                                boxShadow: '0 0 20px rgba(209, 252, 0, 0.3)',
+                                transform: 'translateY(-12px)'
+                            } : {
+                                width: '52px',
+                                height: '52px',
+                                background: 'transparent',
+                                color: 'var(--outline)',
+                                transform: 'translateY(0)'
+                            }
+                        }, e(MIcon, { icon: tab.icon, fill: isActive, style: { fontSize: isActive ? '28px' : '24px' } }))
+                    );
+                })
+            );
+        }
+
+        // --- Workout Score Gauge (redesigned colors) ---
         function WorkoutScoreGauge({ score, maxScore }) {
             const scoreLevel = Math.round((score / maxScore) * 5);
             const clampedScore = Math.max(1, Math.min(5, scoreLevel));
-            
-            // Calculate percentage for continuous fill
             const percentage = clampedScore / 5;
-            const fillAngle = 180 * percentage; // 0 to 180 degrees
+            const fillAngle = 180 * percentage;
             
-            // Color for the score box based on level
             const colors = [
-                '#6B7280', // gray-500 - 1/5
-                '#9CA3AF', // gray-400 - 2/5
-                '#60A5FA', // blue-400 - 3/5
-                '#3B82F6', // blue-500 - 4/5
-                '#2563EB'  // blue-600 - 5/5
+                '#45484c', // outline-variant - 1/5
+                '#737679', // outline - 2/5
+                '#a9abaf', // on-surface-variant - 3/5
+                '#c4ec00', // primary-fixed-dim - 4/5
+                '#d1fc00'  // primary-container - 5/5
             ];
             
             return e('div', { className: 'flex flex-col items-center' },
-                e('div', { className: 'text-sm text-gray-400 mb-2' }, 'Workout Score'),
+                e('div', { className: 'text-sm mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Workout Score'),
                 e('div', { className: 'relative' },
-                    // Speedometer
                     e('svg', { width: 120, height: 70, viewBox: '0 0 120 70' },
-                        // Define gradient along the path
                         e('defs', {},
-                            e('linearGradient', { id: 'scoreGradient', x1: '0%', y1: '0%', x2: '100%', y2: '0%', gradientUnits: 'userSpaceOnUse' },
-                                e('stop', { offset: '0%', style: { stopColor: '#4B5563', stopOpacity: 1 } }), // darker gray at start (left)
-                                e('stop', { offset: '20%', style: { stopColor: '#6B7280', stopOpacity: 1 } }), // gray
-                                e('stop', { offset: '40%', style: { stopColor: '#9CA3AF', stopOpacity: 1 } }), // light gray
-                                e('stop', { offset: '60%', style: { stopColor: '#60A5FA', stopOpacity: 1 } }), // light blue
-                                e('stop', { offset: '80%', style: { stopColor: '#3B82F6', stopOpacity: 1 } }), // blue
-                                e('stop', { offset: '100%', style: { stopColor: '#2563EB', stopOpacity: 1 } }) // dark blue at end (right)
-                            ),
-                            // Create a gradient that follows the arc path
                             e('linearGradient', { id: 'arcGradient', gradientUnits: 'userSpaceOnUse', x1: '10', y1: '60', x2: '110', y2: '60' },
-                                e('stop', { offset: '0%', style: { stopColor: '#4B5563', stopOpacity: 1 } }),
-                                e('stop', { offset: '20%', style: { stopColor: '#6B7280', stopOpacity: 1 } }),
-                                e('stop', { offset: '40%', style: { stopColor: '#9CA3AF', stopOpacity: 1 } }),
-                                e('stop', { offset: '60%', style: { stopColor: '#60A5FA', stopOpacity: 1 } }),
-                                e('stop', { offset: '80%', style: { stopColor: '#3B82F6', stopOpacity: 1 } }),
-                                e('stop', { offset: '100%', style: { stopColor: '#2563EB', stopOpacity: 1 } })
+                                e('stop', { offset: '0%', style: { stopColor: '#45484c', stopOpacity: 1 } }),
+                                e('stop', { offset: '25%', style: { stopColor: '#737679', stopOpacity: 1 } }),
+                                e('stop', { offset: '50%', style: { stopColor: '#a9abaf', stopOpacity: 1 } }),
+                                e('stop', { offset: '75%', style: { stopColor: '#c4ec00', stopOpacity: 1 } }),
+                                e('stop', { offset: '100%', style: { stopColor: '#d1fc00', stopOpacity: 1 } })
                             )
                         ),
-                        // Background arc (gray)
                         (() => {
-                            const startAngle = 180;
-                            const endAngle = 360;
+                            const startAngle = 180, endAngle = 360;
                             const startRad = (startAngle * Math.PI) / 180;
                             const endRad = (endAngle * Math.PI) / 180;
-                            const radius = 50;
-                            const cx = 60;
-                            const cy = 60;
-                            
-                            const x1 = cx + radius * Math.cos(startRad);
-                            const y1 = cy + radius * Math.sin(startRad);
-                            const x2 = cx + radius * Math.cos(endRad);
-                            const y2 = cy + radius * Math.sin(endRad);
-                            
-                            return e('path', {
-                                d: `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${x2} ${y2}`,
-                                stroke: '#374151',
-                                strokeWidth: 10,
-                                fill: 'none',
-                                strokeLinecap: 'round'
-                            });
+                            const radius = 50, cx = 60, cy = 60;
+                            const x1 = cx + radius * Math.cos(startRad), y1 = cy + radius * Math.sin(startRad);
+                            const x2 = cx + radius * Math.cos(endRad), y2 = cy + radius * Math.sin(endRad);
+                            return e('path', { d: `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${x2} ${y2}`, stroke: '#22262b', strokeWidth: 10, fill: 'none', strokeLinecap: 'round' });
                         })(),
-                        // Foreground arc with gradient (fills based on score)
                         (() => {
-                            const startAngle = 180;
-                            const endAngle = 180 + fillAngle;
+                            const startAngle = 180, endAngle = 180 + fillAngle;
                             const startRad = (startAngle * Math.PI) / 180;
                             const endRad = (endAngle * Math.PI) / 180;
-                            const radius = 50;
-                            const cx = 60;
-                            const cy = 60;
-                            
-                            const x1 = cx + radius * Math.cos(startRad);
-                            const y1 = cy + radius * Math.sin(startRad);
-                            const x2 = cx + radius * Math.cos(endRad);
-                            const y2 = cy + radius * Math.sin(endRad);
-                            
+                            const radius = 50, cx = 60, cy = 60;
+                            const x1 = cx + radius * Math.cos(startRad), y1 = cy + radius * Math.sin(startRad);
+                            const x2 = cx + radius * Math.cos(endRad), y2 = cy + radius * Math.sin(endRad);
                             const largeArcFlag = fillAngle > 180 ? 1 : 0;
-                            
-                            return e('path', {
-                                d: `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}`,
-                                stroke: 'url(#arcGradient)',
-                                strokeWidth: 10,
-                                fill: 'none',
-                                strokeLinecap: 'round'
-                            });
+                            return e('path', { d: `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}`, stroke: 'url(#arcGradient)', strokeWidth: 10, fill: 'none', strokeLinecap: 'round' });
                         })()
                     ),
-                    // Score display
-                    e('div', { 
-                        className: 'absolute bottom-0 left-1/2 transform -translate-x-1/2 text-center',
-                        style: { marginBottom: '-8px' }
-                    },
-                        e('div', { 
+                    e('div', { className: 'absolute bottom-0 left-1/2 transform -translate-x-1/2 text-center', style: { marginBottom: '-8px' } },
+                        e('div', {
                             className: 'px-4 py-1 rounded-lg font-bold text-2xl',
-                            style: { 
-                                backgroundColor: colors[clampedScore - 1],
-                                color: 'white'
-                            }
+                            style: { backgroundColor: colors[clampedScore - 1], color: clampedScore >= 4 ? 'var(--void)' : 'var(--on-surface)' }
                         }, `${clampedScore}/5`)
                     )
                 )
             );
         }
 
-        // Scroll wheel component
+        // --- Scroll Wheel ---
         function ScrollWheel({ value, onChange, onClose, label, step = 1, min = 0, max = 500 }) {
             const [items] = useState(() => {
                 const arr = [];
-                for (let i = min; i <= max; i += step) {
-                    arr.push(i);
-                }
+                for (let i = min; i <= max; i += step) arr.push(i);
                 return arr;
             });
             const wheelRef = useRef(null);
@@ -330,9 +503,7 @@
             useEffect(() => {
                 if (wheelRef.current) {
                     const index = items.indexOf(value);
-                    if (index !== -1) {
-                        wheelRef.current.scrollTop = index * 50 - 75;
-                    }
+                    if (index !== -1) wheelRef.current.scrollTop = index * 50 - 75;
                 }
             }, []);
 
@@ -340,30 +511,20 @@
                 if (wheelRef.current) {
                     const scrollTop = wheelRef.current.scrollTop;
                     const index = Math.round((scrollTop + 75) / 50);
-                    if (index >= 0 && index < items.length) {
-                        setSelectedValue(items[index]);
-                    }
+                    if (index >= 0 && index < items.length) setSelectedValue(items[index]);
                 }
             };
 
             return e('div', { className: 'scroll-wheel-overlay', onClick: onClose },
                 e('div', { className: 'scroll-wheel-container', onClick: (ev) => ev.stopPropagation() },
                     e('div', { className: 'text-xl mb-4' }, label),
-                    e('div', { 
-                        ref: wheelRef,
-                        className: 'scroll-wheel',
-                        onScroll: handleScroll
-                    },
+                    e('div', { ref: wheelRef, className: 'scroll-wheel', onScroll: handleScroll },
                         e('div', { style: { height: '75px' } }),
                         items.map((item) =>
                             e('div', {
                                 key: item,
                                 className: `scroll-wheel-item ${item === selectedValue ? 'active' : ''}`,
-                                onClick: () => {
-                                    setSelectedValue(item);
-                                    onChange(item);
-                                    onClose();
-                                }
+                                onClick: () => { setSelectedValue(item); onChange(item); onClose(); }
                             }, step === 1 ? item : item.toFixed(1))
                         ),
                         e('div', { style: { height: '75px' } })
@@ -371,111 +532,79 @@
                     e('div', { className: 'flex gap-4 mt-4' },
                         e('button', {
                             onClick: onClose,
-                            className: 'flex-1 px-4 py-2 bg-gray-600 rounded hover:bg-gray-700'
+                            className: 'flex-1 px-4 py-2 rounded-xl',
+                            style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' }
                         }, 'Cancel'),
                         e('button', {
-                            onClick: () => {
-                                onChange(selectedValue);
-                                onClose();
-                            },
-                            className: 'flex-1 px-4 py-2 bg-blue-600 rounded hover:bg-blue-700'
+                            onClick: () => { onChange(selectedValue); onClose(); },
+                            className: 'flex-1 px-4 py-2 rounded-xl font-bold',
+                            style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' }
                         }, 'Set')
                     )
                 )
             );
         }
 
-        // Custom number input component
+        // --- Custom Number Input (rounded box design) ---
         function CustomNumberInput({ value, onChange, label, step = 1 }) {
             const [isLongPress, setIsLongPress] = useState(false);
             const [tempValue, setTempValue] = useState('');
             const longPressTimer = useRef(null);
 
-            const handleTouchStart = (e) => {
-                longPressTimer.current = setTimeout(() => {
-                    setIsLongPress(true);
-                    setTempValue(value.toString());
-                }, 500);
-            };
+            const handleTouchStart = () => { longPressTimer.current = setTimeout(() => { setIsLongPress(true); setTempValue(value.toString()); }, 500); };
+            const handleTouchEnd = () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); };
 
-            const handleTouchEnd = (e) => {
-                if (longPressTimer.current) {
-                    clearTimeout(longPressTimer.current);
-                }
-            };
-
-            const handleBubbleClick = (e, isTop) => {
-                e.stopPropagation();
-                const rect = e.currentTarget.getBoundingClientRect();
-                const y = e.clientY - rect.top;
-                const halfHeight = rect.height / 2;
-                
-                if (y < halfHeight) {
-                    onChange(value + step);
-                } else {
-                    onChange(Math.max(0, value - step));
-                }
-            };
-
-            const handleManualChange = (val) => {
-                setTempValue(val);
+            const handleBubbleClick = (ev) => {
+                ev.stopPropagation();
+                const rect = ev.currentTarget.getBoundingClientRect();
+                const y = ev.clientY - rect.top;
+                if (y < rect.height / 2) onChange(value + step);
+                else onChange(Math.max(0, value - step));
             };
 
             const handleManualBlur = () => {
                 const num = parseFloat(tempValue);
-                if (!isNaN(num)) {
-                    onChange(num);
-                } else if (tempValue === '') {
-                    onChange(0);
-                }
+                if (!isNaN(num)) onChange(num);
+                else if (tempValue === '') onChange(0);
                 setIsLongPress(false);
             };
 
             if (isLongPress) {
                 return e('div', { className: 'text-center' },
-                    e('div', { className: 'text-xl text-gray-400 mb-2' }, label),
+                    e('div', { className: 'text-sm font-bold uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, label),
                     e('input', {
-                        type: 'number',
-                        step: step,
-                        value: tempValue,
-                        onChange: (ev) => handleManualChange(ev.target.value),
+                        type: 'number', step, value: tempValue,
+                        onChange: (ev) => setTempValue(ev.target.value),
                         onBlur: handleManualBlur,
-                        onKeyDown: (ev) => {
-                            if (ev.key === 'Enter') {
-                                ev.target.blur();
-                            }
-                        },
+                        onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
                         autoFocus: true,
-                        className: 'w-44 h-44 text-5xl font-bold text-center bg-gray-800 rounded-full border-4 border-green-600 outline-none'
+                        className: 'w-44 h-44 text-5xl font-black text-center rounded-2xl outline-none',
+                        style: { background: 'var(--surface-container-high)', border: '3px solid var(--primary-container)', color: 'var(--on-surface)', caretColor: 'var(--primary-container)' }
                     })
                 );
             }
 
             return e('div', { className: 'text-center' },
-                e('div', { className: 'text-xl text-gray-400 mb-2' }, label),
+                e('div', { className: 'text-sm font-bold uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, label),
                 e('div', {
                     onClick: handleBubbleClick,
-                    onTouchStart: handleTouchStart,
-                    onTouchEnd: handleTouchEnd,
-                    onMouseDown: handleTouchStart,
-                    onMouseUp: handleTouchEnd,
-                    className: 'w-44 h-44 text-5xl font-bold text-center bg-gray-800 rounded-full border-4 border-blue-600 outline-none flex flex-col items-center justify-center select-none cursor-pointer relative overflow-hidden'
+                    onTouchStart: handleTouchStart, onTouchEnd: handleTouchEnd,
+                    onMouseDown: handleTouchStart, onMouseUp: handleTouchEnd,
+                    className: 'w-44 h-44 text-5xl font-black text-center rounded-2xl outline-none flex flex-col items-center justify-center select-none cursor-pointer relative overflow-hidden',
+                    style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' }
                 },
-                    e('div', { 
-                        className: 'absolute top-0 left-0 right-0 h-1/3 flex items-center justify-center text-gray-400',
-                        style: { paddingTop: '6px', fontSize: '32px', transform: 'scaleX(1.3)' }
-                    }, '▲'),
-                    e('div', { className: 'text-5xl font-bold' }, value),
-                    e('div', { 
-                        className: 'absolute bottom-0 left-0 right-0 h-1/3 flex items-center justify-center text-gray-400',
-                        style: { paddingBottom: '6px', fontSize: '32px', transform: 'scaleX(1.3)' }
-                    }, '▼')
+                    e('div', { className: 'absolute top-0 left-0 right-0 h-1/3 flex items-center justify-center', style: { paddingTop: '4px', fontSize: '20px', color: 'var(--primary-fixed-dim)', opacity: 0.6 } }, '\u25B2'),
+                    e('div', { className: 'text-5xl font-black' }, value),
+                    e('div', { className: 'absolute bottom-0 left-0 right-0 h-1/3 flex items-center justify-center', style: { paddingBottom: '4px', fontSize: '20px', color: 'var(--primary-fixed-dim)', opacity: 0.6 } }, '\u25BC')
                 )
             );
         }
 
+        // ============================================
+        // MAIN APP
+        // ============================================
         function WorkoutApp() {
-            const [view, setView] = useState('landing');
+            const [view, setView] = useState('login');
             const [workouts, setWorkouts] = useState({});
             const [editingDay, setEditingDay] = useState(null);
             const [editingWorkout, setEditingWorkout] = useState(null);
@@ -489,36 +618,255 @@
             const [completedSets, setCompletedSets] = useState([]);
             const [isLoading, setIsLoading] = useState(true);
             const [initialWorkoutSnapshot, setInitialWorkoutSnapshot] = useState(null);
+            const [activeTab, setActiveTab] = useState('calendar');
+            const [workoutHistory, setWorkoutHistory] = useState([]);
+            // Auth state
+            const [currentUser, setCurrentUser] = useState(null); // { username, createdAt }
+            const [authError, setAuthError] = useState('');
+            const [authLoading, setAuthLoading] = useState(false);
+            const [showProfile, setShowProfile] = useState(false);
+            const [loginUsername, setLoginUsername] = useState('');
+            const [loginPassword, setLoginPassword] = useState('');
+            const [pendingMigration, setPendingMigration] = useState(null); // old workout data to import
 
-            useEffect(() => {
+            // Check for old app data in localStorage
+            const getOldAppData = () => {
                 try {
-                    const savedData = localStorage.getItem('workout-tracker-data');
-                    if (savedData) {
-                        setWorkouts(JSON.parse(savedData));
+                    const old = localStorage.getItem('workout-tracker-data');
+                    if (old) {
+                        const parsed = JSON.parse(old);
+                        if (Object.keys(parsed).length > 0) return parsed;
                     }
-                } catch (error) {
-                    console.log('No saved workouts found');
-                } finally {
-                    setIsLoading(false);
+                } catch (err) {}
+                return null;
+            };
+
+            // --- Auth functions ---
+            const doLogin = async () => {
+                if (!loginUsername.trim() || !loginPassword.trim()) { setAuthError('Enter username and password'); return; }
+                setAuthLoading(true);
+                setAuthError('');
+                const uname = loginUsername.trim().toLowerCase();
+                const pHash = await hashPassword(loginPassword);
+                if (cloudEnabled()) {
+                    const userData = await cloudGet('users/' + uname);
+                    if (!userData) { setAuthError('User not found. Register first.'); setAuthLoading(false); return; }
+                    if (userData.passwordHash !== pHash) { setAuthError('Wrong password'); setAuthLoading(false); return; }
+                    setCurrentUser({ username: uname, createdAt: userData.createdAt || Date.now() });
+                    const loadedWorkouts = userData.workouts || {};
+                    const loadedHistory = userData.history || [];
+                    setWorkouts(loadedWorkouts);
+                    setWorkoutHistory(loadedHistory);
+                    localStorage.setItem('cwa-user', JSON.stringify({ username: uname, passwordHash: pHash }));
+                    // Check for old data to migrate (only if account has no workouts)
+                    if (Object.keys(loadedWorkouts).length === 0) {
+                        const oldData = getOldAppData();
+                        if (oldData) { setPendingMigration(oldData); setView('migrate'); setAuthLoading(false); return; }
+                    }
+                } else {
+                    const localUser = localStorage.getItem('cwa-user-' + uname);
+                    if (!localUser) { setAuthError('User not found. Register first.'); setAuthLoading(false); return; }
+                    const parsed = JSON.parse(localUser);
+                    if (parsed.passwordHash !== pHash) { setAuthError('Wrong password'); setAuthLoading(false); return; }
+                    setCurrentUser({ username: uname, createdAt: parsed.createdAt || Date.now() });
+                    const w = localStorage.getItem('cwa-workouts-' + uname);
+                    const h = localStorage.getItem('cwa-history-' + uname);
+                    if (w) setWorkouts(JSON.parse(w));
+                    else {
+                        const oldData = getOldAppData();
+                        if (oldData) { setPendingMigration(oldData); setView('migrate'); setAuthLoading(false); localStorage.setItem('cwa-user', JSON.stringify({ username: uname, passwordHash: pHash })); return; }
+                    }
+                    if (h) setWorkoutHistory(JSON.parse(h));
+                    localStorage.setItem('cwa-user', JSON.stringify({ username: uname, passwordHash: pHash }));
                 }
+                setView('landing');
+                setIsLoading(false);
+                setAuthLoading(false);
+            };
+
+            const doRegister = async () => {
+                if (!loginUsername.trim() || !loginPassword.trim()) { setAuthError('Enter username and password'); return; }
+                if (loginPassword.trim().length < 4) { setAuthError('Password must be at least 4 characters'); return; }
+                setAuthLoading(true);
+                setAuthError('');
+                const uname = loginUsername.trim().toLowerCase();
+                const pHash = await hashPassword(loginPassword);
+                if (cloudEnabled()) {
+                    const existing = await cloudGet('users/' + uname);
+                    if (existing) { setAuthError('Username already taken'); setAuthLoading(false); return; }
+                    const userData = { passwordHash: pHash, createdAt: Date.now(), workouts: {}, history: [] };
+                    await cloudSet('users/' + uname, userData);
+                    setCurrentUser({ username: uname, createdAt: userData.createdAt });
+                    localStorage.setItem('cwa-user', JSON.stringify({ username: uname, passwordHash: pHash }));
+                } else {
+                    const localUser = localStorage.getItem('cwa-user-' + uname);
+                    if (localUser) { setAuthError('Username already taken'); setAuthLoading(false); return; }
+                    const userData = { passwordHash: pHash, createdAt: Date.now() };
+                    localStorage.setItem('cwa-user-' + uname, JSON.stringify(userData));
+                    setCurrentUser({ username: uname, createdAt: userData.createdAt });
+                    localStorage.setItem('cwa-user', JSON.stringify({ username: uname, passwordHash: pHash }));
+                }
+                // Check for old data to migrate into the new account
+                const oldData = getOldAppData();
+                if (oldData) {
+                    setPendingMigration(oldData);
+                    setView('migrate');
+                    setIsLoading(false);
+                    setAuthLoading(false);
+                    return;
+                }
+                setWorkouts({});
+                setWorkoutHistory([]);
+                setView('landing');
+                setIsLoading(false);
+                setAuthLoading(false);
+            };
+
+            const doMigrationImport = () => {
+                if (pendingMigration) {
+                    setWorkouts(pendingMigration);
+                    setPendingMigration(null);
+                }
+                setView('landing');
+            };
+
+            const doMigrationSkip = () => {
+                setPendingMigration(null);
+                setView('landing');
+            };
+
+            const doLogout = () => {
+                setCurrentUser(null);
+                setWorkouts({});
+                setWorkoutHistory([]);
+                setView('login');
+                setLoginUsername('');
+                setLoginPassword('');
+                setShowProfile(false);
+                localStorage.removeItem('cwa-user');
+            };
+
+            const syncToCloud = async (w, h) => {
+                if (!currentUser) return;
+                const uname = currentUser.username;
+                // Always save locally
+                localStorage.setItem('cwa-workouts-' + uname, JSON.stringify(w));
+                localStorage.setItem('cwa-history-' + uname, JSON.stringify(h));
+                // Save to cloud if enabled
+                if (cloudEnabled()) {
+                    await cloudSet('users/' + uname + '/workouts', w);
+                    await cloudSet('users/' + uname + '/history', h);
+                }
+            };
+
+            // --- Tab switching logic ---
+            const handleTabChange = (tabId) => {
+                if (tabId === 'calendar') {
+                    setActiveTab('calendar');
+                    setView('landing');
+                    // Don't reset edit state - just go back to calendar grid
+                } else if (tabId === 'workout') {
+                    setActiveTab('workout');
+                    if (view === 'live' || view === 'complete') {
+                        // Already in a workout flow, stay there
+                    } else if (liveWorkout) {
+                        setView('live');
+                    } else {
+                        setView('workout-idle');
+                    }
+                } else if (tabId === 'stats') {
+                    setActiveTab('stats');
+                    setView('stats');
+                }
+            };
+
+            // --- Auto-login on mount ---
+            useEffect(() => {
+                const tryAutoLogin = async () => {
+                    try {
+                        const savedSession = localStorage.getItem('cwa-user');
+                        if (savedSession) {
+                            const { username, passwordHash } = JSON.parse(savedSession);
+                            if (cloudEnabled()) {
+                                const userData = await cloudGet('users/' + username);
+                                if (userData && userData.passwordHash === passwordHash) {
+                                    setCurrentUser({ username, createdAt: userData.createdAt || Date.now() });
+                                    setWorkouts(userData.workouts || {});
+                                    setWorkoutHistory(userData.history || []);
+                                    setView('landing');
+                                    setIsLoading(false);
+                                    return;
+                                }
+                            }
+                            // Fallback to local
+                            const localUser = localStorage.getItem('cwa-user-' + username);
+                            if (localUser) {
+                                const parsed = JSON.parse(localUser);
+                                if (parsed.passwordHash === passwordHash) {
+                                    setCurrentUser({ username, createdAt: parsed.createdAt || Date.now() });
+                                    const w = localStorage.getItem('cwa-workouts-' + username);
+                                    const h = localStorage.getItem('cwa-history-' + username);
+                                    if (w) setWorkouts(JSON.parse(w));
+                                    if (h) setWorkoutHistory(JSON.parse(h));
+                                    setView('landing');
+                                    setIsLoading(false);
+                                    return;
+                                }
+                            }
+                        }
+                    } catch (err) { console.log('Auto-login failed:', err); }
+                    setIsLoading(false);
+                };
+                tryAutoLogin();
             }, []);
 
+            // --- Sync on data change ---
             useEffect(() => {
-                if (!isLoading && Object.keys(workouts).length > 0) {
-                    try {
-                        localStorage.setItem('workout-tracker-data', JSON.stringify(workouts));
-                    } catch (error) {
-                        console.error('Failed to save workouts:', error);
+                if (!isLoading && currentUser) {
+                    syncToCloud(workouts, workoutHistory);
+                }
+            }, [workouts, workoutHistory]);
+
+            const saveToHistory = (workout, elapsedTime) => {
+                const entry = {
+                    date: Date.now(),
+                    day: workout.day,
+                    name: workout.name,
+                    totalTime: elapsedTime,
+                    exercises: workout.exercises.map(ex => ({
+                        name: ex.name,
+                        sets: ex.sets.map(s => ({ reps: s.reps, weight: s.weight }))
+                    }))
+                };
+                setWorkoutHistory(prev => [...prev, entry]);
+            };
+
+            const getExerciseHistory = (exerciseName) => {
+                const entries = [];
+                for (let i = workoutHistory.length - 1; i >= 0 && entries.length < 5; i--) {
+                    const w = workoutHistory[i];
+                    const ex = w.exercises.find(x => x.name === exerciseName);
+                    if (ex) {
+                        const maxWeight = Math.max(...ex.sets.map(s => s.weight));
+                        const totalReps = ex.sets.reduce((sum, s) => sum + s.reps, 0);
+                        const totalVol = ex.sets.reduce((sum, s) => sum + s.reps * s.weight, 0);
+                        entries.unshift({ date: w.date, maxWeight, totalReps, totalVol, repsUp: false });
                     }
                 }
-            }, [workouts, isLoading]);
+                // Mark sessions where reps increased vs previous
+                for (let i = 1; i < entries.length; i++) {
+                    if (entries[i].totalReps > entries[i - 1].totalReps) {
+                        entries[i].repsUp = true;
+                    }
+                }
+                return entries;
+            };
 
+            // --- Timers ---
             useEffect(() => {
                 let interval;
                 if (workoutStartTime && view === 'live') {
-                    interval = setInterval(() => {
-                        setTotalElapsedTime(Math.floor((Date.now() - workoutStartTime) / 1000));
-                    }, 1000);
+                    interval = setInterval(() => { setTotalElapsedTime(Math.floor((Date.now() - workoutStartTime) / 1000)); }, 1000);
                 }
                 return () => clearInterval(interval);
             }, [workoutStartTime, view]);
@@ -526,9 +874,7 @@
             useEffect(() => {
                 let interval;
                 if (setStartTime && view === 'live') {
-                    interval = setInterval(() => {
-                        setCurrentSetTime(Math.floor((Date.now() - setStartTime) / 1000));
-                    }, 1000);
+                    interval = setInterval(() => { setCurrentSetTime(Math.floor((Date.now() - setStartTime) / 1000)); }, 1000);
                 }
                 return () => clearInterval(interval);
             }, [setStartTime, view]);
@@ -539,36 +885,14 @@
                 return `${mins}:${secs.toString().padStart(2, '0')}`;
             };
 
+            // --- Workout CRUD ---
             const startNewWorkout = () => {
-                setEditingWorkout({
-                    name: '',
-                    exercises: [{
-                        name: '',
-                        notes: '',
-                        sets: [
-                            { reps: 0, weight: 0 },
-                            { reps: 0, weight: 0 }
-                        ]
-                    }]
-                });
+                setEditingWorkout({ name: '', exercises: [{ name: '', notes: '', sets: [{ reps: 0, weight: 0 }, { reps: 0, weight: 0 }] }] });
                 setView('edit');
             };
 
             const addExercise = () => {
-                setEditingWorkout({
-                    ...editingWorkout,
-                    exercises: [
-                        ...editingWorkout.exercises,
-                        {
-                            name: '',
-                            notes: '',
-                            sets: [
-                                { reps: 0, weight: 0 },
-                                { reps: 0, weight: 0 }
-                            ]
-                        }
-                    ]
-                });
+                setEditingWorkout({ ...editingWorkout, exercises: [...editingWorkout.exercises, { name: '', notes: '', sets: [{ reps: 0, weight: 0 }, { reps: 0, weight: 0 }] }] });
             };
 
             const addSet = (exerciseIndex) => {
@@ -591,7 +915,6 @@
 
             const updateSet = (exerciseIndex, setIndex, field, value) => {
                 const newExercises = [...editingWorkout.exercises];
-                // Allow empty string and convert to 0 only when needed
                 const parsedValue = value === '' ? 0 : parseFloat(value);
                 newExercises[exerciseIndex].sets[setIndex][field] = isNaN(parsedValue) ? 0 : parsedValue;
                 setEditingWorkout({ ...editingWorkout, exercises: newExercises });
@@ -616,10 +939,7 @@
             const saveWorkout = () => {
                 if (editingWorkout.name && editingWorkout.exercises.every(ex => ex.name)) {
                     const newWorkouts = { ...workouts };
-                    newWorkouts[editingDay] = {
-                        ...editingWorkout,
-                        progress: null
-                    };
+                    newWorkouts[editingDay] = { ...editingWorkout, progress: null };
                     setWorkouts(newWorkouts);
                     setView('landing');
                     setEditingDay(null);
@@ -630,21 +950,14 @@
             const startWorkout = (day) => {
                 const workout = workouts[day];
                 const progress = workout.progress;
-
-                // Save initial snapshot for comparison at the end
-                if (!progress) {
-                    setInitialWorkoutSnapshot(JSON.parse(JSON.stringify(workout)));
-                }
-
+                if (!progress) setInitialWorkoutSnapshot(JSON.parse(JSON.stringify(workout)));
                 if (progress) {
                     setCurrentExerciseIndex(progress.currentExerciseIndex);
                     setCurrentSetIndex(progress.currentSetIndex);
                     setWorkoutStartTime(progress.startTime);
                     setCompletedSets(progress.completedSets || []);
                     setSetStartTime(progress.setStartTime || Date.now());
-                    if (progress.initialSnapshot) {
-                        setInitialWorkoutSnapshot(progress.initialSnapshot);
-                    }
+                    if (progress.initialSnapshot) setInitialWorkoutSnapshot(progress.initialSnapshot);
                 } else {
                     setCurrentExerciseIndex(0);
                     setCurrentSetIndex(0);
@@ -652,9 +965,9 @@
                     setCompletedSets([]);
                     setSetStartTime(Date.now());
                 }
-
                 setLiveWorkout({ ...workout, day });
                 setView('live');
+                setActiveTab('workout');
             };
 
             const getTotalSetsRemaining = () => {
@@ -662,11 +975,7 @@
                 let total = 0;
                 for (let i = currentExerciseIndex; i < liveWorkout.exercises.length; i++) {
                     const exercise = liveWorkout.exercises[i];
-                    if (i === currentExerciseIndex) {
-                        total += exercise.sets.length - currentSetIndex;
-                    } else {
-                        total += exercise.sets.length;
-                    }
+                    total += i === currentExerciseIndex ? exercise.sets.length - currentSetIndex : exercise.sets.length;
                 }
                 return total;
             };
@@ -685,14 +994,7 @@
                 const updatedWorkouts = { ...workouts };
                 updatedWorkouts[liveWorkout.day] = {
                     ...liveWorkout,
-                    progress: {
-                        currentExerciseIndex,
-                        currentSetIndex: currentSetIndex + 1,
-                        startTime: workoutStartTime,
-                        setStartTime: Date.now(),
-                        completedSets: newCompletedSets,
-                        initialSnapshot: initialWorkoutSnapshot
-                    }
+                    progress: { currentExerciseIndex, currentSetIndex: currentSetIndex + 1, startTime: workoutStartTime, setStartTime: Date.now(), completedSets: newCompletedSets, initialSnapshot: initialWorkoutSnapshot }
                 };
 
                 const currentExercise = liveWorkout.exercises[currentExerciseIndex];
@@ -714,15 +1016,52 @@
                 } else {
                     updatedWorkouts[liveWorkout.day].progress = null;
                     setWorkouts(updatedWorkouts);
+                    saveToHistory(liveWorkout, Math.floor((Date.now() - workoutStartTime) / 1000));
                     setView('complete');
                     return;
                 }
-
                 setWorkouts(updatedWorkouts);
+            };
+
+            const prevSet = () => {
+                if (currentSetIndex > 0) {
+                    setCurrentSetIndex(currentSetIndex - 1);
+                    setSetStartTime(Date.now());
+                    setCurrentSetTime(0);
+                    // Remove last completed set time
+                    if (completedSets.length > 0) {
+                        setCompletedSets(completedSets.slice(0, -1));
+                    }
+                } else if (currentExerciseIndex > 0) {
+                    const prevExercise = liveWorkout.exercises[currentExerciseIndex - 1];
+                    setCurrentExerciseIndex(currentExerciseIndex - 1);
+                    setCurrentSetIndex(prevExercise.sets.length - 1);
+                    setSetStartTime(Date.now());
+                    setCurrentSetTime(0);
+                    if (completedSets.length > 0) {
+                        setCompletedSets(completedSets.slice(0, -1));
+                    }
+                }
+                // else: already at very first set, do nothing
+            };
+
+            const canGoPrev = () => {
+                return currentSetIndex > 0 || currentExerciseIndex > 0;
+            };
+
+            const getNextExerciseName = () => {
+                if (!liveWorkout) return '';
+                const currentExercise = liveWorkout.exercises[currentExerciseIndex];
+                const isLastSetOfExercise = currentSetIndex >= currentExercise.sets.length - 1;
+                const isLastExercise = currentExerciseIndex >= liveWorkout.exercises.length - 1;
+                if (isLastSetOfExercise && isLastExercise) return 'Finish';
+                if (isLastSetOfExercise && !isLastExercise) return liveWorkout.exercises[currentExerciseIndex + 1].name;
+                return null; // still more sets in current exercise
             };
 
             const finishWorkout = () => {
                 setView('landing');
+                setActiveTab('calendar');
                 setLiveWorkout(null);
                 setCurrentExerciseIndex(0);
                 setCurrentSetIndex(0);
@@ -736,312 +1075,760 @@
 
             const calculateWorkoutSummary = () => {
                 if (!initialWorkoutSnapshot || !liveWorkout) return { summary: [], totalScore: 0, maxScore: 0 };
-
                 const summary = [];
                 let totalScore = 0;
-                
                 liveWorkout.exercises.forEach((exercise, exIdx) => {
                     const initialExercise = initialWorkoutSnapshot.exercises[exIdx];
                     if (!initialExercise) return;
-
-                    let totalRepsIncrease = 0;
-                    let maxWeightIncrease = 0;
-                    let hasChanges = false;
-                    let points = 0;
-
+                    let totalRepsIncrease = 0, maxWeightIncrease = 0, hasChanges = false, points = 0;
                     exercise.sets.forEach((set, setIdx) => {
                         const initialSet = initialExercise.sets[setIdx];
                         if (!initialSet) return;
-
                         const repsDiff = set.reps - initialSet.reps;
                         const weightDiff = set.weight - initialSet.weight;
-
-                        if (repsDiff > 0) {
-                            totalRepsIncrease += repsDiff;
-                            hasChanges = true;
-                        }
-
-                        if (weightDiff > maxWeightIncrease) {
-                            maxWeightIncrease = weightDiff;
-                            if (weightDiff > 0) hasChanges = true;
-                        }
+                        if (repsDiff > 0) { totalRepsIncrease += repsDiff; hasChanges = true; }
+                        if (weightDiff > maxWeightIncrease) { maxWeightIncrease = weightDiff; if (weightDiff > 0) hasChanges = true; }
                     });
-
-                    // Calculate points: 0 if no change, 1 if +1 rep, 2 if +2 reps or weight increase
-                    if (maxWeightIncrease > 0) {
-                        points = 2;
-                    } else if (totalRepsIncrease >= 2) {
-                        points = 2;
-                    } else if (totalRepsIncrease === 1) {
-                        points = 1;
-                    }
-
+                    if (maxWeightIncrease > 0) points = 2;
+                    else if (totalRepsIncrease >= 2) points = 2;
+                    else if (totalRepsIncrease === 1) points = 1;
                     totalScore += points;
-
                     let changeText = 'No change';
-                    if (totalRepsIncrease > 0 && maxWeightIncrease > 0) {
-                        changeText = `Increased reps by ${totalRepsIncrease} and weight by ${maxWeightIncrease}kg`;
-                    } else if (totalRepsIncrease > 0) {
-                        changeText = `Increased reps by ${totalRepsIncrease}`;
-                    } else if (maxWeightIncrease > 0) {
-                        changeText = `Increased weight by ${maxWeightIncrease}kg`;
-                    }
-
-                    summary.push({
-                        name: exercise.name,
-                        change: changeText,
-                        hasChanges: hasChanges,
-                        points: points
-                    });
+                    if (totalRepsIncrease > 0 && maxWeightIncrease > 0) changeText = `Increased reps by ${totalRepsIncrease} and weight by ${maxWeightIncrease}kg`;
+                    else if (totalRepsIncrease > 0) changeText = `Increased reps by ${totalRepsIncrease}`;
+                    else if (maxWeightIncrease > 0) changeText = `Increased weight by ${maxWeightIncrease}kg`;
+                    summary.push({ name: exercise.name, change: changeText, hasChanges, points });
                 });
-
-                const maxScore = liveWorkout.exercises.length * 2; // Each exercise can score max 2 points
-
-                return { summary, totalScore, maxScore };
+                return { summary, totalScore, maxScore: liveWorkout.exercises.length * 2 };
             };
 
+            // ======================
+            // LOADING
+            // ======================
             if (isLoading) {
-                return e('div', { className: 'min-h-screen bg-gray-900 text-white flex items-center justify-center' },
-                    e('div', { className: 'text-xl' }, 'Loading workouts...')
-                );
+                return e('div', {
+                    className: 'min-h-screen flex items-center justify-center',
+                    style: { background: 'var(--void)', color: 'var(--on-surface)' }
+                }, e('div', { className: 'text-xl font-bold', style: { color: 'var(--primary-container)' } }, 'Loading...'));
             }
 
-            if (view === 'edit') {
-                return e('div', { className: 'min-h-screen bg-gray-900 text-white p-6' },
-                    e('div', { className: 'max-w-4xl mx-auto' },
-                        e('div', { className: 'flex items-center justify-between mb-6' },
-                            e('button', {
-                                onClick: () => {
-                                    setView('landing');
-                                    setEditingWorkout(null);
-                                    setEditingDay(null);
-                                },
-                                className: 'flex items-center gap-2 text-gray-400 hover:text-white'
-                            }, e(ArrowLeft, { size: 20 }), 'Back'),
-                            e('h1', { className: 'text-2xl font-bold' }, editingDay),
-                            e('button', {
-                                onClick: saveWorkout,
-                                className: 'px-4 py-2 bg-blue-600 rounded hover:bg-blue-700',
-                                disabled: !editingWorkout?.name || !editingWorkout?.exercises.every(ex => ex.name)
-                            }, 'Save')
-                        ),
-                        e('div', { className: 'mb-6' },
-                            e('label', { className: 'block mb-2 text-sm' }, 'Workout Name'),
+            // ======================
+            // LOGIN VIEW
+            // ======================
+            if (view === 'login') {
+                return e('div', {
+                    className: 'min-h-screen flex flex-col items-center justify-center px-6',
+                    style: { background: 'var(--void)', color: 'var(--on-surface)' }
+                },
+                    // Logo
+                    e('div', { className: 'mb-8 text-center' },
+                        e('span', { className: 'font-black italic text-5xl tracking-tighter', style: { color: 'var(--primary-container)' } }, 'CWA'),
+                        e('div', { className: 'text-sm uppercase tracking-widest mt-2', style: { color: 'var(--on-surface-variant)' } }, 'Workout Tracker')
+                    ),
+                    // Login card
+                    e('div', {
+                        className: 'w-full max-w-sm rounded-2xl p-6',
+                        style: { background: 'var(--surface-container-highest)' }
+                    },
+                        e('div', { className: 'mb-5' },
+                            e('label', { className: 'block text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Username'),
                             e('input', {
                                 type: 'text',
-                                value: editingWorkout?.name || '',
-                                onChange: (ev) => setEditingWorkout({ ...editingWorkout, name: ev.target.value }),
-                                className: 'w-full p-3 bg-gray-800 rounded border border-gray-700 focus:border-blue-500 outline-none',
-                                placeholder: 'e.g., Push Day'
+                                value: loginUsername,
+                                onChange: (ev) => { setLoginUsername(ev.target.value); setAuthError(''); },
+                                onKeyDown: (ev) => { if (ev.key === 'Enter') doLogin(); },
+                                className: 'w-full p-3 rounded-xl outline-none text-lg font-bold',
+                                style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
+                                placeholder: 'Enter username',
+                                autoCapitalize: 'none',
+                                autoCorrect: 'off'
                             })
                         ),
-                        editingWorkout?.exercises.map((exercise, exIdx) =>
-                            e('div', { key: exIdx, className: 'mb-6 p-4 bg-gray-800 rounded' },
-                                e('div', { className: 'flex items-center justify-between mb-4 gap-2' },
-                                    e('input', {
-                                        type: 'text',
-                                        value: exercise.name,
-                                        onChange: (ev) => updateExerciseName(exIdx, ev.target.value),
-                                        onKeyDown: (ev) => {
-                                            if (ev.key === 'Enter') {
-                                                ev.target.blur();
-                                            }
-                                        },
-                                        className: 'flex-1 max-w-[60%] p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
-                                        placeholder: 'Exercise name'
-                                    }),
-                                    e('button', {
-                                        onClick: () => removeExercise(exIdx),
-                                        className: 'ml-2 px-3 py-2 bg-red-600 rounded hover:bg-red-700 text-sm'
-                                    }, 'Remove')
-                                ),
-                                e('div', { className: 'mb-4' },
-                                    e('input', {
-                                        type: 'text',
-                                        value: exercise.notes || '',
-                                        onChange: (ev) => updateExerciseNotes(exIdx, ev.target.value),
-                                        onKeyDown: (ev) => {
-                                            if (ev.key === 'Enter') {
-                                                ev.target.blur();
-                                            }
-                                        },
-                                        className: 'w-full p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none text-sm',
-                                        placeholder: 'Optional notes (e.g., form tips, tempo, rest time)'
-                                    })
-                                ),
-                                e('div', { className: 'space-y-2' },
-                                    exercise.sets.map((set, setIdx) =>
-                                        e('div', { key: setIdx, className: 'flex items-center gap-3' },
-                                            e('span', { className: 'text-gray-400 w-12' }, `Set ${setIdx + 1}`),
-                                            e('input', {
-                                                type: 'number',
-                                                value: set.reps || '',
-                                                onChange: (ev) => updateSet(exIdx, setIdx, 'reps', ev.target.value),
-                                                onKeyDown: (ev) => {
-                                                    if (ev.key === 'Enter') {
-                                                        ev.target.blur();
-                                                    }
-                                                },
-                                                className: 'w-20 p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
-                                                placeholder: 'Reps'
-                                            }),
-                                            e('input', {
-                                                type: 'number',
-                                                step: '0.01',
-                                                value: set.weight || '',
-                                                onChange: (ev) => updateSet(exIdx, setIdx, 'weight', ev.target.value),
-                                                onKeyDown: (ev) => {
-                                                    if (ev.key === 'Enter') {
-                                                        ev.target.blur();
-                                                    }
-                                                },
-                                                className: 'w-24 p-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 outline-none',
-                                                placeholder: 'Weight'
-                                            }),
-                                            e('span', { className: 'text-gray-400' }, 'kg'),
-                                            e('button', {
-                                                onClick: () => removeSet(exIdx, setIdx),
-                                                className: 'ml-auto px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 text-sm'
-                                            }, '✕')
-                                        )
-                                    )
-                                ),
-                                e('button', {
-                                    onClick: () => addSet(exIdx),
-                                    className: 'mt-3 px-3 py-1 bg-gray-700 rounded hover:bg-gray-600 text-sm'
-                                }, '+ Add Set')
-                            )
+                        e('div', { className: 'mb-5' },
+                            e('label', { className: 'block text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Password'),
+                            e('input', {
+                                type: 'password',
+                                value: loginPassword,
+                                onChange: (ev) => { setLoginPassword(ev.target.value); setAuthError(''); },
+                                onKeyDown: (ev) => { if (ev.key === 'Enter') doLogin(); },
+                                className: 'w-full p-3 rounded-xl outline-none text-lg font-bold',
+                                style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
+                                placeholder: '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'
+                            })
                         ),
-                        e('button', {
-                            onClick: addExercise,
-                            className: 'w-[47%] py-3 bg-gray-800 rounded hover:bg-gray-700 flex items-center justify-center gap-2'
-                        }, e(Plus, { size: 20 }), 'Add Exercise')
+                        authError ? e('div', { className: 'text-sm mb-4 px-1', style: { color: 'var(--error)' } }, authError) : null,
+                        e('div', { className: 'flex gap-3' },
+                            e('button', {
+                                onClick: doLogin,
+                                disabled: authLoading,
+                                className: 'flex-1 py-3 rounded-xl font-black text-base transition-all active:scale-95',
+                                style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)', opacity: authLoading ? 0.5 : 1 }
+                            }, authLoading ? 'Loading...' : 'Login'),
+                            e('button', {
+                                onClick: doRegister,
+                                disabled: authLoading,
+                                className: 'flex-1 py-3 rounded-xl font-bold text-base transition-all active:scale-95',
+                                style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', opacity: authLoading ? 0.5 : 1 }
+                            }, 'Register')
+                        ),
+                        !cloudEnabled() ? e('div', { className: 'mt-4 text-xs text-center', style: { color: 'var(--outline)' } },
+                            'Offline mode \u2022 Data stored locally'
+                        ) : e('div', { className: 'mt-4 text-xs text-center', style: { color: 'var(--primary-fixed-dim)' } },
+                            'Cloud sync enabled'
+                        )
                     )
                 );
             }
 
-            if (view === 'live') {
-                const currentExercise = liveWorkout.exercises[currentExerciseIndex];
-                const currentSet = currentExercise.sets[currentSetIndex];
-
-                return e('div', { className: 'h-full bg-gray-900 text-white flex flex-col p-0' },
-                    e('div', { className: 'bg-blue-900 bg-opacity-20 p-2 relative w-full' },
-                        e('div', { className: 'flex items-center justify-between w-full' },
+            // ======================
+            // MIGRATION VIEW
+            // ======================
+            if (view === 'migrate' && pendingMigration) {
+                const dayCount = Object.keys(pendingMigration).filter(k => pendingMigration[k] && pendingMigration[k].name).length;
+                return e('div', {
+                    className: 'min-h-screen flex flex-col items-center justify-center px-6',
+                    style: { background: 'var(--void)', color: 'var(--on-surface)' }
+                },
+                    e('div', {
+                        className: 'w-full max-w-sm rounded-2xl p-6',
+                        style: { background: 'var(--surface-container-highest)' }
+                    },
+                        e('div', { className: 'flex items-center gap-3 mb-5' },
+                            e('div', {
+                                className: 'w-12 h-12 rounded-xl flex items-center justify-center',
+                                style: { background: 'rgba(209, 252, 0, 0.1)' }
+                            }, e(MIcon, { icon: 'sync', style: { fontSize: '28px', color: 'var(--primary-container)' } })),
+                            e('div', null,
+                                e('div', { className: 'text-lg font-black' }, 'Existing Data Found'),
+                                e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } },
+                                    `${dayCount} workout${dayCount !== 1 ? 's' : ''} from previous app`
+                                )
+                            )
+                        ),
+                        // Show what workouts exist
+                        e('div', { className: 'space-y-1.5 mb-5' },
+                            Object.keys(pendingMigration).filter(k => pendingMigration[k] && pendingMigration[k].name).map(day =>
+                                e('div', {
+                                    key: day,
+                                    className: 'flex items-center justify-between px-3 py-2 rounded-lg',
+                                    style: { background: 'var(--surface-container-low)' }
+                                },
+                                    e('span', { className: 'text-sm font-bold' }, day),
+                                    e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, pendingMigration[day].name)
+                                )
+                            )
+                        ),
+                        e('div', { className: 'flex gap-3' },
                             e('button', {
-                                onClick: finishWorkout,
-                                className: 'p-2 hover:bg-gray-800 rounded absolute left-2'
-                            }, e(ArrowLeft, { size: 28 })),
-                            e('div', { className: 'flex-1 flex items-center justify-center gap-8' },
-                                e('div', { className: 'text-center' },
-                                    e('div', { className: 'text-2xl font-bold' }, liveWorkout.day),
-                                    e('div', { className: 'text-xl text-gray-400' }, liveWorkout.name)
-                                ),
-                                e('div', { className: 'text-xl text-gray-400' }, `Total: ${formatTime(totalElapsedTime)}`)
-                            ),
-                            e('div', { className: 'text-right pr-2' },
-                                e('div', { className: 'text-base text-gray-400' }, 'Sets Left'),
-                                e('div', { className: 'text-2xl font-bold' }, getTotalSetsRemaining())
+                                onClick: doMigrationSkip,
+                                className: 'flex-1 py-3 rounded-xl font-bold text-base transition-all active:scale-95',
+                                style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)' }
+                            }, 'Skip'),
+                            e('button', {
+                                onClick: doMigrationImport,
+                                className: 'flex-1 py-3 rounded-xl font-black text-base transition-all active:scale-95',
+                                style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' }
+                            }, 'Import')
+                        )
+                    )
+                );
+            }
+
+            // Profile modal overlay
+            const profileModal = showProfile ? e('div', {
+                className: 'fixed inset-0 z-[100] flex items-start justify-center pt-20',
+                onClick: () => setShowProfile(false)
+            },
+                // Backdrop
+                e('div', { className: 'absolute inset-0', style: { background: 'rgba(0,0,0,0.7)' } }),
+                // Card
+                e('div', {
+                    className: 'relative z-10 w-80 rounded-2xl p-5',
+                    style: { background: 'var(--surface-container-highest)' },
+                    onClick: (ev) => ev.stopPropagation()
+                },
+                    // User icon + name
+                    e('div', { className: 'flex items-center gap-4 mb-5' },
+                        e('div', {
+                            className: 'w-14 h-14 rounded-2xl flex items-center justify-center',
+                            style: { background: 'rgba(209, 252, 0, 0.1)' }
+                        }, e(MIcon, { icon: 'person', fill: true, style: { fontSize: '32px', color: 'var(--primary-container)' } })),
+                        e('div', null,
+                            e('div', { className: 'text-lg font-black' }, currentUser ? currentUser.username : ''),
+                            e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } },
+                                currentUser ? `Joined ${new Date(currentUser.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''
                             )
                         )
                     ),
-                    e('div', { className: 'flex-1 flex flex-col justify-start mt-4 px-4 pb-4' },
-                        e('div', { className: 'flex items-start justify-between mb-2' },
-                            e('div', { className: 'text-left pl-4' },
-                                e('div', { className: 'text-3xl font-bold' }, currentExercise.name),
-                                e('div', { className: 'text-xl text-gray-400' }, `Set ${currentSetIndex + 1} of ${currentExercise.sets.length}`)
+                    // Stats summary
+                    e('div', { className: 'flex gap-3 mb-5' },
+                        e('div', { className: 'flex-1 rounded-xl p-3 text-center', style: { background: 'var(--surface-container-low)' } },
+                            e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } }, workoutHistory.length),
+                            e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'Workouts')
+                        ),
+                        e('div', { className: 'flex-1 rounded-xl p-3 text-center', style: { background: 'var(--surface-container-low)' } },
+                            e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } },
+                                (workoutHistory.reduce((sum, w) => sum + w.exercises.reduce((s, ex) => s + ex.sets.reduce((ss, set) => ss + set.reps * set.weight, 0), 0), 0) / 1000).toFixed(1) + 't'
                             ),
-                            e('div', { className: 'text-right pr-4 pt-1' },
-                                e('div', { className: 'text-xl text-gray-400' }, `Set: ${formatTime(currentSetTime)}`)
+                            e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'Lifted')
+                        )
+                    ),
+                    // Sync status
+                    e('div', { className: 'flex items-center gap-2 mb-5 px-1' },
+                        e(MIcon, { icon: cloudEnabled() ? 'cloud_done' : 'cloud_off', style: { fontSize: '18px', color: cloudEnabled() ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }),
+                        e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } },
+                            cloudEnabled() ? 'Cloud sync active' : 'Offline \u2022 Local storage only'
+                        )
+                    ),
+                    // Logout button
+                    e('button', {
+                        onClick: doLogout,
+                        className: 'w-full py-3 rounded-xl font-bold text-base transition-all active:scale-95',
+                        style: { background: 'var(--surface-container-low)', color: 'var(--error)' }
+                    }, 'Log Out')
+                )
+            ) : null;
+
+            // ======================
+            // EDIT VIEW
+            // ======================
+            if (view === 'edit') {
+                return e('div', {
+                    className: 'min-h-screen flex flex-col',
+                    style: { background: 'var(--void)', color: 'var(--on-surface)' }
+                },
+                    e(TopAppBar, {
+                        title: editingDay ? editingDay.toUpperCase() : 'EDIT',
+                        leftAction: e('button', {
+                            onClick: () => { setView('landing'); setEditingWorkout(null); setEditingDay(null); },
+                            className: 'flex items-center gap-1 transition-opacity active:opacity-60',
+                            style: { color: 'var(--on-surface-variant)' }
+                        }, e(ArrowLeft, { size: 20 }), e('span', { className: 'text-sm' }, 'Back')),
+                        rightAction: e('button', {
+                            onClick: saveWorkout,
+                            className: 'px-4 py-2 rounded-xl text-sm font-bold transition-opacity active:opacity-80',
+                            style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' },
+                            disabled: !editingWorkout?.name || !editingWorkout?.exercises.every(ex => ex.name)
+                        }, 'Save')
+                    }),
+                    e('div', { className: 'flex-1 pt-20 px-4 pb-28 overflow-y-auto' },
+                        e('div', { className: 'max-w-4xl mx-auto' },
+                            // Workout name
+                            e('div', { className: 'mb-6' },
+                                e('label', { className: 'block mb-2 text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Workout Name'),
+                                e('input', {
+                                    type: 'text',
+                                    value: editingWorkout?.name || '',
+                                    onChange: (ev) => setEditingWorkout({ ...editingWorkout, name: ev.target.value }),
+                                    className: 'w-full p-3 rounded-xl outline-none text-lg font-bold',
+                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
+                                    placeholder: 'e.g., Push Day'
+                                })
+                            ),
+                            // Exercises
+                            editingWorkout?.exercises.map((exercise, exIdx) =>
+                                e('div', { key: exIdx, className: 'mb-6 p-4 rounded-xl', style: { background: 'var(--surface-container-highest)' } },
+                                    e('div', { className: 'flex items-center justify-between mb-4 gap-2' },
+                                        e('input', {
+                                            type: 'text', value: exercise.name,
+                                            onChange: (ev) => updateExerciseName(exIdx, ev.target.value),
+                                            onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
+                                            className: 'flex-1 max-w-[60%] p-2 rounded-lg outline-none font-bold',
+                                            style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
+                                            placeholder: 'Exercise name'
+                                        }),
+                                        e('button', {
+                                            onClick: () => removeExercise(exIdx),
+                                            className: 'ml-2 px-3 py-2 rounded-lg text-sm font-bold transition-opacity active:opacity-80',
+                                            style: { background: 'var(--error-container)', color: 'var(--on-error-container)' }
+                                        }, 'Remove')
+                                    ),
+                                    e('div', { className: 'mb-4' },
+                                        e('input', {
+                                            type: 'text', value: exercise.notes || '',
+                                            onChange: (ev) => updateExerciseNotes(exIdx, ev.target.value),
+                                            onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
+                                            className: 'w-full p-2 rounded-lg outline-none text-sm',
+                                            style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)', border: 'none', caretColor: 'var(--primary-container)' },
+                                            placeholder: 'Optional notes (e.g., form tips, tempo, rest time)'
+                                        })
+                                    ),
+                                    // Sets
+                                    e('div', { className: 'space-y-2' },
+                                        exercise.sets.map((set, setIdx) =>
+                                            e('div', { key: setIdx, className: 'flex items-center gap-3' },
+                                                e('span', { className: 'w-12 text-sm', style: { color: 'var(--on-surface-variant)' } }, `Set ${setIdx + 1}`),
+                                                e('input', {
+                                                    type: 'number', value: set.reps || '',
+                                                    onChange: (ev) => updateSet(exIdx, setIdx, 'reps', ev.target.value),
+                                                    onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
+                                                    className: 'w-20 p-2 rounded-lg outline-none',
+                                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
+                                                    placeholder: 'Reps'
+                                                }),
+                                                e('input', {
+                                                    type: 'number', step: '0.01', value: set.weight || '',
+                                                    onChange: (ev) => updateSet(exIdx, setIdx, 'weight', ev.target.value),
+                                                    onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
+                                                    className: 'w-24 p-2 rounded-lg outline-none',
+                                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
+                                                    placeholder: 'Weight'
+                                                }),
+                                                e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'kg'),
+                                                e('button', {
+                                                    onClick: () => removeSet(exIdx, setIdx),
+                                                    className: 'ml-auto px-2 py-1 rounded-lg text-sm transition-opacity active:opacity-60',
+                                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)' }
+                                                }, '\u2715')
+                                            )
+                                        )
+                                    ),
+                                    e('button', {
+                                        onClick: () => addSet(exIdx),
+                                        className: 'mt-3 px-3 py-1 rounded-lg text-sm transition-opacity active:opacity-80',
+                                        style: { background: 'var(--surface-container-low)', color: 'var(--primary-fixed-dim)' }
+                                    }, '+ Add Set')
+                                )
+                            ),
+                            e('button', {
+                                onClick: addExercise,
+                                className: 'w-[47%] py-3 rounded-xl flex items-center justify-center gap-2 transition-opacity active:opacity-80',
+                                style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' }
+                            }, e(Plus, { size: 20 }), 'Add Exercise')
+                        )
+                    ),
+                    e(BottomNavBar, { activeTab: 'calendar', onTabChange: handleTabChange })
+                );
+            }
+
+            // ======================
+            // WORKOUT IDLE VIEW (no active workout)
+            // ======================
+            if (view === 'workout-idle') {
+                const todayName = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
+                const todayWorkout = workouts[todayName];
+
+                return e('div', {
+                    className: 'min-h-screen flex flex-col',
+                    style: { background: 'var(--void)', color: 'var(--on-surface)' }
+                },
+                    e(TopAppBar, { title: 'WORKOUT' }),
+                    e('div', { className: 'flex-1 pt-20 pb-28 px-6 flex flex-col items-center justify-center' },
+                        e(MIcon, { icon: 'fitness_center', style: { fontSize: '64px', color: 'var(--surface-container-highest)' } }),
+                        e('h2', { className: 'text-2xl font-black mt-6 text-center' }, 'No Active Workout'),
+                        e('p', { className: 'text-base mt-2 text-center', style: { color: 'var(--on-surface-variant)' } },
+                            todayWorkout
+                                ? `Today\u2019s workout is ready to go`
+                                : `No workout scheduled for ${todayName}`
+                        ),
+                        todayWorkout ? e('div', { className: 'mt-8 flex flex-col items-center gap-3' },
+                            e('button', {
+                                onClick: () => startWorkout(todayName),
+                                className: 'px-8 py-4 rounded-xl text-lg font-black transition-all active:scale-95',
+                                style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)', boxShadow: '0 0 30px rgba(209, 252, 0, 0.2)' }
+                            }, `Start ${todayName}\u2019s Workout`),
+                            e('p', { className: 'text-base font-bold', style: { color: 'var(--primary-fixed-dim)' } }, todayWorkout.name)
+                        ) : e('button', {
+                            onClick: () => { setActiveTab('calendar'); setView('landing'); },
+                            className: 'mt-8 px-6 py-3 rounded-xl text-sm font-bold transition-all active:scale-95',
+                            style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' }
+                        }, 'Go to Calendar')
+                    ),
+                    e(BottomNavBar, { activeTab: 'workout', onTabChange: handleTabChange })
+                );
+            }
+
+            // ======================
+            // STATS VIEW
+            // ======================
+            if (view === 'stats') {
+                // Compute stats from history
+                const totalWorkouts = workoutHistory.length;
+                const totalWeightKg = workoutHistory.reduce((sum, w) => {
+                    return sum + w.exercises.reduce((eSum, ex) => {
+                        return eSum + ex.sets.reduce((sSum, s) => sSum + s.reps * s.weight, 0);
+                    }, 0);
+                }, 0);
+                const totalWeightTonnes = (totalWeightKg / 1000).toFixed(1);
+                const totalSets = workoutHistory.reduce((sum, w) => {
+                    return sum + w.exercises.reduce((eSum, ex) => eSum + ex.sets.length, 0);
+                }, 0);
+                const totalReps = workoutHistory.reduce((sum, w) => {
+                    return sum + w.exercises.reduce((eSum, ex) => eSum + ex.sets.reduce((sSum, s) => sSum + s.reps, 0), 0);
+                }, 0);
+                // Avg workout time (filter outliers: <40min or >90min)
+                const validTimes = workoutHistory.map(w => w.totalTime).filter(t => t >= 2400 && t <= 5400);
+                const avgTime = validTimes.length > 0 ? Math.round(validTimes.reduce((a, b) => a + b, 0) / validTimes.length) : 0;
+                // Best single set weight
+                let bestWeight = 0;
+                let bestExName = '';
+                workoutHistory.forEach(w => {
+                    w.exercises.forEach(ex => {
+                        ex.sets.forEach(s => {
+                            if (s.weight > bestWeight) { bestWeight = s.weight; bestExName = ex.name; }
+                        });
+                    });
+                });
+                // Unique exercises
+                const uniqueExercises = new Set();
+                workoutHistory.forEach(w => w.exercises.forEach(ex => uniqueExercises.add(ex.name)));
+                // Weekly frequency (last 4 weeks)
+                const fourWeeksAgo = Date.now() - 28 * 24 * 60 * 60 * 1000;
+                const recentWorkouts = workoutHistory.filter(w => w.date >= fourWeeksAgo);
+                const weeklyAvg = recentWorkouts.length > 0 ? (recentWorkouts.length / 4).toFixed(1) : '0';
+
+                // Per-exercise stats (all exercises that appear in history)
+                const exerciseNames = [...uniqueExercises];
+
+                const statCard = (icon, value, label) => e('div', {
+                    className: 'rounded-xl p-4 flex flex-col items-center',
+                    style: { background: 'var(--surface-container-highest)' }
+                },
+                    e(MIcon, { icon, style: { fontSize: '22px', color: 'var(--primary-fixed-dim)', marginBottom: '6px' } }),
+                    e('div', { className: 'text-xl font-black', style: { color: 'var(--on-surface)' } }, value),
+                    e('div', { className: 'text-xs uppercase tracking-widest mt-1 text-center', style: { color: 'var(--on-surface-variant)' } }, label)
+                );
+
+                return e('div', {
+                    className: 'min-h-screen flex flex-col',
+                    style: { background: 'var(--void)', color: 'var(--on-surface)' }
+                },
+                    e(TopAppBar, { title: 'STATS' }),
+                    e('div', { className: 'flex-1 pt-20 pb-28 px-4 overflow-y-auto' },
+                        totalWorkouts === 0 ?
+                            e('div', { className: 'flex flex-col items-center justify-center h-full pt-32' },
+                                e(MIcon, { icon: 'bar_chart', style: { fontSize: '64px', color: 'var(--surface-container-highest)' } }),
+                                e('h2', { className: 'text-2xl font-black mt-6 text-center' }, 'No Stats Yet'),
+                                e('p', { className: 'text-base mt-2 text-center', style: { color: 'var(--on-surface-variant)' } }, 'Complete a workout to see your stats')
+                            )
+                        :
+                        e('div', { className: 'max-w-lg mx-auto' },
+                            // Overview section
+                            e('div', { className: 'text-xs uppercase tracking-widest mb-3 px-1', style: { color: 'var(--on-surface-variant)' } }, 'Overview'),
+                            e('div', { className: 'grid grid-cols-3 gap-2 mb-4' },
+                                statCard('fitness_center', totalWorkouts, 'Workouts'),
+                                statCard('local_fire_department', totalWeightTonnes + 't', 'Lifted'),
+                                statCard('timer', avgTime > 0 ? formatTime(avgTime) : '--', 'Avg Time')
+                            ),
+                            e('div', { className: 'grid grid-cols-3 gap-2 mb-6' },
+                                statCard('repeat', totalSets, 'Total Sets'),
+                                statCard('speed', totalReps, 'Total Reps'),
+                                statCard('calendar_month', weeklyAvg + '/wk', 'Frequency')
+                            ),
+                            // Personal best
+                            bestWeight > 0 ? e('div', {
+                                className: 'rounded-xl p-4 mb-6 flex items-center gap-4',
+                                style: { background: 'var(--surface-container-highest)' }
+                            },
+                                e('div', {
+                                    className: 'w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0',
+                                    style: { background: 'rgba(209, 252, 0, 0.1)' }
+                                }, e(MIcon, { icon: 'emoji_events', fill: true, style: { fontSize: '28px', color: 'var(--primary-container)' } })),
+                                e('div', null,
+                                    e('div', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Personal Best'),
+                                    e('div', { className: 'font-black text-lg' }, `${bestWeight} kg`),
+                                    e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, bestExName)
+                                )
+                            ) : null,
+                            // Exercise progression
+                            exerciseNames.length > 0 ? e('div', null,
+                                e('div', { className: 'text-xs uppercase tracking-widest mb-3 px-1', style: { color: 'var(--on-surface-variant)' } }, 'Exercise Progression'),
+                                e('div', { className: 'space-y-2' },
+                                    exerciseNames.map(name => {
+                                        const hist = getExerciseHistory(name);
+                                        const lastMax = hist.length > 0 ? hist[hist.length - 1].maxWeight : 0;
+                                        return e('div', {
+                                            key: name,
+                                            className: 'rounded-xl p-4 flex items-center gap-3',
+                                            style: { background: 'var(--surface-container-high)' }
+                                        },
+                                            e('div', { className: 'flex-1 min-w-0' },
+                                                e('div', { className: 'font-bold text-base truncate' }, name),
+                                                e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } },
+                                                    lastMax > 0 ? `Last: ${lastMax} kg` : 'No data'
+                                                )
+                                            ),
+                                            e(Sparkline, { data: hist, width: 110, height: 36 })
+                                        );
+                                    })
+                                )
+                            ) : null
+                        )
+                    ),
+                    e(BottomNavBar, { activeTab: 'stats', onTabChange: handleTabChange })
+                );
+            }
+
+            // ======================
+            // LIVE WORKOUT VIEW
+            // ======================
+            if (view === 'live') {
+                const currentExercise = liveWorkout.exercises[currentExerciseIndex];
+                const currentSet = currentExercise.sets[currentSetIndex];
+                const nextExName = getNextExerciseName();
+
+                return e('div', {
+                    className: 'min-h-screen flex flex-col',
+                    style: { background: 'var(--void)', color: 'var(--on-surface)' }
+                },
+                    // TopAppBar: CWA left, workout name center, sets left right
+                    e(TopAppBar, {
+                        title: liveWorkout.name.toUpperCase(),
+                        leftAction: e('span', {
+                            className: 'font-black italic text-xl tracking-tighter',
+                            style: { color: 'var(--primary-container)' }
+                        }, 'CWA'),
+                        rightAction: e('div', { className: 'flex items-center gap-2' },
+                            e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Sets'),
+                            e('span', { className: 'text-lg font-black', style: { color: 'var(--on-surface)' } }, getTotalSetsRemaining())
+                        )
+                    }),
+                    // Main content
+                    e('div', { className: 'flex-1 flex flex-col pt-20 px-4 pb-28' },
+                        // Exercise name row with progress dots
+                        e('div', { className: 'flex items-center justify-between px-2 mb-1' },
+                            e('div', { className: 'flex-1' },
+                                e('div', { className: 'text-2xl font-black leading-tight' }, currentExercise.name),
+                                e('div', { className: 'text-sm mt-0.5', style: { color: 'var(--on-surface-variant)' } }, `Set ${currentSetIndex + 1} of ${currentExercise.sets.length}`)
+                            ),
+                            // Progress dots
+                            e('div', { className: 'flex gap-1.5 flex-wrap justify-end ml-3', style: { maxWidth: '45%' } },
+                                liveWorkout.exercises.map((ex, i) =>
+                                    e('div', { key: i, className: 'flex gap-1' },
+                                        ex.sets.map((_, j) => {
+                                            let bg;
+                                            if (i < currentExerciseIndex || (i === currentExerciseIndex && j < currentSetIndex)) bg = 'var(--primary-container)';
+                                            else if (i === currentExerciseIndex && j === currentSetIndex) bg = 'var(--secondary)';
+                                            else bg = 'var(--surface-container-highest)';
+                                            return e('div', { key: j, style: { width: 7, height: 7, borderRadius: '50%', background: bg } });
+                                        })
+                                    )
+                                )
                             )
                         ),
-                        e('div', { className: 'flex items-center justify-center gap-4' },
-                            e(CustomNumberInput, {
-                                value: currentSet.reps,
-                                onChange: (val) => updateLiveSet('reps', val),
-                                label: 'Reps',
-                                step: 1
-                            }),
-                            e(CustomNumberInput, {
-                                value: currentSet.weight,
-                                onChange: (val) => updateLiveSet('weight', val),
-                                label: 'Weight (kg)',
-                                step: 0.5
-                            }),
+                        // Timers row: day + total time | set time
+                        e('div', { className: 'flex items-center justify-between px-2 mb-4 mt-2' },
+                            e('div', { className: 'flex items-center gap-3' },
+                                e('span', { className: 'text-xs uppercase tracking-widest font-bold', style: { color: 'var(--on-surface-variant)' } }, liveWorkout.day),
+                                e('span', { className: 'text-sm font-bold', style: { color: 'var(--primary-fixed-dim)' } }, formatTime(totalElapsedTime))
+                            ),
+                            e('div', { className: 'flex items-center gap-2' },
+                                e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Set'),
+                                e('span', { className: 'text-sm font-bold', style: { color: 'var(--primary-fixed-dim)' } }, formatTime(currentSetTime))
+                            )
+                        ),
+                        // Arrow + Number inputs + Arrow
+                        e('div', { className: 'flex items-center justify-center gap-3 mt-2' },
+                            // Back arrow
+                            e('button', {
+                                onClick: prevSet,
+                                disabled: !canGoPrev(),
+                                className: 'p-3 rounded-2xl transition-all active:scale-90 flex-shrink-0',
+                                style: {
+                                    background: canGoPrev() ? 'var(--surface-container-highest)' : 'var(--surface-container-low)',
+                                    color: canGoPrev() ? 'var(--on-surface)' : 'var(--outline-variant)',
+                                    opacity: canGoPrev() ? 1 : 0.3
+                                }
+                            }, e(ArrowLeft, { size: 28 })),
+                            // Reps input
+                            e(CustomNumberInput, { value: currentSet.reps, onChange: (val) => updateLiveSet('reps', val), label: 'Reps', step: 1 }),
+                            // Weight input
+                            e(CustomNumberInput, { value: currentSet.weight, onChange: (val) => updateLiveSet('weight', val), label: 'Weight (kg)', step: 0.5 }),
+                            // Forward arrow
                             e('button', {
                                 onClick: nextSet,
-                                className: 'p-6 bg-blue-600 rounded-full hover:bg-blue-700 mt-8'
-                            }, e(ArrowRight, { size: 40 }))
+                                className: 'p-3 rounded-2xl transition-all active:scale-90 flex-shrink-0',
+                                style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--void)' }
+                            }, e(ArrowRight, { size: 28 }))
                         ),
-                        currentExercise.notes ? e('div', { className: 'mt-6 px-4 text-center' },
-                            e('div', { 
-                                className: 'text-gray-300 text-base leading-snug',
-                                style: { 
-                                    maxWidth: '600px',
-                                    margin: '0 auto',
+                        // Notes bar - centered under the two counters with background
+                        currentExercise.notes ? e('div', { className: 'flex justify-center mt-3' },
+                            e('div', {
+                                className: 'px-5 py-2.5 rounded-xl text-sm leading-snug text-center',
+                                style: {
+                                    background: 'var(--surface-container-high)',
+                                    color: 'var(--on-surface-variant)',
+                                    width: '23rem',
+                                    maxWidth: '100%',
                                     display: '-webkit-box',
                                     WebkitLineClamp: '2',
                                     WebkitBoxOrient: 'vertical',
                                     overflow: 'hidden'
                                 }
                             }, currentExercise.notes)
-                        ) : null
-                    )
+                        ) : null,
+                        // Next exercise indicator (bottom right)
+                        e('div', { className: 'mt-auto pt-3 flex justify-end px-2' },
+                            nextExName ? e('div', {
+                                className: 'flex items-center gap-2 px-3 py-1.5 rounded-xl',
+                                style: { background: 'var(--surface-container-highest)' }
+                            },
+                                e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Next:'),
+                                e('span', {
+                                    className: 'text-sm font-bold',
+                                    style: { color: nextExName === 'Finish' ? 'var(--primary-container)' : 'var(--on-surface)' }
+                                }, nextExName)
+                            ) : null
+                        )
+                    ),
+                    e(BottomNavBar, { activeTab: 'workout', onTabChange: handleTabChange })
                 );
             }
 
+            // ======================
+            // COMPLETE VIEW
+            // ======================
             if (view === 'complete') {
                 const { summary: workoutSummary, totalScore, maxScore } = calculateWorkoutSummary();
+                const scoreLevel = maxScore > 0 ? Math.round((totalScore / maxScore) * 5) : 0;
+                const clampedScore = Math.max(0, Math.min(5, scoreLevel));
 
-                return e('div', { className: 'h-screen bg-gray-900 text-white flex flex-col relative overflow-y-auto' },
-                    e('button', {
-                        onClick: finishWorkout,
-                        className: 'absolute top-4 right-4 px-6 py-3 bg-blue-600 rounded text-lg hover:bg-blue-700 z-10'
-                    }, 'Home'),
-                    e('div', { className: 'flex-1 flex flex-col items-center justify-start pt-12 px-6 pb-24' },
-                        e('div', { className: 'w-full max-w-2xl relative mb-6' },
-                            // Workout Score Gauge - positioned absolutely on the left
-                            e('div', { className: 'absolute left-0 top-0' },
-                                e(WorkoutScoreGauge, { score: totalScore, maxScore: maxScore })
-                            ),
-                            // Center content - fully centered without flex layout
-                            e('div', { className: 'flex flex-col items-center justify-start w-full px-32' },
-                                e('div', { className: 'mb-3 flex justify-center w-full' }, e(Check, { size: 60, className: 'text-green-500' })),
-                                e('h1', { className: 'text-3xl font-bold mb-1 text-center w-full' }, 'Workout Complete!'),
-                                e('div', { className: 'text-xl text-gray-400 text-center w-full' }, `Total Time: ${formatTime(totalElapsedTime)}`)
-                            )
-                        ),
-                        e('div', { className: 'w-full max-w-2xl mt-12' },
-                            e('h2', { className: 'text-2xl font-bold mb-4 text-center' }, 'Exercise Summary'),
-                            e('div', { className: 'space-y-3' },
-                                workoutSummary.map((item, idx) =>
-                                    e('div', { 
-                                        key: idx, 
-                                        className: 'bg-gray-800 p-4 rounded-lg'
-                                    },
-                                        e('div', { className: 'flex items-center justify-between mb-1' },
-                                            e('div', { className: 'font-bold text-lg' }, item.name),
-                                            e('div', { 
-                                                className: 'text-sm px-2 py-1 rounded',
-                                                style: { 
-                                                    backgroundColor: item.points === 2 ? '#2563EB' : item.points === 1 ? '#60A5FA' : '#374151',
-                                                    color: 'white'
-                                                }
-                                            }, `+${item.points} pts`)
-                                        ),
-                                        e('div', { 
-                                            className: item.hasChanges ? 'text-green-400' : 'text-gray-400'
-                                        }, item.change)
+                // Battery cell colors - progressive fill
+                const cellColors = [
+                    '#45484c', // 1 - dim
+                    '#737679', // 2 - outline
+                    '#a9abaf', // 3 - on-surface-variant
+                    '#c4ec00', // 4 - primary-fixed-dim
+                    '#d1fc00', // 5 - primary-container
+                ];
+
+                return e('div', {
+                    className: 'min-h-screen flex flex-col',
+                    style: { background: 'var(--void)', color: 'var(--on-surface)' }
+                },
+                    e(TopAppBar, {
+                        title: 'WORKOUT COMPLETE',
+                        rightAction: e('button', {
+                            onClick: finishWorkout,
+                            className: 'px-4 py-2 rounded-xl text-sm font-bold transition-opacity active:opacity-80',
+                            style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' }
+                        }, 'Home')
+                    }),
+                    e('div', { className: 'flex-1 flex flex-col items-center pt-20 px-5 pb-28 overflow-y-auto' },
+                        // Hero card
+                        e('div', {
+                            className: 'w-full max-w-lg rounded-2xl p-6 mt-4',
+                            style: { background: 'var(--surface-container-highest)' }
+                        },
+                            // Trophy + title row
+                            e('div', { className: 'flex items-center gap-4 mb-5' },
+                                e('div', {
+                                    className: 'w-16 h-16 rounded-2xl flex items-center justify-center flex-shrink-0',
+                                    style: { background: 'rgba(209, 252, 0, 0.1)' }
+                                },
+                                    e(MIcon, { icon: 'emoji_events', fill: true, style: { fontSize: '36px', color: 'var(--primary-container)' } })
+                                ),
+                                e('div', null,
+                                    e('div', { className: 'text-2xl font-black leading-tight' }, 'Great Work!'),
+                                    e('div', { className: 'text-sm mt-0.5', style: { color: 'var(--on-surface-variant)' } },
+                                        liveWorkout ? `${liveWorkout.name} \u2022 ${liveWorkout.day}` : 'Workout finished'
                                     )
                                 )
+                            ),
+                            // Stats row
+                            e('div', { className: 'flex gap-3 mb-5' },
+                                // Time box
+                                e('div', {
+                                    className: 'flex-1 rounded-xl p-3 flex flex-col items-center',
+                                    style: { background: 'var(--surface-container-low)' }
+                                },
+                                    e(MIcon, { icon: 'timer', style: { fontSize: '20px', color: 'var(--primary-fixed-dim)', marginBottom: '4px' } }),
+                                    e('div', { className: 'text-xl font-black', style: { color: 'var(--primary-fixed-dim)' } }, formatTime(totalElapsedTime)),
+                                    e('div', { className: 'text-xs uppercase tracking-widest mt-0.5', style: { color: 'var(--on-surface-variant)' } }, 'Duration')
+                                ),
+                                // Sets box
+                                e('div', {
+                                    className: 'flex-1 rounded-xl p-3 flex flex-col items-center',
+                                    style: { background: 'var(--surface-container-low)' }
+                                },
+                                    e(MIcon, { icon: 'repeat', style: { fontSize: '20px', color: 'var(--primary-fixed-dim)', marginBottom: '4px' } }),
+                                    e('div', { className: 'text-xl font-black', style: { color: 'var(--primary-fixed-dim)' } }, completedSets.length),
+                                    e('div', { className: 'text-xs uppercase tracking-widest mt-0.5', style: { color: 'var(--on-surface-variant)' } }, 'Sets Done')
+                                ),
+                                // Score box
+                                e('div', {
+                                    className: 'flex-1 rounded-xl p-3 flex flex-col items-center',
+                                    style: { background: 'var(--surface-container-low)' }
+                                },
+                                    e(MIcon, { icon: 'trending_up', style: { fontSize: '20px', color: 'var(--primary-fixed-dim)', marginBottom: '4px' } }),
+                                    e('div', { className: 'text-xl font-black', style: { color: 'var(--primary-fixed-dim)' } }, `${totalScore}/${maxScore}`),
+                                    e('div', { className: 'text-xs uppercase tracking-widest mt-0.5', style: { color: 'var(--on-surface-variant)' } }, 'Points')
+                                )
+                            ),
+                            // Battery score bar
+                            e('div', null,
+                                e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Workout Score'),
+                                e('div', { className: 'flex gap-1.5' },
+                                    [0, 1, 2, 3, 4].map(i =>
+                                        e('div', {
+                                            key: i,
+                                            className: 'flex-1 h-10 rounded-lg transition-all duration-500',
+                                            style: {
+                                                background: i < clampedScore ? cellColors[i] : 'var(--surface-container-low)',
+                                                boxShadow: i < clampedScore && i >= 3 ? `0 0 12px ${cellColors[i]}40` : 'none'
+                                            }
+                                        })
+                                    )
+                                ),
+                                e('div', { className: 'flex justify-between mt-1.5' },
+                                    e('span', { className: 'text-xs', style: { color: 'var(--outline)' } }, 'Maintain'),
+                                    e('span', { className: 'text-xs font-bold', style: { color: clampedScore >= 4 ? 'var(--primary-container)' : 'var(--outline)' } }, 'Progress')
+                                )
+                            )
+                        ),
+                        // Exercise Summary
+                        e('div', { className: 'w-full max-w-lg mt-6' },
+                            e('div', { className: 'text-xs uppercase tracking-widest mb-3 px-1', style: { color: 'var(--on-surface-variant)' } }, 'Exercise Breakdown'),
+                            e('div', { className: 'space-y-2' },
+                                workoutSummary.map((item, idx) => {
+                                    const hist = getExerciseHistory(item.name);
+                                    return e('div', {
+                                        key: idx,
+                                        className: 'p-4 rounded-xl',
+                                        style: { background: 'var(--surface-container-high)' }
+                                    },
+                                        // Top row: points + name + change
+                                        e('div', { className: 'flex items-center gap-3' },
+                                            e('div', {
+                                                className: 'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-black',
+                                                style: {
+                                                    background: item.points === 2 ? 'var(--primary-container)' : item.points === 1 ? 'var(--primary-fixed-dim)' : 'var(--surface-container-lowest)',
+                                                    color: item.points >= 1 ? 'var(--void)' : 'var(--on-surface-variant)'
+                                                }
+                                            }, `+${item.points}`),
+                                            e('div', { className: 'flex-1 min-w-0' },
+                                                e('div', { className: 'font-bold text-base truncate' }, item.name),
+                                                e('div', {
+                                                    className: 'text-sm truncate',
+                                                    style: { color: item.hasChanges ? 'var(--primary-fixed-dim)' : 'var(--on-surface-variant)' }
+                                                }, item.change)
+                                            )
+                                        ),
+                                        // Sparkline row (if history exists)
+                                        hist.length >= 2 ? e('div', {
+                                            className: 'mt-3 rounded-lg px-3 py-2 flex items-center justify-between',
+                                            style: { background: 'var(--surface-container-lowest)' }
+                                        },
+                                            e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } },
+                                                `${hist.length} sessions \u2022 ${hist[hist.length - 1].maxWeight}kg`
+                                            ),
+                                            e(Sparkline, { data: hist, width: 100, height: 28 })
+                                        ) : null
+                                    );
+                                })
                             )
                         )
-                    )
+                    ),
+                    e(BottomNavBar, { activeTab: 'workout', onTabChange: handleTabChange })
                 );
             }
 
+            // ======================
+            // LANDING / CALENDAR VIEW
+            // ======================
             const today = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
             const currentDate = new Date();
-            
+
             const getDateForDay = (dayName) => {
                 const todayIndex = DAYS.indexOf(today);
                 const targetIndex = DAYS.indexOf(dayName);
@@ -1053,55 +1840,173 @@
                 return `${day}/${month}`;
             };
 
-            return e('div', { className: 'min-h-screen bg-gray-900 text-white p-6' },
-                e('div', { className: 'max-w-6xl mx-auto' },
-                    e('div', { className: 'grid grid-cols-2 gap-4' },
+            // Get week number
+            const getWeekNumber = (d) => {
+                const date = new Date(d);
+                date.setHours(0, 0, 0, 0);
+                date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
+                const week1 = new Date(date.getFullYear(), 0, 4);
+                return 1 + Math.round(((date - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+            };
+
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+            return e('div', {
+                className: 'min-h-screen flex flex-col',
+                style: { background: 'var(--void)', color: 'var(--on-surface)' }
+            },
+                profileModal,
+                e(TopAppBar, {
+                    title: 'CALENDAR VIEW',
+                    rightAction: e('button', {
+                        onClick: () => setShowProfile(true),
+                        className: 'w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90',
+                        style: { background: 'rgba(209, 252, 0, 0.1)' }
+                    }, e(MIcon, { icon: 'person', fill: true, style: { fontSize: '20px', color: 'var(--primary-container)' } }))
+                }),
+                e('main', { className: 'flex-1 pt-20 px-4 pb-28' },
+                    // Date header
+                    e('div', { className: 'mb-6' },
+                        e('p', {
+                            className: 'text-xs uppercase tracking-widest',
+                            style: { color: 'var(--on-surface-variant)' }
+                        }, `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`),
+                        e('h2', { className: 'text-4xl font-black leading-none mt-1' }, `WEEK ${getWeekNumber(currentDate)}`)
+                    ),
+                    // Weekly grid
+                    e('div', { className: 'grid grid-cols-2 gap-4 max-w-6xl mx-auto' },
                         DAYS.map((day) => {
                             const workout = workouts[day];
                             const isToday = day === today;
                             const hasProgress = workout?.progress;
 
-                            return e('div', {
-                                key: day,
-                                className: `p-6 rounded-lg relative ${isToday ? 'bg-blue-900 border-2 border-blue-500' : 'bg-gray-800'}`
-                            },
-                                e('div', { className: 'absolute top-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-white text-gray-900 rounded text-xs font-bold' }, 
-                                    getDateForDay(day)
-                                ),
-                                e('div', { className: 'flex items-center justify-between mt-6' },
-                                    e('div', { className: 'flex-1' },
-                                        e('h2', { className: 'text-xl font-bold' }, day),
-                                        e('div', { className: 'text-gray-400 text-sm mt-1' }, workout ? workout.name : 'Rest')
-                                    )
-                                ),
-                                e('div', { className: 'flex items-center gap-2 justify-end' },
-                                    workout ? [
+                            // TODAY card - highlighted with primary-container
+                            if (isToday && workout) {
+                                return e('div', {
+                                    key: day,
+                                    className: 'rounded-xl p-5 flex flex-col justify-between min-h-[160px] relative overflow-hidden',
+                                    style: {
+                                        background: 'var(--primary-container)',
+                                        boxShadow: '0 0 30px rgba(209, 252, 0, 0.15)'
+                                    }
+                                },
+                                    e('div', {
+                                        className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
+                                        style: { background: 'rgba(76, 93, 0, 0.2)', color: 'var(--on-primary-container)' }
+                                    }, getDateForDay(day)),
+                                    e('div', null,
+                                        e('span', {
+                                            className: 'text-xs uppercase tracking-widest font-bold',
+                                            style: { color: 'var(--on-primary-container)' }
+                                        }, `${day} \u2022 Today`),
+                                        e('h3', {
+                                            className: 'font-black text-xl mt-1 leading-tight',
+                                            style: { color: 'var(--on-primary-container)' }
+                                        }, workout.name)
+                                    ),
+                                    e('div', { className: 'flex items-center gap-2 justify-end mt-4' },
                                         e('button', {
                                             key: 'start',
                                             onClick: () => startWorkout(day),
-                                            className: 'px-4 py-2 bg-green-600 rounded hover:bg-green-700 text-sm'
+                                            className: 'px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95',
+                                            style: { background: 'var(--on-primary-container)', color: 'var(--primary-container)' }
                                         }, hasProgress ? 'Continue' : 'Start'),
                                         e('button', {
                                             key: 'settings',
-                                            onClick: () => {
-                                                setEditingDay(day);
-                                                setEditingWorkout(workout);
-                                                setView('edit');
-                                            },
-                                            className: 'p-2 bg-gray-700 rounded hover:bg-gray-600'
+                                            onClick: () => { setEditingDay(day); setEditingWorkout(workout); setView('edit'); },
+                                            className: 'p-2 rounded-xl transition-all active:scale-95',
+                                            style: { background: 'rgba(76, 93, 0, 0.15)', color: 'var(--on-primary-container)' }
                                         }, e(Settings, { size: 18 }))
-                                    ] : e('button', {
-                                        onClick: () => {
-                                            setEditingDay(day);
-                                            startNewWorkout();
-                                        },
-                                        className: 'flex items-center gap-2 px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 text-sm'
+                                    )
+                                );
+                            }
+
+                            // Today but no workout (rest day)
+                            if (isToday && !workout) {
+                                return e('div', {
+                                    key: day,
+                                    className: 'rounded-xl p-5 flex flex-col justify-between min-h-[160px] relative',
+                                    style: {
+                                        background: 'var(--primary-container)',
+                                        boxShadow: '0 0 30px rgba(209, 252, 0, 0.15)'
+                                    }
+                                },
+                                    e('div', {
+                                        className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
+                                        style: { background: 'rgba(76, 93, 0, 0.2)', color: 'var(--on-primary-container)' }
+                                    }, getDateForDay(day)),
+                                    e('div', null,
+                                        e('span', { className: 'text-xs uppercase tracking-widest font-bold', style: { color: 'var(--on-primary-container)' } }, `${day} \u2022 Today`),
+                                        e('h3', { className: 'font-medium text-lg mt-1 italic', style: { color: 'var(--on-primary-container)', opacity: 0.7 } }, 'Rest Day')
+                                    ),
+                                    e('div', { className: 'flex justify-end mt-4' },
+                                        e('button', {
+                                            onClick: () => { setEditingDay(day); startNewWorkout(); },
+                                            className: 'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95',
+                                            style: { background: 'var(--on-primary-container)', color: 'var(--primary-container)' }
+                                        }, e(Plus, { size: 18 }), 'Add')
+                                    )
+                                );
+                            }
+
+                            // Regular day with workout
+                            if (workout) {
+                                return e('div', {
+                                    key: day,
+                                    className: 'rounded-xl p-5 flex flex-col justify-between min-h-[160px] relative',
+                                    style: { background: 'var(--surface-container-highest)' }
+                                },
+                                    e('div', {
+                                        className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
+                                        style: { background: 'rgba(248, 249, 254, 0.06)', color: 'var(--on-surface-variant)' }
+                                    }, getDateForDay(day)),
+                                    e('div', null,
+                                        e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, day),
+                                        e('h3', { className: 'font-bold text-xl mt-1', style: { color: 'var(--on-surface)' } }, workout.name)
+                                    ),
+                                    e('div', { className: 'flex items-center gap-2 justify-end mt-4' },
+                                        e('button', {
+                                            key: 'start',
+                                            onClick: () => startWorkout(day),
+                                            className: 'px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95',
+                                            style: { background: 'var(--surface-container-low)', color: 'var(--primary-fixed-dim)' }
+                                        }, hasProgress ? 'Continue' : 'Start'),
+                                        e('button', {
+                                            key: 'settings',
+                                            onClick: () => { setEditingDay(day); setEditingWorkout(workout); setView('edit'); },
+                                            className: 'p-2 rounded-xl transition-all active:scale-95',
+                                            style: { background: 'rgba(69, 72, 76, 0.15)', color: 'var(--on-surface)' }
+                                        }, e(Settings, { size: 18 }))
+                                    )
+                                );
+                            }
+
+                            // Rest day (no workout)
+                            return e('div', {
+                                key: day,
+                                className: 'rounded-xl p-5 flex flex-col justify-between min-h-[160px] relative',
+                                style: { background: 'var(--surface-container-low)', border: '1px dashed rgba(69, 72, 76, 0.2)' }
+                            },
+                                e('div', {
+                                    className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
+                                    style: { background: 'rgba(248, 249, 254, 0.03)', color: 'var(--on-surface-variant)' }
+                                }, getDateForDay(day)),
+                                e('div', null,
+                                    e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, day),
+                                    e('h3', { className: 'font-medium text-lg mt-1 italic', style: { color: 'var(--on-surface-variant)', opacity: 0.6 } }, 'Rest Day')
+                                ),
+                                e('div', { className: 'flex justify-end mt-4' },
+                                    e('button', {
+                                        onClick: () => { setEditingDay(day); startNewWorkout(); },
+                                        className: 'flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all active:scale-95',
+                                        style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' }
                                     }, e(Plus, { size: 18 }), 'Add')
                                 )
                             );
                         })
                     )
-                )
+                ),
+                e(BottomNavBar, { activeTab, onTabChange: handleTabChange })
             );
         }
 

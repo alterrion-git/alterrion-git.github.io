@@ -1,11 +1,10 @@
 // Service Worker with Cache Versioning
-const CACHE_VERSION = 'v2.6.5'; // UPDATE THIS WITH EACH NEW VERSION!
+const CACHE_VERSION = 'v3.0.0'; // UPDATE THIS WITH EACH NEW VERSION!
 const CACHE_NAME = `workout-tracker-${CACHE_VERSION}`;
 
 const urlsToCache = [
   './',
   './index.html',
-  './workout-tracker.html',
   'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
   'https://cdn.tailwindcss.com'
@@ -42,8 +41,14 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - serve from cache, fall back to network
+// Fetch event - network first for API calls, cache first for assets
 self.addEventListener('fetch', (event) => {
+  // Don't cache Firebase requests or config file
+  if (event.request.url.includes('firebaseio.com') || event.request.url.includes('googleapis.com') || event.request.url.includes('firebasedatabase.app') || event.request.url.includes('config.js')) {
+    event.respondWith(fetch(event.request).catch(() => new Response('', { status: 503 })));
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request)
       .then((response) => {
