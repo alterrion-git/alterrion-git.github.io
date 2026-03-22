@@ -391,19 +391,30 @@
                 { id: 'stats', icon: 'bar_chart', label: 'Stats' },
             ];
 
+            // Detect narrow cover screen (flip phones typically < 320px wide)
+            const [isCover, setIsCover] = useState(window.innerWidth < 320);
+            useEffect(() => {
+                const check = () => setIsCover(window.innerWidth < 320);
+                window.addEventListener('resize', check);
+                return () => window.removeEventListener('resize', check);
+            }, []);
+
             return e('nav', {
-                className: 'fixed bottom-0 left-0 w-full z-50 flex items-end px-8 pt-3',
+                className: 'fixed bottom-0 left-0 z-50 flex items-end pt-3',
                 style: {
                     background: 'rgba(16, 20, 23, 0.85)',
                     backdropFilter: 'blur(20px)',
                     WebkitBackdropFilter: 'blur(20px)',
                     paddingBottom: 'max(env(safe-area-inset-bottom), 12px)',
-                    borderTop: '1px solid rgba(69, 72, 76, 0.1)'
+                    borderTop: '1px solid rgba(69, 72, 76, 0.1)',
+                    width: isCover ? '65%' : '100%',
+                    paddingLeft: isCover ? '8px' : '32px',
+                    paddingRight: isCover ? '8px' : '32px',
+                    borderRadius: isCover ? '0 16px 0 0' : '0'
                 }
             },
                 tabs.map(tab => {
                     const isActive = activeTab === tab.id;
-                    // Each tab gets equal width, content centered
                     return e('div', {
                         key: tab.id,
                         className: 'flex-1 flex justify-center',
@@ -578,7 +589,7 @@
                         onBlur: handleManualBlur,
                         onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
                         autoFocus: true,
-                        className: 'w-44 h-44 text-5xl font-black text-center rounded-2xl outline-none',
+                        className: 'w-48 h-48 text-5xl font-black text-center rounded-2xl outline-none',
                         style: { background: 'var(--surface-container-high)', border: '3px solid var(--primary-container)', color: 'var(--on-surface)', caretColor: 'var(--primary-container)' }
                     })
                 );
@@ -590,7 +601,7 @@
                     onClick: handleBubbleClick,
                     onTouchStart: handleTouchStart, onTouchEnd: handleTouchEnd,
                     onMouseDown: handleTouchStart, onMouseUp: handleTouchEnd,
-                    className: 'w-44 h-44 text-5xl font-black text-center rounded-2xl outline-none flex flex-col items-center justify-center select-none cursor-pointer relative overflow-hidden',
+                    className: 'w-48 h-48 text-5xl font-black text-center rounded-2xl outline-none flex flex-col items-center justify-center select-none cursor-pointer relative overflow-hidden',
                     style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' }
                 },
                     e('div', { className: 'absolute top-0 left-0 right-0 h-1/3 flex items-center justify-center', style: { paddingTop: '4px', fontSize: '20px', color: 'var(--primary-fixed-dim)', opacity: 0.6 } }, '\u25B2'),
@@ -1117,21 +1128,21 @@
             // ======================
             if (view === 'login') {
                 return e('div', {
-                    className: 'min-h-screen flex flex-col items-center justify-center px-6',
-                    style: { background: 'var(--void)', color: 'var(--on-surface)' }
+                    className: 'h-full flex flex-col items-center justify-center px-6',
+                    style: { background: 'var(--void)', color: 'var(--on-surface)', overflow: 'hidden' }
                 },
                     // Logo
-                    e('div', { className: 'mb-8 text-center' },
-                        e('span', { className: 'font-black italic text-5xl tracking-tighter', style: { color: 'var(--primary-container)' } }, 'CWA'),
-                        e('div', { className: 'text-sm uppercase tracking-widest mt-2', style: { color: 'var(--on-surface-variant)' } }, 'Workout Tracker')
+                    e('div', { className: 'mb-6 text-center' },
+                        e('span', { className: 'font-black italic text-4xl tracking-tighter', style: { color: 'var(--primary-container)' } }, 'CWA'),
+                        e('div', { className: 'text-xs uppercase tracking-widest mt-1', style: { color: 'var(--on-surface-variant)' } }, 'Workout Tracker')
                     ),
                     // Login card
                     e('div', {
-                        className: 'w-full max-w-sm rounded-2xl p-6',
+                        className: 'w-full max-w-sm rounded-2xl p-5',
                         style: { background: 'var(--surface-container-highest)' }
                     },
-                        e('div', { className: 'mb-5' },
-                            e('label', { className: 'block text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Username'),
+                        e('div', { className: 'mb-4' },
+                            e('label', { className: 'block text-xs uppercase tracking-widest mb-1.5', style: { color: 'var(--on-surface-variant)' } }, 'Username'),
                             e('input', {
                                 type: 'text',
                                 value: loginUsername,
@@ -1144,8 +1155,8 @@
                                 autoCorrect: 'off'
                             })
                         ),
-                        e('div', { className: 'mb-5' },
-                            e('label', { className: 'block text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Password'),
+                        e('div', { className: 'mb-4' },
+                            e('label', { className: 'block text-xs uppercase tracking-widest mb-1.5', style: { color: 'var(--on-surface-variant)' } }, 'Password'),
                             e('input', {
                                 type: 'password',
                                 value: loginPassword,
@@ -1156,7 +1167,7 @@
                                 placeholder: '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'
                             })
                         ),
-                        authError ? e('div', { className: 'text-sm mb-4 px-1', style: { color: 'var(--error)' } }, authError) : null,
+                        authError ? e('div', { className: 'text-sm mb-3 px-1', style: { color: 'var(--error)' } }, authError) : null,
                         e('div', { className: 'flex gap-3' },
                             e('button', {
                                 onClick: doLogin,
@@ -1171,9 +1182,9 @@
                                 style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', opacity: authLoading ? 0.5 : 1 }
                             }, 'Register')
                         ),
-                        !cloudEnabled() ? e('div', { className: 'mt-4 text-xs text-center', style: { color: 'var(--outline)' } },
+                        !cloudEnabled() ? e('div', { className: 'mt-3 text-xs text-center', style: { color: 'var(--outline)' } },
                             'Offline mode \u2022 Data stored locally'
-                        ) : e('div', { className: 'mt-4 text-xs text-center', style: { color: 'var(--primary-fixed-dim)' } },
+                        ) : e('div', { className: 'mt-3 text-xs text-center', style: { color: 'var(--primary-fixed-dim)' } },
                             'Cloud sync enabled'
                         )
                     )
@@ -1648,7 +1659,7 @@
                                 style: {
                                     background: 'var(--surface-container-high)',
                                     color: 'var(--on-surface-variant)',
-                                    width: '23rem',
+                                    width: '25.5rem',
                                     maxWidth: '100%',
                                     display: '-webkit-box',
                                     WebkitLineClamp: '2',
