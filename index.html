@@ -400,44 +400,47 @@
             }, []);
 
             return e('nav', {
-                className: 'fixed bottom-0 left-0 z-50 flex items-end pt-3',
+                className: 'fixed bottom-0 left-0 z-50 flex items-end',
                 style: {
                     background: 'rgba(16, 20, 23, 0.85)',
                     backdropFilter: 'blur(20px)',
                     WebkitBackdropFilter: 'blur(20px)',
-                    paddingBottom: 'max(env(safe-area-inset-bottom), 12px)',
+                    paddingBottom: isCover ? '6px' : 'max(env(safe-area-inset-bottom), 12px)',
+                    paddingTop: isCover ? '4px' : '12px',
                     borderTop: '1px solid rgba(69, 72, 76, 0.1)',
-                    width: isCover ? '65%' : '100%',
-                    paddingLeft: isCover ? '8px' : '32px',
-                    paddingRight: isCover ? '8px' : '32px',
-                    borderRadius: isCover ? '0 16px 0 0' : '0'
+                    width: isCover ? '42%' : '100%',
+                    paddingLeft: isCover ? '4px' : '32px',
+                    paddingRight: isCover ? '4px' : '32px',
+                    borderRadius: isCover ? '0 20px 0 0' : '0'
                 }
             },
                 tabs.map(tab => {
                     const isActive = activeTab === tab.id;
+                    const btnSize = isCover ? '36px' : '52px';
+                    const iconSize = isCover ? (isActive ? '20px' : '18px') : (isActive ? '28px' : '24px');
                     return e('div', {
                         key: tab.id,
                         className: 'flex-1 flex justify-center',
-                        style: { height: '56px', alignItems: 'flex-start' }
+                        style: { height: isCover ? '40px' : '56px', alignItems: 'flex-start' }
                     },
                         e('button', {
                             onClick: () => onTabChange(tab.id),
                             className: 'flex items-center justify-center rounded-full transition-all duration-300 active:scale-90',
                             style: isActive ? {
-                                width: '52px',
-                                height: '52px',
+                                width: btnSize,
+                                height: btnSize,
                                 background: 'linear-gradient(45deg, #d1fc00, #c4ec00)',
                                 color: 'var(--void)',
                                 boxShadow: '0 0 20px rgba(209, 252, 0, 0.3)',
-                                transform: 'translateY(-12px)'
+                                transform: isCover ? 'translateY(-6px)' : 'translateY(-12px)'
                             } : {
-                                width: '52px',
-                                height: '52px',
+                                width: btnSize,
+                                height: btnSize,
                                 background: 'transparent',
                                 color: 'var(--outline)',
                                 transform: 'translateY(0)'
                             }
-                        }, e(MIcon, { icon: tab.icon, fill: isActive, style: { fontSize: isActive ? '28px' : '24px' } }))
+                        }, e(MIcon, { icon: tab.icon, fill: isActive, style: { fontSize: iconSize } }))
                     );
                 })
             );
