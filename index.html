@@ -10,7 +10,6 @@
     <meta name="theme-color" content="#0b0e11">
     <meta name="screen-orientation" content="portrait">
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icon-192.png">
     <title>CWA - Workout Tracker</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
@@ -642,7 +641,8 @@
             const [showProfile, setShowProfile] = useState(false);
             const [loginUsername, setLoginUsername] = useState('');
             const [loginPassword, setLoginPassword] = useState('');
-            const [pendingMigration, setPendingMigration] = useState(null); // old workout data to import
+            const [pendingMigration, setPendingMigration] = useState(null);
+            const [expandedHistoryIdx, setExpandedHistoryIdx] = useState(null); // old workout data to import
 
             // Check for old app data in localStorage
             const getOldAppData = () => {
@@ -842,18 +842,25 @@
                 }
             }, [workouts, workoutHistory]);
 
-            const saveToHistory = (workout, elapsedTime) => {
+            const saveToHistory = (workout, elapsedTime, totalScore, maxScore) => {
                 const entry = {
                     date: Date.now(),
                     day: workout.day,
                     name: workout.name,
                     totalTime: elapsedTime,
+                    score: totalScore || 0,
+                    maxScore: maxScore || 0,
                     exercises: workout.exercises.map(ex => ({
                         name: ex.name,
                         sets: ex.sets.map(s => ({ reps: s.reps, weight: s.weight }))
                     }))
                 };
                 setWorkoutHistory(prev => [...prev, entry]);
+            };
+
+            const deleteFromHistory = (idx) => {
+                setWorkoutHistory(prev => prev.filter((_, i) => i !== idx));
+                setExpandedHistoryIdx(null);
             };
 
             const getExerciseHistory = (exerciseName) => {
@@ -1031,7 +1038,8 @@
                 } else {
                     updatedWorkouts[liveWorkout.day].progress = null;
                     setWorkouts(updatedWorkouts);
-                    saveToHistory(liveWorkout, Math.floor((Date.now() - workoutStartTime) / 1000));
+                    const { totalScore, maxScore } = calculateWorkoutSummary();
+                    saveToHistory(liveWorkout, Math.floor((Date.now() - workoutStartTime) / 1000), totalScore, maxScore);
                     setView('complete');
                     return;
                 }
@@ -1492,8 +1500,8 @@
                 const recentWorkouts = workoutHistory.filter(w => w.date >= fourWeeksAgo);
                 const weeklyAvg = recentWorkouts.length > 0 ? (recentWorkouts.length / 4).toFixed(1) : '0';
 
-                // Per-exercise stats (all exercises that appear in history)
-                const exerciseNames = [...uniqueExercises];
+                // Last 10 workouts (newest first)
+                const last10 = workoutHistory.slice().reverse().slice(0, 10);
 
                 const statCard = (icon, value, label) => e('div', {
                     className: 'rounded-xl p-4 flex flex-col items-center',
@@ -1545,25 +1553,86 @@
                                     e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, bestExName)
                                 )
                             ) : null,
-                            // Exercise progression
-                            exerciseNames.length > 0 ? e('div', null,
-                                e('div', { className: 'text-xs uppercase tracking-widest mb-3 px-1', style: { color: 'var(--on-surface-variant)' } }, 'Exercise Progression'),
+                            // Workout History
+                            last10.length > 0 ? e('div', null,
+                                e('div', { className: 'text-xs uppercase tracking-widest mb-3 px-1', style: { color: 'var(--on-surface-variant)' } }, 'Recent Workouts'),
                                 e('div', { className: 'space-y-2' },
-                                    exerciseNames.map(name => {
-                                        const hist = getExerciseHistory(name);
-                                        const lastMax = hist.length > 0 ? hist[hist.length - 1].maxWeight : 0;
-                                        return e('div', {
-                                            key: name,
-                                            className: 'rounded-xl p-4 flex items-center gap-3',
-                                            style: { background: 'var(--surface-container-high)' }
-                                        },
-                                            e('div', { className: 'flex-1 min-w-0' },
-                                                e('div', { className: 'font-bold text-base truncate' }, name),
-                                                e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } },
-                                                    lastMax > 0 ? `Last: ${lastMax} kg` : 'No data'
-                                                )
+                                    last10.map((w, dispIdx) => {
+                                        const realIdx = workoutHistory.length - 1 - dispIdx;
+                                        const isExpanded = expandedHistoryIdx === realIdx;
+                                        const wDate = new Date(w.date);
+                                        const dateStr = wDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+                                        const totalWt = w.exercises.reduce((s, ex) => s + ex.sets.reduce((ss, set) => ss + set.reps * set.weight, 0), 0);
+                                        const rating = w.totalTime >= 2400 && w.totalTime <= 5400 ? '\u2705' : (w.totalTime < 2400 ? '\u26A0\uFE0F' : '\u26A0\uFE0F');
+                                        return e('div', { key: realIdx },
+                                            // Main row (clickable)
+                                            e('div', {
+                                                className: 'rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-all active:scale-[0.98]',
+                                                style: { background: isExpanded ? 'var(--surface-container-highest)' : 'var(--surface-container-high)' },
+                                                onClick: () => setExpandedHistoryIdx(isExpanded ? null : realIdx)
+                                            },
+                                                // Date badge
+                                                e('div', {
+                                                    className: 'w-12 text-center flex-shrink-0',
+                                                },
+                                                    e('div', { className: 'text-sm font-black leading-tight', style: { color: 'var(--primary-fixed-dim)' } }, dateStr.split(' ')[0]),
+                                                    e('div', { className: 'text-xs uppercase', style: { color: 'var(--on-surface-variant)' } }, dateStr.split(' ')[1])
+                                                ),
+                                                // Name + day
+                                                e('div', { className: 'flex-1 min-w-0' },
+                                                    e('div', { className: 'font-bold text-sm truncate' }, w.name),
+                                                    e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, w.day)
+                                                ),
+                                                // Duration
+                                                e('div', { className: 'text-sm font-bold flex-shrink-0', style: { color: 'var(--on-surface-variant)' } }, formatTime(w.totalTime)),
+                                                // Score badge
+                                                w.maxScore > 0 ? (() => {
+                                                    const ratio = w.score / w.maxScore;
+                                                    const level = Math.max(0, Math.min(4, Math.round(ratio * 5) - 1));
+                                                    const colors = ['#45484c', '#737679', '#a9abaf', '#c4ec00', '#d1fc00'];
+                                                    const bg = level >= 0 ? colors[Math.max(0, level)] : colors[0];
+                                                    const fg = level >= 3 ? 'var(--void)' : 'var(--on-surface)';
+                                                    return e('div', {
+                                                        className: 'text-xs font-black px-1.5 py-0.5 rounded-lg flex-shrink-0',
+                                                        style: { background: bg, color: fg, boxShadow: level >= 3 ? `0 0 8px ${bg}40` : 'none' }
+                                                    }, `${w.score}/${w.maxScore}`);
+                                                })() : null,
+                                                // Expand arrow
+                                                e(MIcon, { icon: isExpanded ? 'expand_less' : 'expand_more', style: { fontSize: '20px', color: 'var(--outline)' } })
                                             ),
-                                            e(Sparkline, { data: hist, width: 110, height: 36 })
+                                            // Expanded detail
+                                            isExpanded ? e('div', {
+                                                className: 'rounded-b-xl px-4 py-3 -mt-1',
+                                                style: { background: 'var(--surface-container-highest)' }
+                                            },
+                                                // Total weight
+                                                e('div', { className: 'flex justify-between mb-3' },
+                                                    e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Total Weight'),
+                                                    e('span', { className: 'text-sm font-bold', style: { color: 'var(--primary-fixed-dim)' } }, `${totalWt.toFixed(0)} kg`)
+                                                ),
+                                                // Exercise list
+                                                e('div', { className: 'space-y-1.5 mb-3' },
+                                                    w.exercises.map((ex, ei) => {
+                                                        const exWt = ex.sets.reduce((s, set) => s + set.reps * set.weight, 0);
+                                                        const topSet = ex.sets.reduce((best, set) => set.weight > best.weight ? set : best, { reps: 0, weight: 0 });
+                                                        return e('div', {
+                                                            key: ei,
+                                                            className: 'flex items-center justify-between px-2 py-1.5 rounded-lg',
+                                                            style: { background: 'var(--surface-container-low)' }
+                                                        },
+                                                            e('span', { className: 'text-sm truncate flex-1' }, ex.name),
+                                                            e('span', { className: 'text-xs flex-shrink-0 ml-2', style: { color: 'var(--on-surface-variant)' } },
+                                                                `${ex.sets.length}×${topSet.reps}@${topSet.weight}kg`)
+                                                        );
+                                                    })
+                                                ),
+                                                // Delete button
+                                                e('button', {
+                                                    onClick: (ev) => { ev.stopPropagation(); deleteFromHistory(realIdx); },
+                                                    className: 'w-full py-2 rounded-lg text-sm font-bold transition-all active:scale-95',
+                                                    style: { background: 'var(--surface-container-low)', color: 'var(--error)' }
+                                                }, 'Delete from History')
+                                            ) : null
                                         );
                                     })
                                 )
