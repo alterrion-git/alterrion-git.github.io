@@ -199,7 +199,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.0.0';
+        const APP_VERSION = '3.0.1';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
