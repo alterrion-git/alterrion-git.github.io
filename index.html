@@ -310,6 +310,14 @@
             e('polyline', { points: '20 6 9 17 4 12' })
         );
 
+        const ChevronUp = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+            e('polyline', { points: '18 15 12 9 6 15' })
+        );
+
+        const ChevronDown = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+            e('polyline', { points: '6 9 12 15 18 9' })
+        );
+
         // Material icon helper
         const MIcon = ({ icon, fill = false, className = '', style = {} }) => e('span', {
             className: `material-symbols-outlined ${className}`,
@@ -964,6 +972,14 @@
                 }
             };
 
+            const moveExercise = (fromIndex, toIndex) => {
+                if (toIndex < 0 || toIndex >= editingWorkout.exercises.length) return;
+                const newExercises = [...editingWorkout.exercises];
+                const [moved] = newExercises.splice(fromIndex, 1);
+                newExercises.splice(toIndex, 0, moved);
+                setEditingWorkout({ ...editingWorkout, exercises: newExercises });
+            };
+
             const saveWorkout = () => {
                 if (editingWorkout.name && editingWorkout.exercises.every(ex => ex.name)) {
                     const newWorkouts = { ...workouts };
@@ -1362,15 +1378,31 @@
                                             type: 'text', value: exercise.name,
                                             onChange: (ev) => updateExerciseName(exIdx, ev.target.value),
                                             onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
-                                            className: 'flex-1 max-w-[60%] p-2 rounded-lg outline-none font-bold',
+                                            className: 'flex-1 min-w-0 p-2 rounded-lg outline-none font-bold',
                                             style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
                                             placeholder: 'Exercise name'
                                         }),
-                                        e('button', {
-                                            onClick: () => removeExercise(exIdx),
-                                            className: 'ml-2 px-3 py-2 rounded-lg text-sm font-bold transition-opacity active:opacity-80',
-                                            style: { background: 'var(--error-container)', color: 'var(--on-error-container)' }
-                                        }, 'Remove')
+                                        e('div', { className: 'flex items-center gap-1 flex-shrink-0' },
+                                            e('button', {
+                                                onClick: () => moveExercise(exIdx, exIdx - 1),
+                                                disabled: exIdx === 0,
+                                                'aria-label': 'Move exercise up',
+                                                className: 'p-2 rounded-lg transition-opacity active:opacity-60',
+                                                style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)', opacity: exIdx === 0 ? 0.3 : 1 }
+                                            }, e(ChevronUp, { size: 18 })),
+                                            e('button', {
+                                                onClick: () => moveExercise(exIdx, exIdx + 1),
+                                                disabled: exIdx === editingWorkout.exercises.length - 1,
+                                                'aria-label': 'Move exercise down',
+                                                className: 'p-2 rounded-lg transition-opacity active:opacity-60',
+                                                style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)', opacity: exIdx === editingWorkout.exercises.length - 1 ? 0.3 : 1 }
+                                            }, e(ChevronDown, { size: 18 })),
+                                            e('button', {
+                                                onClick: () => removeExercise(exIdx),
+                                                className: 'ml-1 px-3 py-2 rounded-lg text-sm font-bold transition-opacity active:opacity-80',
+                                                style: { background: 'var(--error-container)', color: 'var(--on-error-container)' }
+                                            }, 'Remove')
+                                        )
                                     ),
                                     e('div', { className: 'mb-4' },
                                         e('input', {
@@ -1710,25 +1742,40 @@
                         // Cover screen: arrows inline with counters
                         // Full screen: counters, notes, then arrows below
                         isCoverScreen ?
-                            // COVER LAYOUT: arrow + counters + arrow in one row
-                            e('div', { className: 'flex items-center justify-center gap-2 mt-2' },
-                                e('button', {
-                                    onClick: prevSet,
-                                    disabled: !canGoPrev(),
-                                    className: 'p-2 rounded-2xl transition-all active:scale-90 flex-shrink-0',
-                                    style: {
-                                        background: canGoPrev() ? 'var(--surface-container-highest)' : 'var(--surface-container-low)',
-                                        color: canGoPrev() ? 'var(--on-surface)' : 'var(--outline-variant)',
-                                        opacity: canGoPrev() ? 1 : 0.3
-                                    }
-                                }, e(ArrowLeft, { size: 22 })),
-                                e(CustomNumberInput, { value: currentSet.reps, onChange: (val) => updateLiveSet('reps', val), label: 'Reps', step: 1 }),
-                                e(CustomNumberInput, { value: currentSet.weight, onChange: (val) => updateLiveSet('weight', val), label: 'Weight (kg)', step: 0.5 }),
-                                e('button', {
-                                    onClick: nextSet,
-                                    className: 'p-2 rounded-2xl transition-all active:scale-90 flex-shrink-0',
-                                    style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--void)' }
-                                }, e(ArrowRight, { size: 22 }))
+                            // COVER LAYOUT: arrow + counters + arrow in one row, notes below
+                            e('div', null,
+                                e('div', { className: 'flex items-center justify-center gap-2 mt-2' },
+                                    e('button', {
+                                        onClick: prevSet,
+                                        disabled: !canGoPrev(),
+                                        className: 'p-2 rounded-2xl transition-all active:scale-90 flex-shrink-0',
+                                        style: {
+                                            background: canGoPrev() ? 'var(--surface-container-highest)' : 'var(--surface-container-low)',
+                                            color: canGoPrev() ? 'var(--on-surface)' : 'var(--outline-variant)',
+                                            opacity: canGoPrev() ? 1 : 0.3
+                                        }
+                                    }, e(ArrowLeft, { size: 22 })),
+                                    e(CustomNumberInput, { value: currentSet.reps, onChange: (val) => updateLiveSet('reps', val), label: 'Reps', step: 1 }),
+                                    e(CustomNumberInput, { value: currentSet.weight, onChange: (val) => updateLiveSet('weight', val), label: 'Weight (kg)', step: 0.5 }),
+                                    e('button', {
+                                        onClick: nextSet,
+                                        className: 'p-2 rounded-2xl transition-all active:scale-90 flex-shrink-0',
+                                        style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--void)' }
+                                    }, e(ArrowRight, { size: 22 }))
+                                ),
+                                // Notes bar
+                                currentExercise.notes ? e('div', { className: 'flex justify-center mt-2 px-2' },
+                                    e('div', {
+                                        className: 'px-4 py-2 rounded-xl text-xs leading-snug text-center',
+                                        style: {
+                                            background: 'var(--surface-container-high)',
+                                            color: 'var(--on-surface-variant)',
+                                            maxWidth: '100%',
+                                            whiteSpace: 'pre-wrap',
+                                            overflowWrap: 'anywhere'
+                                        }
+                                    }, currentExercise.notes)
+                                ) : null
                             )
                         :
                             // FULL LAYOUT: counters, notes, then arrows
@@ -1747,10 +1794,8 @@
                                             color: 'var(--on-surface-variant)',
                                             width: '22rem',
                                             maxWidth: '100%',
-                                            display: '-webkit-box',
-                                            WebkitLineClamp: '2',
-                                            WebkitBoxOrient: 'vertical',
-                                            overflow: 'hidden'
+                                            whiteSpace: 'pre-wrap',
+                                            overflowWrap: 'anywhere'
                                         }
                                     }, currentExercise.notes)
                                 ) : null,
