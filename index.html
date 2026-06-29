@@ -199,7 +199,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.3.0';
+        const APP_VERSION = '3.4.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -280,6 +280,29 @@
         function weekKey(ts) { const { year, week } = isoWeekInfo(ts); return `${year}-W${String(week).padStart(2, '0')}`; }
         function monthKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
         function countDistinct(arr, keyFn) { return new Set(arr.map(keyFn)).size; }
+
+        // Auto-end window: a session older than this is considered abandoned. Used to (a)
+        // strip stale `progress` whenever workouts load (so finished/forgotten workouts can
+        // never "come back" days later) and (b) auto-discard a live session left running.
+        const AUTO_END_MS = 4 * 60 * 60 * 1000; // 4 hours
+        function sanitizeWorkouts(w) {
+            if (!w || typeof w !== 'object') return w;
+            let changed = false;
+            const out = {};
+            for (const k of Object.keys(w)) {
+                const day = w[k];
+                if (day && day.progress) {
+                    const started = day.progress.startTime || day.progress.setStartTime || 0;
+                    if (!started || (Date.now() - started) > AUTO_END_MS) {
+                        out[k] = { ...day, progress: null };
+                        changed = true;
+                        continue;
+                    }
+                }
+                out[k] = day;
+            }
+            return changed ? out : w;
+        }
 
         // --- On-device OpenAI API key (never synced to the world-readable DB) ---
         const OPENAI_KEY_LS = 'cwa-openai-key';
@@ -948,7 +971,7 @@
                     if (!userData) { setAuthError('User not found. Register first.'); setAuthLoading(false); return; }
                     if (userData.passwordHash !== pHash) { setAuthError('Wrong password'); setAuthLoading(false); return; }
                     setCurrentUser({ username: uname, createdAt: userData.createdAt || Date.now() });
-                    const loadedWorkouts = userData.workouts || {};
+                    const loadedWorkouts = sanitizeWorkouts(userData.workouts || {});
                     const loadedHistory = userData.history || [];
                     setWorkouts(loadedWorkouts);
                     setWorkoutHistory(loadedHistory);
@@ -967,7 +990,7 @@
                     setCurrentUser({ username: uname, createdAt: parsed.createdAt || Date.now() });
                     const w = localStorage.getItem('cwa-workouts-' + uname);
                     const h = localStorage.getItem('cwa-history-' + uname);
-                    if (w) setWorkouts(JSON.parse(w));
+                    if (w) setWorkouts(sanitizeWorkouts(JSON.parse(w)));
                     else {
                         const oldData = getOldAppData();
                         if (oldData) { setPendingMigration(oldData); setView('migrate'); setAuthLoading(false); localStorage.setItem('cwa-user', JSON.stringify({ username: uname, passwordHash: pHash })); return; }
@@ -1048,17 +1071,34 @@
                 localStorage.removeItem('cwa-user');
             };
 
-            const syncToCloud = async (w, h) => {
+            // Coalescing, serialized cloud writer. Local save is immediate; cloud writes are
+            // queued so they run strictly in order and always end on the LATEST state. This
+            // kills the last-write-wins race where a slow earlier write (with an active
+            // `progress`) could land after the completion write and resurrect a finished
+            // workout hours/days later.
+            const syncRef = useRef({ pending: null, running: false });
+            const syncToCloud = (w, h) => {
                 if (!currentUser) return;
                 const uname = currentUser.username;
-                // Always save locally
-                localStorage.setItem('cwa-workouts-' + uname, JSON.stringify(w));
-                localStorage.setItem('cwa-history-' + uname, JSON.stringify(h));
-                // Save to cloud if enabled
-                if (cloudEnabled()) {
-                    await cloudSet('users/' + uname + '/workouts', w);
-                    await cloudSet('users/' + uname + '/history', h);
-                }
+                try {
+                    localStorage.setItem('cwa-workouts-' + uname, JSON.stringify(w));
+                    localStorage.setItem('cwa-history-' + uname, JSON.stringify(h));
+                } catch (err) {}
+                if (!cloudEnabled()) return;
+                syncRef.current.pending = { uname, w, h };
+                if (syncRef.current.running) return;
+                syncRef.current.running = true;
+                (async () => {
+                    while (syncRef.current.pending) {
+                        const job = syncRef.current.pending;
+                        syncRef.current.pending = null;
+                        try {
+                            await cloudSet('users/' + job.uname + '/workouts', job.w);
+                            await cloudSet('users/' + job.uname + '/history', job.h);
+                        } catch (err) {}
+                    }
+                    syncRef.current.running = false;
+                })();
             };
 
             // Persist a single progress field (profile / metrics / recaps) locally + cloud.
@@ -1121,7 +1161,7 @@
                                 const userData = await cloudGet('users/' + username);
                                 if (userData && userData.passwordHash === passwordHash) {
                                     setCurrentUser({ username, createdAt: userData.createdAt || Date.now() });
-                                    const lw = userData.workouts || {};
+                                    const lw = sanitizeWorkouts(userData.workouts || {});
                                     setWorkouts(lw);
                                     setWorkoutHistory(userData.history || []);
                                     hydrateProgress(username, userData);
@@ -1139,7 +1179,7 @@
                                     setCurrentUser({ username, createdAt: parsed.createdAt || Date.now() });
                                     const w = localStorage.getItem('cwa-workouts-' + username);
                                     const h = localStorage.getItem('cwa-history-' + username);
-                                    const lw = w ? JSON.parse(w) : {};
+                                    const lw = sanitizeWorkouts(w ? JSON.parse(w) : {});
                                     if (w) setWorkouts(lw);
                                     if (h) setWorkoutHistory(JSON.parse(h));
                                     hydrateProgress(username, null);
@@ -1201,12 +1241,14 @@
                         sets: ex.sets.map(s => ({ reps: s.reps, weight: s.weight }))
                     }))
                 };
-                // De-dup same-day sessions: if this workout was already logged earlier today
-                // (e.g. it got started multiple times after tweaking notes/settings), replace
-                // that entry instead of appending a duplicate that would pollute progress data.
+                // One unified session per calendar day per day-slot. If today's workout was
+                // already logged (started/finished more than once after tweaking settings,
+                // re-running it, etc.), REPLACE that entry rather than appending a duplicate —
+                // duplicates pollute the trend data the AI recaps rely on. Keyed on calendar
+                // date + day-slot (not name) so renaming mid-day still collapses to one.
                 setWorkoutHistory(prev => {
-                    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
-                    const dupIdx = prev.findIndex(h => h.day === entry.day && h.name === entry.name && h.date >= startOfToday.getTime());
+                    const ek = dayKey(entry.date);
+                    const dupIdx = prev.findIndex(h => h.day === entry.day && dayKey(h.date) === ek);
                     if (dupIdx !== -1) {
                         const copy = prev.slice();
                         copy[dupIdx] = entry;
@@ -1246,7 +1288,18 @@
             useEffect(() => {
                 let interval;
                 if (workoutStartTime && view === 'live') {
-                    interval = setInterval(() => { setTotalElapsedTime(Math.floor((Date.now() - workoutStartTime) / 1000)); }, 1000);
+                    interval = setInterval(() => {
+                        const elapsedMs = Date.now() - workoutStartTime;
+                        // Safety net: a session left running past the auto-end window is treated
+                        // as abandoned and discarded (not saved), so it can't linger or log a
+                        // bogus multi-hour workout into the recap data.
+                        if (elapsedMs > AUTO_END_MS) {
+                            cancelWorkout();
+                            setToast('Workout auto-ended after 4h');
+                            return;
+                        }
+                        setTotalElapsedTime(Math.floor(elapsedMs / 1000));
+                    }, 1000);
                 }
                 return () => clearInterval(interval);
             }, [workoutStartTime, view]);
@@ -1362,9 +1415,10 @@
                     const marker = JSON.parse(raw);
                     if (!marker || !marker.day) return false;
                     if (marker.user && username && marker.user !== username) return false;
-                    // Only auto-resume recent sessions (within 12h) so we never yank the user
-                    // into a workout they abandoned days ago.
-                    if (Date.now() - (marker.ts || 0) > 12 * 60 * 60 * 1000) return false;
+                    // Only auto-resume sessions within the auto-end window so we never yank the
+                    // user into a workout they abandoned (matches sanitizeWorkouts, which has
+                    // already stripped progress older than this from loadedWorkouts).
+                    if (Date.now() - (marker.ts || 0) > AUTO_END_MS) return false;
                     const w = loadedWorkouts[marker.day];
                     if (!w || !w.progress) return false;
                     const p = w.progress;
@@ -3089,7 +3143,7 @@
             },
                 profileModal,
                 e(TopAppBar, {
-                    title: 'CALENDAR VIEW',
+                    title: 'PLAN',
                     rightAction: e('button', {
                         onClick: () => setShowProfile(true),
                         className: 'w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90',
