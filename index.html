@@ -242,7 +242,7 @@
         //   3. Realtime Database > Rules > paste the rules shown in Settings (in-app),
         //      which restrict each user to users/<their-uid>.
         // While this is empty, the app keeps the original username login unchanged.
-        const FIREBASE_API_KEY = ''; // e.g. 'AIzaSy...'
+        const FIREBASE_API_KEY = 'AIzaSyDf4kFXmHgparBHdDhaBUIJT5otJTHd-Zw'; // Firebase Web API key (public by design; security comes from DB rules)
         const fbAuthEnabled = () => FIREBASE_API_KEY.length > 0 && FIREBASE_DB_URL.length > 0;
 
         let __fbToken = null, __fbTokenExp = 0; // current idToken + expiry (ms epoch)
