@@ -199,7 +199,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.0.1';
+        const APP_VERSION = '3.1.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -212,34 +212,16 @@
             setTimeout(() => { window.scrollTo(0, 1); }, 100);
         });
 
-        let lastWidth = window.innerWidth;
-        let lastHeight = window.innerHeight;
-
-        const handleScreenChange = () => {
-            const currentWidth = window.innerWidth;
-            const currentHeight = window.innerHeight;
-            const widthDiff = Math.abs(currentWidth - lastWidth);
-            // Only reload on major WIDTH changes (fold/unfold changes width significantly)
-            // Height changes from lock/unlock, keyboard, URL bar should NOT trigger reload
-            if (widthDiff > 200) {
-                lastWidth = currentWidth;
-                lastHeight = currentHeight;
-                window.location.reload();
-                return;
-            }
-            lastWidth = currentWidth;
-            lastHeight = currentHeight;
-        };
-
-        window.addEventListener('orientationchange', () => { setTimeout(handleScreenChange, 100); });
-        let resizeTimeout;
-        window.addEventListener('resize', () => {
-            clearTimeout(resizeTimeout);
-            resizeTimeout = setTimeout(handleScreenChange, 150);
-        });
-
+        // NOTE: We deliberately do NOT reload the page on resize/orientation/fold changes.
+        // Reloading was destructive — it dropped the user out of an in-progress workout and
+        // felt like "the app closed". The React layout is now fully reactive to viewport
+        // changes (see useViewport), so switching between cover screen and main screen,
+        // folding/unfolding, rotating, or keyboard show/hide all re-layout in place.
+        // We just re-broadcast a resize so any throttled listeners settle after the change.
+        const nudgeResize = () => { setTimeout(() => window.dispatchEvent(new Event('resize')), 120); };
+        window.addEventListener('orientationchange', nudgeResize);
         if (window.screen && window.screen.orientation) {
-            window.screen.orientation.addEventListener('change', () => { setTimeout(handleScreenChange, 100); });
+            window.screen.orientation.addEventListener('change', nudgeResize);
         }
 
         // ============================================
@@ -284,6 +266,74 @@
         const e = React.createElement;
 
         const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+        // --- Shared viewport hook (single source of truth for screen size) ---
+        // Fixes the recurring aspect-ratio bugs: instead of every component sniffing
+        // window dimensions independently (and disagreeing), they all read from here,
+        // and everything re-renders together on any viewport change.
+        function getViewport() {
+            const w = window.innerWidth || document.documentElement.clientWidth || 360;
+            const h = window.innerHeight || document.documentElement.clientHeight || 640;
+            return {
+                w, h,
+                // Cover screen = short relative to width (flip phone cover, or landscape).
+                isCover: h < w * 1.2,
+                // Genuinely small in either dimension — used to scale controls down.
+                isSmall: w < 360 || h < 520,
+            };
+        }
+        function useViewport() {
+            const [vp, setVp] = useState(getViewport);
+            useEffect(() => {
+                let raf = null;
+                const update = () => {
+                    if (raf) cancelAnimationFrame(raf);
+                    raf = requestAnimationFrame(() => setVp(getViewport()));
+                };
+                window.addEventListener('resize', update);
+                window.addEventListener('orientationchange', update);
+                if (window.visualViewport) window.visualViewport.addEventListener('resize', update);
+                return () => {
+                    window.removeEventListener('resize', update);
+                    window.removeEventListener('orientationchange', update);
+                    if (window.visualViewport) window.visualViewport.removeEventListener('resize', update);
+                    if (raf) cancelAnimationFrame(raf);
+                };
+            }, []);
+            return vp;
+        }
+
+        // --- Reusable confirmation dialog (used before destructive actions) ---
+        function ConfirmDialog({ title, message, confirmLabel = 'Delete', cancelLabel = 'Cancel', danger = true, onConfirm, onCancel }) {
+            return e('div', {
+                className: 'fixed inset-0 z-[200] flex items-center justify-center px-6',
+                onClick: onCancel
+            },
+                e('div', { className: 'absolute inset-0', style: { background: 'rgba(0,0,0,0.7)' } }),
+                e('div', {
+                    className: 'relative z-10 w-full max-w-xs rounded-2xl p-5',
+                    style: { background: 'var(--surface-container-highest)' },
+                    onClick: (ev) => ev.stopPropagation()
+                },
+                    e('div', { className: 'text-lg font-black mb-1', style: { color: 'var(--on-surface)' } }, title || 'Are you sure?'),
+                    message ? e('div', { className: 'text-sm mb-4', style: { color: 'var(--on-surface-variant)' } }, message) : e('div', { className: 'mb-4' }),
+                    e('div', { className: 'flex gap-3' },
+                        e('button', {
+                            onClick: onCancel,
+                            className: 'flex-1 py-3 rounded-xl font-bold text-base transition-all active:scale-95',
+                            style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)' }
+                        }, cancelLabel),
+                        e('button', {
+                            onClick: onConfirm,
+                            className: 'flex-1 py-3 rounded-xl font-black text-base transition-all active:scale-95',
+                            style: danger
+                                ? { background: 'var(--error-container)', color: 'var(--on-error-container)' }
+                                : { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' }
+                        }, confirmLabel)
+                    )
+                )
+            );
+        }
 
         // --- Icon Components (inline SVG) ---
         const Plus = ({ size = 24 }) => e('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
@@ -398,12 +448,7 @@
             ];
 
             // Detect narrow cover screen (flip phones: nearly square or landscape aspect)
-            const [isCover, setIsCover] = useState(window.innerHeight < window.innerWidth * 1.2);
-            useEffect(() => {
-                const check = () => setIsCover(window.innerHeight < window.innerWidth * 1.2);
-                window.addEventListener('resize', check);
-                return () => window.removeEventListener('resize', check);
-            }, []);
+            const { isCover } = useViewport();
 
             return e('nav', {
                 className: 'fixed bottom-0 left-0 z-50 flex items-end',
@@ -566,20 +611,31 @@
         }
 
         // --- Custom Number Input (rounded box design) ---
-        function CustomNumberInput({ value, onChange, label, step = 1 }) {
+        // Format a number for display: drop trailing .0 but keep real decimals (partials).
+        function fmtNum(v) {
+            if (typeof v !== 'number' || isNaN(v)) return '0';
+            return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
+        }
+
+        function CustomNumberInput({ value, onChange, label, step = 1, size = 168 }) {
             const [isLongPress, setIsLongPress] = useState(false);
             const [tempValue, setTempValue] = useState('');
             const longPressTimer = useRef(null);
 
-            const handleTouchStart = () => { longPressTimer.current = setTimeout(() => { setIsLongPress(true); setTempValue(value.toString()); }, 500); };
+            // Scale all type sizes off the box size so it stays readable when shrunk.
+            const valuePx = Math.round(size * 0.34);
+            const arrowPx = Math.max(14, Math.round(size * 0.12));
+            const sizePx = Math.round(size) + 'px';
+
+            const handleTouchStart = () => { longPressTimer.current = setTimeout(() => { setIsLongPress(true); setTempValue(fmtNum(value)); }, 500); };
             const handleTouchEnd = () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); };
 
             const handleBubbleClick = (ev) => {
                 ev.stopPropagation();
                 const rect = ev.currentTarget.getBoundingClientRect();
                 const y = ev.clientY - rect.top;
-                if (y < rect.height / 2) onChange(value + step);
-                else onChange(Math.max(0, value - step));
+                if (y < rect.height / 2) onChange(Math.round((value + step) * 100) / 100);
+                else onChange(Math.max(0, Math.round((value - step) * 100) / 100));
             };
 
             const handleManualBlur = () => {
@@ -591,31 +647,31 @@
 
             if (isLongPress) {
                 return e('div', { className: 'text-center' },
-                    e('div', { className: 'text-sm font-bold uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, label),
+                    e('div', { className: 'font-bold uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)', fontSize: '0.8rem' } }, label),
                     e('input', {
-                        type: 'number', step, value: tempValue,
+                        type: 'number', step, value: tempValue, inputMode: 'decimal',
                         onChange: (ev) => setTempValue(ev.target.value),
                         onBlur: handleManualBlur,
                         onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
                         autoFocus: true,
-                        className: 'text-5xl font-black text-center rounded-2xl outline-none',
-                        style: { width: '10.5rem', height: '10.5rem', background: 'var(--surface-container-high)', border: '3px solid var(--primary-container)', color: 'var(--on-surface)', caretColor: 'var(--primary-container)' }
+                        className: 'font-black text-center rounded-2xl outline-none',
+                        style: { width: sizePx, height: sizePx, fontSize: valuePx + 'px', background: 'var(--surface-container-high)', border: '3px solid var(--primary-container)', color: 'var(--on-surface)', caretColor: 'var(--primary-container)' }
                     })
                 );
             }
 
             return e('div', { className: 'text-center' },
-                e('div', { className: 'text-sm font-bold uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, label),
+                e('div', { className: 'font-bold uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)', fontSize: '0.8rem' } }, label),
                 e('div', {
                     onClick: handleBubbleClick,
                     onTouchStart: handleTouchStart, onTouchEnd: handleTouchEnd,
                     onMouseDown: handleTouchStart, onMouseUp: handleTouchEnd,
-                    className: 'text-5xl font-black text-center rounded-2xl outline-none flex flex-col items-center justify-center select-none cursor-pointer relative overflow-hidden',
-                    style: { width: '10.5rem', height: '10.5rem', background: 'var(--surface-container-highest)', color: 'var(--on-surface)' }
+                    className: 'font-black text-center rounded-2xl outline-none flex flex-col items-center justify-center select-none cursor-pointer relative overflow-hidden',
+                    style: { width: sizePx, height: sizePx, background: 'var(--surface-container-highest)', color: 'var(--on-surface)' }
                 },
-                    e('div', { className: 'absolute top-0 left-0 right-0 h-1/3 flex items-center justify-center', style: { paddingTop: '4px', fontSize: '20px', color: 'var(--primary-fixed-dim)', opacity: 0.6 } }, '\u25B2'),
-                    e('div', { className: 'text-5xl font-black' }, value),
-                    e('div', { className: 'absolute bottom-0 left-0 right-0 h-1/3 flex items-center justify-center', style: { paddingBottom: '4px', fontSize: '20px', color: 'var(--primary-fixed-dim)', opacity: 0.6 } }, '\u25BC')
+                    e('div', { className: 'absolute top-0 left-0 right-0 h-1/3 flex items-center justify-center', style: { paddingTop: '4px', fontSize: arrowPx + 'px', color: 'var(--primary-fixed-dim)', opacity: 0.6 } }, '\u25B2'),
+                    e('div', { className: 'font-black', style: { fontSize: valuePx + 'px', lineHeight: 1 } }, fmtNum(value)),
+                    e('div', { className: 'absolute bottom-0 left-0 right-0 h-1/3 flex items-center justify-center', style: { paddingBottom: '4px', fontSize: arrowPx + 'px', color: 'var(--primary-fixed-dim)', opacity: 0.6 } }, '\u25BC')
                 )
             );
         }
@@ -650,13 +706,11 @@
             const [pendingMigration, setPendingMigration] = useState(null);
             const [expandedHistoryIdx, setExpandedHistoryIdx] = useState(null);
 
-            // Cover screen detection (flip phone: nearly square aspect)
-            const [isCoverScreen, setIsCoverScreen] = useState(window.innerHeight < window.innerWidth * 1.2);
-            useEffect(() => {
-                const check = () => setIsCoverScreen(window.innerHeight < window.innerWidth * 1.2);
-                window.addEventListener('resize', check);
-                return () => window.removeEventListener('resize', check);
-            }, []); // old workout data to import
+            // Cover screen detection (flip phone: nearly square aspect) — shared hook
+            const viewport = useViewport();
+            const isCoverScreen = viewport.isCover;
+            // Confirmation dialog state: { title, message, confirmLabel, onConfirm }
+            const [confirmState, setConfirmState] = useState(null);
 
             // Check for old app data in localStorage
             const getOldAppData = () => {
@@ -820,9 +874,11 @@
                                 const userData = await cloudGet('users/' + username);
                                 if (userData && userData.passwordHash === passwordHash) {
                                     setCurrentUser({ username, createdAt: userData.createdAt || Date.now() });
-                                    setWorkouts(userData.workouts || {});
+                                    const lw = userData.workouts || {};
+                                    setWorkouts(lw);
                                     setWorkoutHistory(userData.history || []);
-                                    setView('landing');
+                                    // Drop straight back into an in-progress workout if there is one.
+                                    if (!resumeSessionIfAny(lw, username)) setView('landing');
                                     setIsLoading(false);
                                     return;
                                 }
@@ -835,9 +891,10 @@
                                     setCurrentUser({ username, createdAt: parsed.createdAt || Date.now() });
                                     const w = localStorage.getItem('cwa-workouts-' + username);
                                     const h = localStorage.getItem('cwa-history-' + username);
-                                    if (w) setWorkouts(JSON.parse(w));
+                                    const lw = w ? JSON.parse(w) : {};
+                                    if (w) setWorkouts(lw);
                                     if (h) setWorkoutHistory(JSON.parse(h));
-                                    setView('landing');
+                                    if (!resumeSessionIfAny(lw, username)) setView('landing');
                                     setIsLoading(false);
                                     return;
                                 }
@@ -869,7 +926,19 @@
                         sets: ex.sets.map(s => ({ reps: s.reps, weight: s.weight }))
                     }))
                 };
-                setWorkoutHistory(prev => [...prev, entry]);
+                // De-dup same-day sessions: if this workout was already logged earlier today
+                // (e.g. it got started multiple times after tweaking notes/settings), replace
+                // that entry instead of appending a duplicate that would pollute progress data.
+                setWorkoutHistory(prev => {
+                    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+                    const dupIdx = prev.findIndex(h => h.day === entry.day && h.name === entry.name && h.date >= startOfToday.getTime());
+                    if (dupIdx !== -1) {
+                        const copy = prev.slice();
+                        copy[dupIdx] = entry;
+                        return copy;
+                    }
+                    return [...prev, entry];
+                });
             };
 
             const deleteFromHistory = (idx) => {
@@ -982,8 +1051,17 @@
 
             const saveWorkout = () => {
                 if (editingWorkout.name && editingWorkout.exercises.every(ex => ex.name)) {
+                    const prev = workouts[editingDay];
+                    // Preserve an in-progress session across edits (adding notes / tweaking
+                    // settings used to silently cancel the workout). Only drop progress if the
+                    // edit made the saved indices invalid.
+                    let progress = prev && prev.progress ? prev.progress : null;
+                    if (progress) {
+                        const ex = editingWorkout.exercises[progress.currentExerciseIndex];
+                        if (!ex || !ex.sets[progress.currentSetIndex]) progress = null;
+                    }
                     const newWorkouts = { ...workouts };
-                    newWorkouts[editingDay] = { ...editingWorkout, progress: null };
+                    newWorkouts[editingDay] = { ...editingWorkout, progress };
                     setWorkouts(newWorkouts);
                     setView('landing');
                     setEditingDay(null);
@@ -991,10 +1069,48 @@
                 }
             };
 
+            // Active-session marker: lets us drop the user straight back into a live
+            // workout when the PWA is reopened (instead of forcing a Continue tap), and
+            // makes set-1 recoverable.
+            const writeSessionMarker = (day) => {
+                try { localStorage.setItem('cwa-active-session', JSON.stringify({ user: currentUser ? currentUser.username : null, day, ts: Date.now() })); } catch (err) {}
+            };
+            const clearSessionMarker = () => {
+                try { localStorage.removeItem('cwa-active-session'); } catch (err) {}
+            };
+
+            // On app reopen, jump straight back into a recent in-progress workout.
+            const resumeSessionIfAny = (loadedWorkouts, username) => {
+                try {
+                    const raw = localStorage.getItem('cwa-active-session');
+                    if (!raw) return false;
+                    const marker = JSON.parse(raw);
+                    if (!marker || !marker.day) return false;
+                    if (marker.user && username && marker.user !== username) return false;
+                    // Only auto-resume recent sessions (within 12h) so we never yank the user
+                    // into a workout they abandoned days ago.
+                    if (Date.now() - (marker.ts || 0) > 12 * 60 * 60 * 1000) return false;
+                    const w = loadedWorkouts[marker.day];
+                    if (!w || !w.progress) return false;
+                    const p = w.progress;
+                    // Indices may be stale if the workout was edited — validate before resuming.
+                    if (!w.exercises[p.currentExerciseIndex] || !w.exercises[p.currentExerciseIndex].sets[p.currentSetIndex]) return false;
+                    setCurrentExerciseIndex(p.currentExerciseIndex);
+                    setCurrentSetIndex(p.currentSetIndex);
+                    setWorkoutStartTime(p.startTime || Date.now());
+                    setCompletedSets(p.completedSets || []);
+                    setSetStartTime(Date.now());
+                    setInitialWorkoutSnapshot(p.initialSnapshot || JSON.parse(JSON.stringify({ ...w, progress: null })));
+                    setLiveWorkout({ ...w, day: marker.day });
+                    setActiveTab('workout');
+                    setView('live');
+                    return true;
+                } catch (err) { return false; }
+            };
+
             const startWorkout = (day) => {
                 const workout = workouts[day];
                 const progress = workout.progress;
-                if (!progress) setInitialWorkoutSnapshot(JSON.parse(JSON.stringify(workout)));
                 if (progress) {
                     setCurrentExerciseIndex(progress.currentExerciseIndex);
                     setCurrentSetIndex(progress.currentSetIndex);
@@ -1002,13 +1118,25 @@
                     setCompletedSets(progress.completedSets || []);
                     setSetStartTime(progress.setStartTime || Date.now());
                     if (progress.initialSnapshot) setInitialWorkoutSnapshot(progress.initialSnapshot);
+                    else setInitialWorkoutSnapshot(JSON.parse(JSON.stringify(workout)));
                 } else {
+                    // Brand-new session: persist progress immediately (including the initial
+                    // snapshot) so the workout is recoverable even if the app is killed while
+                    // still on the very first set.
+                    const snapshot = JSON.parse(JSON.stringify({ ...workout, progress: null }));
+                    const now = Date.now();
+                    setInitialWorkoutSnapshot(snapshot);
                     setCurrentExerciseIndex(0);
                     setCurrentSetIndex(0);
-                    setWorkoutStartTime(Date.now());
+                    setWorkoutStartTime(now);
                     setCompletedSets([]);
-                    setSetStartTime(Date.now());
+                    setSetStartTime(now);
+                    setWorkouts(prev => ({
+                        ...prev,
+                        [day]: { ...prev[day], progress: { currentExerciseIndex: 0, currentSetIndex: 0, startTime: now, setStartTime: now, completedSets: [], initialSnapshot: snapshot } }
+                    }));
                 }
+                writeSessionMarker(day);
                 setLiveWorkout({ ...workout, day });
                 setView('live');
                 setActiveTab('workout');
@@ -1062,9 +1190,11 @@
                     setWorkouts(updatedWorkouts);
                     const { totalScore, maxScore } = calculateWorkoutSummary();
                     saveToHistory(liveWorkout, Math.floor((Date.now() - workoutStartTime) / 1000), totalScore, maxScore);
+                    clearSessionMarker();
                     setView('complete');
                     return;
                 }
+                writeSessionMarker(liveWorkout.day);
                 setWorkouts(updatedWorkouts);
             };
 
@@ -1105,6 +1235,7 @@
             };
 
             const finishWorkout = () => {
+                clearSessionMarker();
                 setView('landing');
                 setActiveTab('calendar');
                 setLiveWorkout(null);
@@ -1116,6 +1247,46 @@
                 setCurrentSetTime(0);
                 setCompletedSets([]);
                 setInitialWorkoutSnapshot(null);
+            };
+
+            // Permanently delete a day's workout from the plan.
+            const deleteWorkout = (day) => {
+                setWorkouts(prev => {
+                    const nw = { ...prev };
+                    delete nw[day];
+                    return nw;
+                });
+                if (liveWorkout && liveWorkout.day === day) {
+                    clearSessionMarker();
+                    setLiveWorkout(null);
+                }
+                setView('landing');
+                setActiveTab('calendar');
+                setEditingDay(null);
+                setEditingWorkout(null);
+            };
+
+            // Discard an in-progress workout without saving to history (clears its progress).
+            const cancelWorkout = () => {
+                if (liveWorkout) {
+                    setWorkouts(prev => {
+                        const nw = { ...prev };
+                        if (nw[liveWorkout.day]) nw[liveWorkout.day] = { ...nw[liveWorkout.day], progress: null };
+                        return nw;
+                    });
+                }
+                clearSessionMarker();
+                setLiveWorkout(null);
+                setCurrentExerciseIndex(0);
+                setCurrentSetIndex(0);
+                setWorkoutStartTime(null);
+                setSetStartTime(null);
+                setTotalElapsedTime(0);
+                setCurrentSetTime(0);
+                setCompletedSets([]);
+                setInitialWorkoutSnapshot(null);
+                setView('landing');
+                setActiveTab('calendar');
             };
 
             const calculateWorkoutSummary = () => {
@@ -1398,9 +1569,18 @@
                                                 style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)', opacity: exIdx === editingWorkout.exercises.length - 1 ? 0.3 : 1 }
                                             }, e(ChevronDown, { size: 18 })),
                                             e('button', {
-                                                onClick: () => removeExercise(exIdx),
+                                                onClick: () => {
+                                                    if (editingWorkout.exercises.length <= 1) return;
+                                                    setConfirmState({
+                                                        title: 'Remove exercise?',
+                                                        message: `"${exercise.name || 'This exercise'}" will be removed from this workout.`,
+                                                        confirmLabel: 'Remove',
+                                                        onConfirm: () => { removeExercise(exIdx); setConfirmState(null); }
+                                                    });
+                                                },
+                                                disabled: editingWorkout.exercises.length <= 1,
                                                 className: 'ml-1 px-3 py-2 rounded-lg text-sm font-bold transition-opacity active:opacity-80',
-                                                style: { background: 'var(--error-container)', color: 'var(--on-error-container)' }
+                                                style: { background: 'var(--error-container)', color: 'var(--on-error-container)', opacity: editingWorkout.exercises.length <= 1 ? 0.4 : 1 }
                                             }, 'Remove')
                                         )
                                     ),
@@ -1455,9 +1635,21 @@
                                 onClick: addExercise,
                                 className: 'w-[47%] py-3 rounded-xl flex items-center justify-center gap-2 transition-opacity active:opacity-80',
                                 style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' }
-                            }, e(Plus, { size: 20 }), 'Add Exercise')
+                            }, e(Plus, { size: 20 }), 'Add Exercise'),
+                            // Delete whole workout (only for an already-saved day)
+                            (editingDay && workouts[editingDay]) ? e('button', {
+                                onClick: () => setConfirmState({
+                                    title: 'Delete workout?',
+                                    message: `"${workouts[editingDay].name}" (${editingDay}) and its in-progress session will be permanently deleted. History is kept.`,
+                                    confirmLabel: 'Delete',
+                                    onConfirm: () => { deleteWorkout(editingDay); setConfirmState(null); }
+                                }),
+                                className: 'w-full mt-8 py-3 rounded-xl text-sm font-bold transition-opacity active:opacity-80',
+                                style: { background: 'var(--surface-container-low)', color: 'var(--error)' }
+                            }, 'Delete Workout') : null
                         )
                     ),
+                    confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null,
                     e(BottomNavBar, { activeTab: 'calendar', onTabChange: handleTabChange })
                 );
             }
@@ -1666,7 +1858,15 @@
                                                 ),
                                                 // Delete button
                                                 e('button', {
-                                                    onClick: (ev) => { ev.stopPropagation(); deleteFromHistory(realIdx); },
+                                                    onClick: (ev) => {
+                                                        ev.stopPropagation();
+                                                        setConfirmState({
+                                                            title: 'Delete from history?',
+                                                            message: `This logged session of "${w.name}" (${dateStr}) will be permanently removed.`,
+                                                            confirmLabel: 'Delete',
+                                                            onConfirm: () => { deleteFromHistory(realIdx); setConfirmState(null); }
+                                                        });
+                                                    },
                                                     className: 'w-full py-2 rounded-lg text-sm font-bold transition-all active:scale-95',
                                                     style: { background: 'var(--surface-container-low)', color: 'var(--error)' }
                                                 }, 'Delete from History')
@@ -1677,6 +1877,7 @@
                             ) : null
                         )
                     ),
+                    confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null,
                     e(BottomNavBar, { activeTab: 'stats', onTabChange: handleTabChange })
                 );
             }
@@ -1688,6 +1889,16 @@
                 const currentExercise = liveWorkout.exercises[currentExerciseIndex];
                 const currentSet = currentExercise.sets[currentSetIndex];
                 const nextExName = getNextExerciseName();
+
+                // Size the reps/weight boxes to actually fit the current screen.
+                // Cover layout packs [arrow][reps][weight][arrow] in one row, so the two
+                // boxes must share the width left after the arrows; they are also capped by
+                // the (short) available height. Full layout only shares width.
+                const boxSize = isCoverScreen
+                    ? Math.max(86, Math.min(148, Math.floor((viewport.w - 136) / 2), Math.floor(viewport.h * 0.46)))
+                    : Math.max(110, Math.min(168, Math.floor((viewport.w - 52) / 2)));
+                const contentPadTop = 72;
+                const contentPadBottom = isCoverScreen ? 52 : 112;
 
                 return e('div', {
                     className: 'h-full flex flex-col',
@@ -1706,7 +1917,7 @@
                         )
                     }),
                     // Main content
-                    e('div', { className: 'flex-1 flex flex-col pt-20 px-4 pb-28' },
+                    e('div', { className: 'flex-1 flex flex-col px-4', style: { paddingTop: contentPadTop, paddingBottom: contentPadBottom, minHeight: 0, overflowY: 'auto' } },
                         // Exercise name row with progress dots
                         e('div', { className: 'flex items-center justify-between px-2 mb-1' },
                             e('div', { className: 'flex-1' },
@@ -1755,8 +1966,8 @@
                                             opacity: canGoPrev() ? 1 : 0.3
                                         }
                                     }, e(ArrowLeft, { size: 22 })),
-                                    e(CustomNumberInput, { value: currentSet.reps, onChange: (val) => updateLiveSet('reps', val), label: 'Reps', step: 1 }),
-                                    e(CustomNumberInput, { value: currentSet.weight, onChange: (val) => updateLiveSet('weight', val), label: 'Weight (kg)', step: 0.5 }),
+                                    e(CustomNumberInput, { value: currentSet.reps, onChange: (val) => updateLiveSet('reps', val), label: 'Reps', step: 1, size: boxSize }),
+                                    e(CustomNumberInput, { value: currentSet.weight, onChange: (val) => updateLiveSet('weight', val), label: 'Weight (kg)', step: 0.5, size: boxSize }),
                                     e('button', {
                                         onClick: nextSet,
                                         className: 'p-2 rounded-2xl transition-all active:scale-90 flex-shrink-0',
@@ -1782,8 +1993,8 @@
                             e('div', null,
                                 // Counters row
                                 e('div', { className: 'flex items-center justify-center gap-3 mt-2' },
-                                    e(CustomNumberInput, { value: currentSet.reps, onChange: (val) => updateLiveSet('reps', val), label: 'Reps', step: 1 }),
-                                    e(CustomNumberInput, { value: currentSet.weight, onChange: (val) => updateLiveSet('weight', val), label: 'Weight (kg)', step: 0.5 })
+                                    e(CustomNumberInput, { value: currentSet.reps, onChange: (val) => updateLiveSet('reps', val), label: 'Reps', step: 1, size: boxSize }),
+                                    e(CustomNumberInput, { value: currentSet.weight, onChange: (val) => updateLiveSet('weight', val), label: 'Weight (kg)', step: 0.5, size: boxSize })
                                 ),
                                 // Notes bar
                                 currentExercise.notes ? e('div', { className: 'flex justify-center mt-3' },
@@ -1818,8 +2029,8 @@
                                     }, e(ArrowRight, { size: 24 }))
                                 )
                             ),
-                        // Next exercise indicator (bottom left)
-                        e('div', { className: 'mt-auto pt-3 flex justify-start px-2' },
+                        // Next exercise indicator (bottom left) + discard (bottom right)
+                        e('div', { className: 'mt-auto pt-3 flex justify-between items-center px-2 gap-2' },
                             nextExName ? e('div', {
                                 className: 'flex items-center gap-2 px-3 py-1.5 rounded-xl',
                                 style: { background: 'var(--surface-container-highest)' }
@@ -1829,9 +2040,20 @@
                                     className: 'text-sm font-bold',
                                     style: { color: nextExName === 'Finish' ? 'var(--primary-container)' : 'var(--on-surface)' }
                                 }, nextExName)
-                            ) : null
+                            ) : e('div', null),
+                            e('button', {
+                                onClick: () => setConfirmState({
+                                    title: 'Discard workout?',
+                                    message: 'Your progress for this session will be discarded and not saved to history.',
+                                    confirmLabel: 'Discard',
+                                    onConfirm: () => { cancelWorkout(); setConfirmState(null); }
+                                }),
+                                className: 'flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-opacity active:opacity-70 flex-shrink-0',
+                                style: { background: 'var(--surface-container-high)', color: 'var(--on-surface-variant)' }
+                            }, e(MIcon, { icon: 'close', style: { fontSize: '16px' } }), 'End')
                         )
                     ),
+                    confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null,
                     e(BottomNavBar, { activeTab: 'workout', onTabChange: handleTabChange })
                 );
             }
