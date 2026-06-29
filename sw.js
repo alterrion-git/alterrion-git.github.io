@@ -1,5 +1,5 @@
 // Service Worker with Cache Versioning
-const CACHE_VERSION = 'v3.5.0'; // UPDATE THIS WITH EACH NEW VERSION!
+const CACHE_VERSION = 'v3.6.0'; // UPDATE THIS WITH EACH NEW VERSION!
 const CACHE_NAME = `workout-tracker-${CACHE_VERSION}`;
 
 const urlsToCache = [
@@ -7,7 +7,9 @@ const urlsToCache = [
   './index.html',
   'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
-  'https://cdn.tailwindcss.com'
+  'https://cdn.tailwindcss.com',
+  'https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js',
+  'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js'
 ];
 
 // Install event - cache resources

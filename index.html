@@ -153,6 +153,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase Auth (compat) — used for Google + email/password sign-in. Optional:
+         if these fail to load, the app falls back to the legacy username login. -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -199,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.5.0';
+        const APP_VERSION = '3.6.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -243,48 +247,71 @@
         //      which restrict each user to users/<their-uid>.
         // While this is empty, the app keeps the original username login unchanged.
         const FIREBASE_API_KEY = 'AIzaSyDf4kFXmHgparBHdDhaBUIJT5otJTHd-Zw'; // Firebase Web API key (public by design; security comes from DB rules)
-        const fbAuthEnabled = () => FIREBASE_API_KEY.length > 0 && FIREBASE_DB_URL.length > 0;
+        // Derive auth domain / project id from the DB URL's project ('workout-app-423a6').
+        const FIREBASE_PROJECT_ID = (FIREBASE_DB_URL.match(/https:\/\/([^.]+)/) || [])[1] || '';
+        const FIREBASE_CONFIG = {
+            apiKey: FIREBASE_API_KEY,
+            authDomain: FIREBASE_PROJECT_ID ? `${FIREBASE_PROJECT_ID.replace(/-default-rtdb$/, '')}.firebaseapp.com` : '',
+            projectId: FIREBASE_PROJECT_ID.replace(/-default-rtdb$/, ''),
+            databaseURL: FIREBASE_DB_URL,
+        };
+        // Secure mode is on only when a key is set AND the Firebase Auth SDK actually loaded.
+        const fbSdkPresent = () => typeof firebase !== 'undefined' && firebase.auth;
+        const fbAuthEnabled = () => FIREBASE_API_KEY.length > 0 && FIREBASE_DB_URL.length > 0 && fbSdkPresent();
 
-        let __fbToken = null, __fbTokenExp = 0; // current idToken + expiry (ms epoch)
-        function fbSaveSession(s) { try { localStorage.setItem('cwa-fb-session', JSON.stringify(s)); } catch (e) {} __fbToken = s.idToken; __fbTokenExp = s.expiresAt; }
-        function fbLoadSession() { try { return JSON.parse(localStorage.getItem('cwa-fb-session')); } catch (e) { return null; } }
-        function fbClearSession() { try { localStorage.removeItem('cwa-fb-session'); } catch (e) {} __fbToken = null; __fbTokenExp = 0; }
-        async function fbEmailAuth(kind, email, password) {
-            // kind: 'signUp' | 'signInWithPassword'
-            const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:${kind}?key=${FIREBASE_API_KEY}`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password, returnSecureToken: true })
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                const code = data.error && data.error.message ? data.error.message : 'AUTH_FAILED';
-                const map = { EMAIL_EXISTS: 'That email is already registered.', EMAIL_NOT_FOUND: 'No account for that email.', INVALID_PASSWORD: 'Wrong password.', INVALID_LOGIN_CREDENTIALS: 'Wrong email or password.', WEAK_PASSWORD: 'Password should be at least 6 characters.', OPERATION_NOT_ALLOWED: 'Enable Email/Password sign-in in the Firebase console.' };
-                throw new Error(map[code] || code.replace(/_/g, ' ').toLowerCase());
-            }
-            const session = { uid: data.localId, email: data.email, refreshToken: data.refreshToken, idToken: data.idToken, expiresAt: Date.now() + (parseInt(data.expiresIn, 10) || 3600) * 1000 };
-            fbSaveSession(session);
-            return session;
+        let __fbAuth = null;
+        function fbInit() {
+            if (__fbAuth) return __fbAuth;
+            if (!fbSdkPresent()) return null;
+            try {
+                if (!(firebase.apps && firebase.apps.length)) firebase.initializeApp(FIREBASE_CONFIG);
+                __fbAuth = firebase.auth();
+                try { __fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch (e) {}
+                return __fbAuth;
+            } catch (e) { return null; }
         }
-        async function fbRefresh(refreshToken) {
-            const res = await fetch(`https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`, {
-                method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error('Session expired');
-            const prev = fbLoadSession() || {};
-            const session = { uid: data.user_id || prev.uid, email: prev.email, refreshToken: data.refresh_token, idToken: data.id_token, expiresAt: Date.now() + (parseInt(data.expires_in, 10) || 3600) * 1000 };
-            fbSaveSession(session);
-            return session;
+        function fbMapError(err) {
+            const c = (err && err.code) || '';
+            const map = {
+                'auth/email-already-in-use': 'That email is already registered — try Login.',
+                'auth/invalid-email': 'That email looks invalid.',
+                'auth/user-not-found': 'No account for that email.',
+                'auth/wrong-password': 'Wrong password.',
+                'auth/invalid-credential': 'Wrong email or password.',
+                'auth/weak-password': 'Password should be at least 6 characters.',
+                'auth/operation-not-allowed': 'Enable this sign-in method in the Firebase console.',
+                'auth/popup-blocked': 'Popup blocked — retrying with redirect…',
+                'auth/network-request-failed': 'Network error — check your connection.',
+                'auth/unauthorized-domain': 'This domain is not authorized in Firebase Auth settings.',
+            };
+            return map[c] || (err && err.message) || 'Authentication failed';
         }
-        // Returns a valid idToken (refreshing if near expiry), or null if not signed in.
+        // Returns a fresh idToken from the SDK (auto-refreshing), or null if not signed in.
         async function fbValidToken() {
-            if (!fbAuthEnabled()) return null;
-            if (__fbToken && Date.now() < __fbTokenExp - 60000) return __fbToken;
-            const s = fbLoadSession();
-            if (!s || !s.refreshToken) return null;
-            try { return (await fbRefresh(s.refreshToken)).idToken; } catch (e) { return null; }
+            const a = fbInit();
+            if (!a || !a.currentUser) return null;
+            try { return await a.currentUser.getIdToken(); } catch (e) { return null; }
         }
+        // Resolves the persisted user once on startup (works offline from cached state).
+        function fbCurrentUserOnce() {
+            const a = fbInit();
+            if (!a) return Promise.resolve(null);
+            return new Promise((resolve) => { const off = a.onAuthStateChanged((u) => { off(); resolve(u || null); }); });
+        }
+        async function fbGetRedirectUser() {
+            const a = fbInit();
+            if (!a) return null;
+            try { const r = await a.getRedirectResult(); return (r && r.user) || null; } catch (e) { return null; }
+        }
+        async function fbSignInEmail(email, password) { const a = fbInit(); if (!a) throw new Error('Sign-in unavailable (offline?)'); return (await a.signInWithEmailAndPassword(email, password)).user; }
+        async function fbRegisterEmail(email, password) { const a = fbInit(); if (!a) throw new Error('Sign-up unavailable (offline?)'); return (await a.createUserWithEmailAndPassword(email, password)).user; }
+        async function fbSignInGoogle() {
+            const a = fbInit(); if (!a) throw new Error('Google sign-in unavailable (offline?)');
+            const provider = new firebase.auth.GoogleAuthProvider();
+            // Redirect is the reliable flow inside an installed PWA (popups are often blocked).
+            await a.signInWithRedirect(provider);
+        }
+        async function fbSignOut() { const a = fbInit(); if (a) { try { await a.signOut(); } catch (e) {} } }
 
         async function hashPassword(password) {
             const encoder = new TextEncoder();
@@ -1017,22 +1044,48 @@
             };
 
             // --- Auth functions ---
+            // Load a signed-in Firebase user's data into app state. Offline-safe: if the
+            // cloud read fails (no network) but we have a local cache for this uid, use the
+            // cache instead of wiping the view; only create a fresh record for a truly new uid.
+            const loadFbUser = async (u) => {
+                const uid = u.uid;
+                let userData = await cloudGet('users/' + uid);
+                if (!userData) {
+                    const localW = localStorage.getItem('cwa-workouts-' + uid);
+                    if (localW != null) {
+                        userData = { email: u.email || '', createdAt: Date.now(), workouts: JSON.parse(localW || '{}') , history: JSON.parse(localStorage.getItem('cwa-history-' + uid) || '[]') };
+                    } else {
+                        // Genuinely new account (first sign-in) — create an empty record.
+                        userData = { email: u.email || '', createdAt: Date.now(), workouts: {}, history: [] };
+                        await cloudSet('users/' + uid, userData);
+                    }
+                }
+                setCurrentUser({ username: uid, email: u.email || userData.email || '', createdAt: userData.createdAt || Date.now() });
+                const lw = sanitizeWorkouts(userData.workouts || {});
+                setWorkouts(lw);
+                setWorkoutHistory(userData.history || []);
+                hydrateProgress(uid, userData);
+                if (!resumeSessionIfAny(lw, uid)) setView('landing');
+                setIsLoading(false);
+            };
+
+            const doGoogle = async () => {
+                if (!fbAuthEnabled()) { setAuthError('Sign-in unavailable right now.'); return; }
+                setAuthLoading(true); setAuthError('');
+                try {
+                    await fbSignInGoogle(); // redirects away; tryAutoLogin handles the return
+                } catch (err) { setAuthError(fbMapError(err)); setAuthLoading(false); }
+            };
+
             const doLogin = async () => {
-                // Secure Firebase Auth path (email/password). Active only when an API key is set.
+                // Secure Firebase Auth path (email/password). Active only when secure mode is on.
                 if (fbAuthEnabled()) {
                     if (!loginUsername.trim() || !loginPassword.trim()) { setAuthError('Enter email and password'); return; }
                     setAuthLoading(true); setAuthError('');
                     try {
-                        const s = await fbEmailAuth('signInWithPassword', loginUsername.trim(), loginPassword);
-                        const userData = await cloudGet('users/' + s.uid);
-                        setCurrentUser({ username: s.uid, email: s.email, createdAt: (userData && userData.createdAt) || Date.now() });
-                        const lw = sanitizeWorkouts((userData && userData.workouts) || {});
-                        setWorkouts(lw);
-                        setWorkoutHistory((userData && userData.history) || []);
-                        hydrateProgress(s.uid, userData);
-                        if (!resumeSessionIfAny(lw, s.uid)) setView('landing');
-                        setIsLoading(false);
-                    } catch (err) { setAuthError(err.message || 'Login failed'); }
+                        const u = await fbSignInEmail(loginUsername.trim(), loginPassword);
+                        await loadFbUser(u);
+                    } catch (err) { setAuthError(fbMapError(err)); }
                     setAuthLoading(false);
                     return;
                 }
@@ -1085,13 +1138,9 @@
                     if (loginPassword.trim().length < 6) { setAuthError('Password must be at least 6 characters'); return; }
                     setAuthLoading(true); setAuthError('');
                     try {
-                        const s = await fbEmailAuth('signUp', loginUsername.trim(), loginPassword);
-                        const createdAt = Date.now();
-                        await cloudSet('users/' + s.uid, { email: s.email, createdAt, workouts: {}, history: [] });
-                        setCurrentUser({ username: s.uid, email: s.email, createdAt });
-                        setWorkouts({}); setWorkoutHistory([]); setProfile(DEFAULT_PROFILE); setMetrics([]); setRecaps([]);
-                        setView('landing'); setIsLoading(false);
-                    } catch (err) { setAuthError(err.message || 'Register failed'); }
+                        const u = await fbRegisterEmail(loginUsername.trim(), loginPassword);
+                        await loadFbUser(u); // creates the empty record for the new uid
+                    } catch (err) { setAuthError(fbMapError(err)); }
                     setAuthLoading(false);
                     return;
                 }
@@ -1159,7 +1208,7 @@
                 setLoginPassword('');
                 setShowProfile(false);
                 localStorage.removeItem('cwa-user');
-                fbClearSession();
+                fbSignOut();
             };
 
             // Coalescing, serialized cloud writer. Local save is immediate; cloud writes are
@@ -1244,22 +1293,13 @@
             // --- Auto-login on mount ---
             useEffect(() => {
                 const tryAutoLogin = async () => {
-                    // Secure Firebase Auth path: restore a session from the stored refresh token.
+                    // Secure Firebase Auth path: complete any Google redirect, then restore the
+                    // persisted session via the SDK (works offline from cached auth state).
                     if (fbAuthEnabled()) {
                         try {
-                            const t = await fbValidToken();
-                            const s = fbLoadSession();
-                            if (t && s && s.uid) {
-                                const userData = await cloudGet('users/' + s.uid);
-                                setCurrentUser({ username: s.uid, email: s.email, createdAt: (userData && userData.createdAt) || Date.now() });
-                                const lw = sanitizeWorkouts((userData && userData.workouts) || {});
-                                setWorkouts(lw);
-                                setWorkoutHistory((userData && userData.history) || []);
-                                hydrateProgress(s.uid, userData);
-                                if (!resumeSessionIfAny(lw, s.uid)) setView('landing');
-                                setIsLoading(false);
-                                return;
-                            }
+                            await fbGetRedirectUser(); // finishes a Google redirect sign-in if returning from one
+                            const u = await fbCurrentUserOnce();
+                            if (u) { await loadFbUser(u); return; }
                         } catch (err) { console.log('FB auto-login failed:', err); }
                         setIsLoading(false);
                         return;
@@ -1963,6 +2003,28 @@
                         className: 'w-full max-w-sm rounded-2xl p-5',
                         style: { background: 'var(--surface-container-highest)' }
                     },
+                        // Google sign-in (primary) + divider — only in secure mode
+                        fbAuthEnabled() ? e('div', { className: 'mb-4' },
+                            e('button', {
+                                onClick: doGoogle,
+                                disabled: authLoading,
+                                className: 'w-full py-3 rounded-xl font-bold text-base flex items-center justify-center gap-3 transition-all active:scale-95',
+                                style: { background: '#fff', color: '#1f1f1f', opacity: authLoading ? 0.6 : 1 }
+                            },
+                                e('svg', { width: 20, height: 20, viewBox: '0 0 48 48' },
+                                    e('path', { fill: '#EA4335', d: 'M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z' }),
+                                    e('path', { fill: '#4285F4', d: 'M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z' }),
+                                    e('path', { fill: '#FBBC05', d: 'M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z' }),
+                                    e('path', { fill: '#34A853', d: 'M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z' })
+                                ),
+                                'Continue with Google'
+                            ),
+                            e('div', { className: 'flex items-center gap-3 mt-4' },
+                                e('div', { className: 'flex-1 h-px', style: { background: 'var(--outline-variant)' } }),
+                                e('span', { className: 'text-xs', style: { color: 'var(--outline)' } }, 'or email'),
+                                e('div', { className: 'flex-1 h-px', style: { background: 'var(--outline-variant)' } })
+                            )
+                        ) : null,
                         e('div', { className: 'mb-4' },
                             e('label', { className: 'block text-xs uppercase tracking-widest mb-1.5', style: { color: 'var(--on-surface-variant)' } }, fbAuthEnabled() ? 'Email' : 'Username'),
                             e('input', {
