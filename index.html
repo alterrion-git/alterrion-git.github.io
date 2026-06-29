@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.6.1';
+        const APP_VERSION = '3.6.2';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -3117,6 +3117,9 @@
                         e('div', { className: 'max-w-lg mx-auto' }, children)
                     ),
                     toastEl,
+                    // Render confirm dialogs centrally so every sub-view gets them (the import
+                    // confirm lives here — without it, Import silently did nothing).
+                    confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null,
                     e(BottomNavBar, { activeTab: 'progress', onTabChange: handleTabChange })
                 );
 
@@ -3208,8 +3211,7 @@
                                     })
                                 )
                             ) : e('div', { className: 'mt-6 text-center text-sm', style: { color: 'var(--outline)' } }, 'No entries yet.')
-                        ),
-                        confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null
+                        )
                     );
                 }
 
@@ -3245,8 +3247,7 @@
                                     )
                                 )),
                             e('div', { className: 'text-xs leading-snug px-1 mt-2', style: { color: 'var(--outline)' } },
-                                'Photos stay on this device only. They are sent to the AI just for the moment a recap is generated.'),
-                            confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null
+                                'Photos stay on this device only. They are sent to the AI just for the moment a recap is generated.')
                         )
                     );
                 }
@@ -3325,8 +3326,7 @@
                                     e('button', { onClick: () => { try { navigator.clipboard.writeText(rulesText); setToast('Rules copied'); } catch (e) { setToast('Copy failed'); } }, className: 'mt-3 w-full py-2.5 rounded-lg font-bold text-sm active:scale-95', style: { background: 'var(--surface-container-low)', color: 'var(--primary-fixed-dim)' } }, 'Copy rules')
                                 )
                             ) : null
-                        ),
-                        confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null
+                        )
                     );
                 }
 
