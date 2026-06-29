@@ -199,7 +199,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.4.0';
+        const APP_VERSION = '3.5.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -233,6 +233,59 @@
 
         const cloudEnabled = () => FIREBASE_DB_URL.length > 0;
 
+        // ============================================
+        // FIREBASE AUTH (optional, secure mode) — OFF until you paste a Web API key.
+        // ============================================
+        // To turn the app into a properly secured multi-user app for free:
+        //   1. Firebase console > Project settings > General > "Web API Key" -> paste below.
+        //   2. Authentication > Sign-in method > enable "Email/Password".
+        //   3. Realtime Database > Rules > paste the rules shown in Settings (in-app),
+        //      which restrict each user to users/<their-uid>.
+        // While this is empty, the app keeps the original username login unchanged.
+        const FIREBASE_API_KEY = ''; // e.g. 'AIzaSy...'
+        const fbAuthEnabled = () => FIREBASE_API_KEY.length > 0 && FIREBASE_DB_URL.length > 0;
+
+        let __fbToken = null, __fbTokenExp = 0; // current idToken + expiry (ms epoch)
+        function fbSaveSession(s) { try { localStorage.setItem('cwa-fb-session', JSON.stringify(s)); } catch (e) {} __fbToken = s.idToken; __fbTokenExp = s.expiresAt; }
+        function fbLoadSession() { try { return JSON.parse(localStorage.getItem('cwa-fb-session')); } catch (e) { return null; } }
+        function fbClearSession() { try { localStorage.removeItem('cwa-fb-session'); } catch (e) {} __fbToken = null; __fbTokenExp = 0; }
+        async function fbEmailAuth(kind, email, password) {
+            // kind: 'signUp' | 'signInWithPassword'
+            const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:${kind}?key=${FIREBASE_API_KEY}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password, returnSecureToken: true })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                const code = data.error && data.error.message ? data.error.message : 'AUTH_FAILED';
+                const map = { EMAIL_EXISTS: 'That email is already registered.', EMAIL_NOT_FOUND: 'No account for that email.', INVALID_PASSWORD: 'Wrong password.', INVALID_LOGIN_CREDENTIALS: 'Wrong email or password.', WEAK_PASSWORD: 'Password should be at least 6 characters.', OPERATION_NOT_ALLOWED: 'Enable Email/Password sign-in in the Firebase console.' };
+                throw new Error(map[code] || code.replace(/_/g, ' ').toLowerCase());
+            }
+            const session = { uid: data.localId, email: data.email, refreshToken: data.refreshToken, idToken: data.idToken, expiresAt: Date.now() + (parseInt(data.expiresIn, 10) || 3600) * 1000 };
+            fbSaveSession(session);
+            return session;
+        }
+        async function fbRefresh(refreshToken) {
+            const res = await fetch(`https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error('Session expired');
+            const prev = fbLoadSession() || {};
+            const session = { uid: data.user_id || prev.uid, email: prev.email, refreshToken: data.refresh_token, idToken: data.id_token, expiresAt: Date.now() + (parseInt(data.expires_in, 10) || 3600) * 1000 };
+            fbSaveSession(session);
+            return session;
+        }
+        // Returns a valid idToken (refreshing if near expiry), or null if not signed in.
+        async function fbValidToken() {
+            if (!fbAuthEnabled()) return null;
+            if (__fbToken && Date.now() < __fbTokenExp - 60000) return __fbToken;
+            const s = fbLoadSession();
+            if (!s || !s.refreshToken) return null;
+            try { return (await fbRefresh(s.refreshToken)).idToken; } catch (e) { return null; }
+        }
+
         async function hashPassword(password) {
             const encoder = new TextEncoder();
             const data = encoder.encode(password + '_cwa_salt_2024');
@@ -244,7 +297,9 @@
         async function cloudGet(path) {
             if (!cloudEnabled()) return null;
             try {
-                const res = await fetch(`${FIREBASE_DB_URL}/${path}.json`);
+                let q = '';
+                if (fbAuthEnabled()) { const t = await fbValidToken(); if (!t) return null; q = `?auth=${t}`; }
+                const res = await fetch(`${FIREBASE_DB_URL}/${path}.json${q}`);
                 if (!res.ok) return null;
                 return await res.json();
             } catch (err) { console.error('Cloud get error:', err); return null; }
@@ -253,7 +308,9 @@
         async function cloudSet(path, data) {
             if (!cloudEnabled()) return false;
             try {
-                const res = await fetch(`${FIREBASE_DB_URL}/${path}.json`, {
+                let q = '';
+                if (fbAuthEnabled()) { const t = await fbValidToken(); if (!t) return false; q = `?auth=${t}`; }
+                const res = await fetch(`${FIREBASE_DB_URL}/${path}.json${q}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
@@ -961,6 +1018,24 @@
 
             // --- Auth functions ---
             const doLogin = async () => {
+                // Secure Firebase Auth path (email/password). Active only when an API key is set.
+                if (fbAuthEnabled()) {
+                    if (!loginUsername.trim() || !loginPassword.trim()) { setAuthError('Enter email and password'); return; }
+                    setAuthLoading(true); setAuthError('');
+                    try {
+                        const s = await fbEmailAuth('signInWithPassword', loginUsername.trim(), loginPassword);
+                        const userData = await cloudGet('users/' + s.uid);
+                        setCurrentUser({ username: s.uid, email: s.email, createdAt: (userData && userData.createdAt) || Date.now() });
+                        const lw = sanitizeWorkouts((userData && userData.workouts) || {});
+                        setWorkouts(lw);
+                        setWorkoutHistory((userData && userData.history) || []);
+                        hydrateProgress(s.uid, userData);
+                        if (!resumeSessionIfAny(lw, s.uid)) setView('landing');
+                        setIsLoading(false);
+                    } catch (err) { setAuthError(err.message || 'Login failed'); }
+                    setAuthLoading(false);
+                    return;
+                }
                 if (!loginUsername.trim() || !loginPassword.trim()) { setAuthError('Enter username and password'); return; }
                 setAuthLoading(true);
                 setAuthError('');
@@ -1005,6 +1080,21 @@
             };
 
             const doRegister = async () => {
+                if (fbAuthEnabled()) {
+                    if (!loginUsername.trim() || !loginPassword.trim()) { setAuthError('Enter email and password'); return; }
+                    if (loginPassword.trim().length < 6) { setAuthError('Password must be at least 6 characters'); return; }
+                    setAuthLoading(true); setAuthError('');
+                    try {
+                        const s = await fbEmailAuth('signUp', loginUsername.trim(), loginPassword);
+                        const createdAt = Date.now();
+                        await cloudSet('users/' + s.uid, { email: s.email, createdAt, workouts: {}, history: [] });
+                        setCurrentUser({ username: s.uid, email: s.email, createdAt });
+                        setWorkouts({}); setWorkoutHistory([]); setProfile(DEFAULT_PROFILE); setMetrics([]); setRecaps([]);
+                        setView('landing'); setIsLoading(false);
+                    } catch (err) { setAuthError(err.message || 'Register failed'); }
+                    setAuthLoading(false);
+                    return;
+                }
                 if (!loginUsername.trim() || !loginPassword.trim()) { setAuthError('Enter username and password'); return; }
                 if (loginPassword.trim().length < 4) { setAuthError('Password must be at least 4 characters'); return; }
                 setAuthLoading(true);
@@ -1069,6 +1159,7 @@
                 setLoginPassword('');
                 setShowProfile(false);
                 localStorage.removeItem('cwa-user');
+                fbClearSession();
             };
 
             // Coalescing, serialized cloud writer. Local save is immediate; cloud writes are
@@ -1153,6 +1244,26 @@
             // --- Auto-login on mount ---
             useEffect(() => {
                 const tryAutoLogin = async () => {
+                    // Secure Firebase Auth path: restore a session from the stored refresh token.
+                    if (fbAuthEnabled()) {
+                        try {
+                            const t = await fbValidToken();
+                            const s = fbLoadSession();
+                            if (t && s && s.uid) {
+                                const userData = await cloudGet('users/' + s.uid);
+                                setCurrentUser({ username: s.uid, email: s.email, createdAt: (userData && userData.createdAt) || Date.now() });
+                                const lw = sanitizeWorkouts((userData && userData.workouts) || {});
+                                setWorkouts(lw);
+                                setWorkoutHistory((userData && userData.history) || []);
+                                hydrateProgress(s.uid, userData);
+                                if (!resumeSessionIfAny(lw, s.uid)) setView('landing');
+                                setIsLoading(false);
+                                return;
+                            }
+                        } catch (err) { console.log('FB auto-login failed:', err); }
+                        setIsLoading(false);
+                        return;
+                    }
                     try {
                         const savedSession = localStorage.getItem('cwa-user');
                         if (savedSession) {
@@ -1782,6 +1893,48 @@
                 } finally { setAiBusy(false); }
             };
 
+            // --- Full backup export / import (JSON). Also the migration path between
+            // accounts / auth methods, since photos live on-device. ---
+            const exportData = async () => {
+                try {
+                    const ph = currentUser ? await photoList(currentUser.username) : [];
+                    const blob = { app: 'CWA', version: APP_VERSION, exportedAt: Date.now(), profile, metrics, recaps, workouts, history: workoutHistory, photos: ph };
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(new Blob([JSON.stringify(blob)], { type: 'application/json' }));
+                    a.download = `cwa-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                    document.body.appendChild(a); a.click(); a.remove();
+                    setToast('Backup downloaded');
+                } catch (err) { setAiError('Export failed: ' + (err.message || err)); }
+            };
+            const importData = (file) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    let blob;
+                    try { blob = JSON.parse(reader.result); } catch (err) { setAiError('Invalid backup file'); return; }
+                    setConfirmState({
+                        title: 'Import backup?',
+                        message: 'This replaces your current workouts, history, goals, metrics, recaps and photos with the backup.',
+                        confirmLabel: 'Import', danger: false,
+                        onConfirm: async () => {
+                            if (blob.workouts) setWorkouts(sanitizeWorkouts(blob.workouts));
+                            if (Array.isArray(blob.history)) setWorkoutHistory(blob.history);
+                            if (blob.profile) setProfile({ ...DEFAULT_PROFILE, ...blob.profile });
+                            if (Array.isArray(blob.metrics)) setMetrics(blob.metrics);
+                            if (Array.isArray(blob.recaps)) setRecaps(blob.recaps);
+                            if (Array.isArray(blob.photos) && currentUser) {
+                                for (const p of blob.photos) {
+                                    try { await photoAdd({ ...p, user: currentUser.username, id: p.id || `${currentUser.username}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` }); } catch (err) {}
+                                }
+                                await refreshPhotos();
+                            }
+                            setConfirmState(null);
+                            setToast('Backup imported');
+                        }
+                    });
+                };
+                reader.readAsText(file);
+            };
+
             // ======================
             // LOADING
             // ======================
@@ -1811,15 +1964,15 @@
                         style: { background: 'var(--surface-container-highest)' }
                     },
                         e('div', { className: 'mb-4' },
-                            e('label', { className: 'block text-xs uppercase tracking-widest mb-1.5', style: { color: 'var(--on-surface-variant)' } }, 'Username'),
+                            e('label', { className: 'block text-xs uppercase tracking-widest mb-1.5', style: { color: 'var(--on-surface-variant)' } }, fbAuthEnabled() ? 'Email' : 'Username'),
                             e('input', {
-                                type: 'text',
+                                type: fbAuthEnabled() ? 'email' : 'text',
                                 value: loginUsername,
                                 onChange: (ev) => { setLoginUsername(ev.target.value); setAuthError(''); },
                                 onKeyDown: (ev) => { if (ev.key === 'Enter') doLogin(); },
                                 className: 'w-full p-3 rounded-xl outline-none text-lg font-bold',
                                 style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
-                                placeholder: 'Enter username',
+                                placeholder: fbAuthEnabled() ? 'you@example.com' : 'Enter username',
                                 autoCapitalize: 'none',
                                 autoCorrect: 'off'
                             })
@@ -1854,7 +2007,7 @@
                         !cloudEnabled() ? e('div', { className: 'mt-3 text-xs text-center', style: { color: 'var(--outline)' } },
                             'Offline mode \u2022 Data stored locally'
                         ) : e('div', { className: 'mt-3 text-xs text-center', style: { color: 'var(--primary-fixed-dim)' } },
-                            'Cloud sync enabled'
+                            fbAuthEnabled() ? 'Secure Firebase accounts' : 'Cloud sync enabled'
                         )
                     )
                 );
@@ -1934,7 +2087,7 @@
                             style: { background: 'rgba(209, 252, 0, 0.1)' }
                         }, e(MIcon, { icon: 'person', fill: true, style: { fontSize: '32px', color: 'var(--primary-container)' } })),
                         e('div', null,
-                            e('div', { className: 'text-lg font-black' }, currentUser ? currentUser.username : ''),
+                            e('div', { className: 'text-lg font-black', style: { wordBreak: 'break-all' } }, currentUser ? (currentUser.email || currentUser.username) : ''),
                             e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } },
                                 currentUser ? `Joined ${new Date(currentUser.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''
                             )
@@ -3055,6 +3208,7 @@
 
                 // ---- SETTINGS ----
                 if (progressSub === 'settings') {
+                    const rulesText = '{\n  "rules": {\n    "users": {\n      "$uid": {\n        ".read": "auth != null && auth.uid === $uid",\n        ".write": "auth != null && auth.uid === $uid"\n      }\n    }\n  }\n}';
                     return shell('SETTINGS', true,
                         e('div', { className: 'space-y-5' },
                             e('div', null,
@@ -3062,13 +3216,37 @@
                                 e(ApiKeyForm, { onChanged: () => setToast('Key updated') })
                             ),
                             e('div', null,
+                                sectionTitle('Backup & Restore'),
+                                e('div', { className: 'rounded-2xl p-4', style: card },
+                                    e('div', { className: 'flex gap-2' },
+                                        e('button', { onClick: exportData, className: 'flex-1 py-2.5 rounded-lg font-bold text-sm active:scale-95', style: { background: 'var(--surface-container-low)', color: 'var(--primary-fixed-dim)' } }, 'Export'),
+                                        e('label', { className: 'flex-1 py-2.5 rounded-lg font-bold text-sm text-center cursor-pointer active:scale-95', style: { background: 'var(--surface-container-low)', color: 'var(--primary-fixed-dim)' } },
+                                            'Import',
+                                            e('input', { type: 'file', accept: 'application/json,.json', className: 'hidden', onChange: (ev) => { const f = ev.target.files && ev.target.files[0]; if (f) importData(f); ev.target.value = ''; } })
+                                        )
+                                    ),
+                                    e('div', { className: 'text-xs mt-3 leading-snug', style: { color: 'var(--outline)' } }, 'Download a full JSON backup (workouts, history, goals, metrics, recaps and photos), or restore one. Also the way to move data to a new account.')
+                                )
+                            ),
+                            e('div', null,
                                 sectionTitle('Account'),
                                 e('div', { className: 'rounded-2xl p-4 flex items-center gap-2', style: card },
-                                    e(MIcon, { icon: cloudEnabled() ? 'cloud_done' : 'cloud_off', style: { fontSize: '20px', color: cloudEnabled() ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }),
-                                    e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, cloudEnabled() ? 'Cloud sync active' : 'Offline · local only')
+                                    e(MIcon, { icon: fbAuthEnabled() ? 'verified_user' : (cloudEnabled() ? 'cloud_done' : 'cloud_off'), style: { fontSize: '20px', color: (fbAuthEnabled() || cloudEnabled()) ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }),
+                                    e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, fbAuthEnabled() ? 'Secure Firebase account' : (cloudEnabled() ? 'Cloud sync active (shared DB)' : 'Offline · local only'))
                                 )
-                            )
-                        )
+                            ),
+                            // Setup helper for the secure-auth migration (only relevant before enabling it).
+                            !fbAuthEnabled() ? e('div', null,
+                                sectionTitle('Secure accounts (setup)'),
+                                e('div', { className: 'rounded-2xl p-4', style: card },
+                                    e('div', { className: 'text-sm leading-snug mb-3', style: { color: 'var(--on-surface-variant)' } },
+                                        'To make accounts private (each user sees only their own data): in the Firebase console enable Email/Password sign-in, paste your Web API key into the app source (FIREBASE_API_KEY), then set the Realtime Database rules to:'),
+                                    e('pre', { className: 'text-xs rounded-lg p-3 overflow-x-auto', style: { background: 'var(--surface-container-lowest)', color: 'var(--primary-fixed-dim)' } }, rulesText),
+                                    e('button', { onClick: () => { try { navigator.clipboard.writeText(rulesText); setToast('Rules copied'); } catch (e) { setToast('Copy failed'); } }, className: 'mt-3 w-full py-2.5 rounded-lg font-bold text-sm active:scale-95', style: { background: 'var(--surface-container-low)', color: 'var(--primary-fixed-dim)' } }, 'Copy rules')
+                                )
+                            ) : null
+                        ),
+                        confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null
                     );
                 }
 
