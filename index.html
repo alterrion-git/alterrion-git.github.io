@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.6.0';
+        const APP_VERSION = '3.6.1';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -281,6 +281,8 @@
                 'auth/weak-password': 'Password should be at least 6 characters.',
                 'auth/operation-not-allowed': 'Enable this sign-in method in the Firebase console.',
                 'auth/popup-blocked': 'Popup blocked — retrying with redirect…',
+                'auth/popup-closed-by-user': 'Sign-in cancelled.',
+                'auth/cancelled-popup-request': 'Sign-in cancelled.',
                 'auth/network-request-failed': 'Network error — check your connection.',
                 'auth/unauthorized-domain': 'This domain is not authorized in Firebase Auth settings.',
             };
@@ -308,8 +310,22 @@
         async function fbSignInGoogle() {
             const a = fbInit(); if (!a) throw new Error('Google sign-in unavailable (offline?)');
             const provider = new firebase.auth.GoogleAuthProvider();
-            // Redirect is the reliable flow inside an installed PWA (popups are often blocked).
-            await a.signInWithRedirect(provider);
+            provider.setCustomParameters({ prompt: 'select_account' });
+            // Popup is the reliable flow when the app domain differs from the Firebase auth
+            // domain: signInWithRedirect loses its session to browser storage partitioning
+            // (Chrome/Safari) and dumps the user back on the login page. Returns the user
+            // directly. Only fall back to a full-page redirect if popups are unavailable.
+            try {
+                const res = await a.signInWithPopup(provider);
+                return (res && res.user) || null;
+            } catch (err) {
+                const c = err && err.code;
+                if (c === 'auth/popup-blocked' || c === 'auth/operation-not-supported-in-this-environment') {
+                    await a.signInWithRedirect(provider);
+                    return null; // page navigates; tryAutoLogin completes it on return
+                }
+                throw err; // includes auth/popup-closed-by-user (user cancelled) and real errors
+            }
         }
         async function fbSignOut() { const a = fbInit(); if (a) { try { await a.signOut(); } catch (e) {} } }
 
@@ -1073,7 +1089,9 @@
                 if (!fbAuthEnabled()) { setAuthError('Sign-in unavailable right now.'); return; }
                 setAuthLoading(true); setAuthError('');
                 try {
-                    await fbSignInGoogle(); // redirects away; tryAutoLogin handles the return
+                    const u = await fbSignInGoogle();
+                    if (u) { await loadFbUser(u); setAuthLoading(false); }
+                    // else: a popup was blocked and we redirected — page will navigate away.
                 } catch (err) { setAuthError(fbMapError(err)); setAuthLoading(false); }
             };
 
