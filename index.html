@@ -199,7 +199,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.2.0';
+        const APP_VERSION = '3.3.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -445,13 +445,17 @@
         }
 
         // --- Daily metrics entry form (own local state) ---
-        function MetricForm({ onSave }) {
-            const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-            const [weight, setWeight] = useState('');
-            const [kcal, setKcal] = useState('');
-            const [sleep, setSleep] = useState('');
-            const [steps, setSteps] = useState('');
-            const [note, setNote] = useState('');
+        // fixedDate: 'YYYY-MM-DD' to lock the date (hides the picker, used by the calendar
+        // day sheet). initial: an existing metrics entry to prefill for editing.
+        function MetricForm({ onSave, fixedDate, initial, compact }) {
+            const init = initial || {};
+            const str = (v) => (v == null ? '' : String(v));
+            const [date, setDate] = useState(() => fixedDate || new Date().toISOString().slice(0, 10));
+            const [weight, setWeight] = useState(str(init.weight));
+            const [kcal, setKcal] = useState(str(init.kcal));
+            const [sleep, setSleep] = useState(str(init.sleep));
+            const [steps, setSteps] = useState(str(init.steps));
+            const [note, setNote] = useState(init.note || '');
             const inputStyle = { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' };
             const num = (ph, val, set, step) => e('input', {
                 type: 'number', inputMode: 'decimal', step: step || 'any', value: val,
@@ -470,12 +474,12 @@
                 };
                 if (entry.weight == null && entry.kcal == null && entry.sleep == null && entry.steps == null && !entry.note) return;
                 onSave(entry);
-                setWeight(''); setKcal(''); setSleep(''); setSteps(''); setNote('');
+                if (!fixedDate) { setWeight(''); setKcal(''); setSleep(''); setSteps(''); setNote(''); }
             };
             const labeled = (label, node) => e('div', null,
                 e('div', { className: 'text-xs uppercase tracking-widest mb-1', style: { color: 'var(--on-surface-variant)' } }, label), node);
-            return e('div', { className: 'rounded-2xl p-4', style: { background: 'var(--surface-container-highest)' } },
-                e('div', { className: 'mb-3' }, labeled('Date', e('input', {
+            return e('div', { className: 'rounded-2xl', style: compact ? {} : { padding: '16px', background: 'var(--surface-container-highest)' } },
+                fixedDate ? null : e('div', { className: 'mb-3' }, labeled('Date', e('input', {
                     type: 'date', value: date, onChange: (ev) => setDate(ev.target.value),
                     className: 'w-full p-2.5 rounded-lg outline-none text-base', style: inputStyle
                 }))),
@@ -634,8 +638,9 @@
         // --- BottomNavBar ---
         function BottomNavBar({ activeTab, onTabChange }) {
             const tabs = [
-                { id: 'calendar', icon: 'calendar_today', label: 'Calendar' },
+                { id: 'calendar', icon: 'event_repeat', label: 'Plan' },
                 { id: 'workout', icon: 'fitness_center', label: 'Workout' },
+                { id: 'month', icon: 'calendar_month', label: 'Calendar' },
                 { id: 'progress', icon: 'insights', label: 'Progress' },
                 { id: 'stats', icon: 'bar_chart', label: 'Stats' },
             ];
@@ -652,9 +657,9 @@
                     paddingBottom: isCover ? '6px' : 'max(env(safe-area-inset-bottom), 12px)',
                     paddingTop: isCover ? '4px' : '12px',
                     borderTop: '1px solid rgba(69, 72, 76, 0.1)',
-                    width: isCover ? '56%' : '100%',
-                    paddingLeft: isCover ? '4px' : '24px',
-                    paddingRight: isCover ? '4px' : '24px',
+                    width: isCover ? (tabs.length >= 5 ? '70%' : '56%') : '100%',
+                    paddingLeft: isCover ? '4px' : '20px',
+                    paddingRight: isCover ? '4px' : '20px',
                     borderRadius: isCover ? '0 20px 0 0' : '0'
                 }
             },
@@ -908,6 +913,10 @@
             const [aiBusy, setAiBusy] = useState(false);
             const [aiError, setAiError] = useState('');
             const [toast, setToast] = useState('');
+            // Month calendar: cursor = first-of-month being shown; selectedDay = day sheet open
+            const [calCursor, setCalCursor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime(); });
+            const [selectedDay, setSelectedDay] = useState(null); // ms at noon of the picked day, or null
+            const [monthPicker, setMonthPicker] = useState(false);
 
             // Cover screen detection (flip phone: nearly square aspect) — shared hook
             const viewport = useViewport();
@@ -1087,6 +1096,9 @@
                     } else {
                         setView('workout-idle');
                     }
+                } else if (tabId === 'month') {
+                    setActiveTab('month');
+                    setView('calendarMonth');
                 } else if (tabId === 'progress') {
                     setActiveTab('progress');
                     setProgressSub('hub');
@@ -1596,11 +1608,12 @@
             };
             const deleteMetric = (date) => setMetrics(prev => prev.filter(m => dayKey(m.date) !== dayKey(date)));
 
-            const addPhotoFromFile = async (file, weekTag) => {
+            const addPhotoFromFile = async (file, dateTs) => {
                 if (!file || !currentUser) return;
                 try {
+                    const ts = dateTs || Date.now();
                     const data = await compressImage(file);
-                    const rec = { id: `${currentUser.username}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, user: currentUser.username, date: Date.now(), week: weekKey(Date.now()), data };
+                    const rec = { id: `${currentUser.username}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, user: currentUser.username, date: ts, week: weekKey(ts), data };
                     await photoAdd(rec);
                     await refreshPhotos();
                     setToast('Photo added');
@@ -2621,6 +2634,170 @@
                         )
                     ),
                     e(BottomNavBar, { activeTab: 'workout', onTabChange: handleTabChange })
+                );
+            }
+
+            // ======================
+            // MONTH CALENDAR VIEW (per-day logging hub)
+            // ======================
+            if (view === 'calendarMonth') {
+                const monthNamesFull = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                const cursor = new Date(calCursor);
+                const year = cursor.getFullYear();
+                const month = cursor.getMonth();
+                const todayKey = dayKey(Date.now());
+
+                // Presence sets for indicator dots.
+                const metricDays = new Set(metrics.map(m => dayKey(m.date)));
+                const photoDays = new Set(photos.map(p => dayKey(p.date)));
+                const workoutDays = new Set(workoutHistory.map(w => dayKey(w.date)));
+
+                // Build a Monday-first 6-week grid.
+                const firstOfMonth = new Date(year, month, 1);
+                const leading = (firstOfMonth.getDay() + 6) % 7; // 0 = Monday
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                const cells = [];
+                for (let i = 0; i < leading; i++) cells.push(null);
+                for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d, 12, 0, 0, 0));
+                while (cells.length % 7 !== 0) cells.push(null);
+
+                const shiftMonth = (delta) => { const d = new Date(year, month + delta, 1); d.setHours(0, 0, 0, 0); setCalCursor(d.getTime()); };
+                const goToday = () => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); setCalCursor(d.getTime()); };
+
+                const dot = (color) => e('div', { style: { width: 5, height: 5, borderRadius: '50%', background: color } });
+                const navBtn = (icon, onClick, lbl) => e('button', {
+                    onClick, 'aria-label': lbl,
+                    className: 'w-9 h-9 rounded-full flex items-center justify-center active:scale-90 flex-shrink-0',
+                    style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' }
+                }, e(MIcon, { icon, style: { fontSize: '20px' } }));
+
+                // ---- Day detail sheet ----
+                const daySheet = selectedDay != null ? (() => {
+                    const d = new Date(selectedDay);
+                    const dk = dayKey(selectedDay);
+                    const existing = metrics.find(m => dayKey(m.date) === dk) || null;
+                    const dayPhotos = photos.filter(p => dayKey(p.date) === dk);
+                    const dayWorkouts = workoutHistory.filter(w => dayKey(w.date) === dk);
+                    const fixed = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                    return e('div', { className: 'fixed inset-0 z-[160] flex flex-col', style: { background: 'var(--void)' } },
+                        e(TopAppBar, {
+                            title: d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase(),
+                            leftAction: e('button', {
+                                onClick: () => setSelectedDay(null),
+                                className: 'flex items-center gap-1 active:opacity-60', style: { color: 'var(--on-surface-variant)' }
+                            }, e(MIcon, { icon: 'close', style: { fontSize: '22px' } }))
+                        }),
+                        e('div', { className: 'flex-1 overflow-y-auto pt-20 px-4 pb-8', style: { color: 'var(--on-surface)' } },
+                            e('div', { className: 'max-w-lg mx-auto space-y-5' },
+                                dayWorkouts.length ? e('div', null,
+                                    e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Workouts'),
+                                    e('div', { className: 'space-y-1.5' }, dayWorkouts.map((w, i) => e('div', { key: i, className: 'rounded-xl px-3 py-2 flex items-center gap-2', style: { background: 'var(--surface-container-high)' } },
+                                        e(MIcon, { icon: 'fitness_center', style: { fontSize: '18px', color: 'var(--primary-fixed-dim)' } }),
+                                        e('span', { className: 'text-sm font-bold' }, w.name),
+                                        e('span', { className: 'text-xs ml-auto', style: { color: 'var(--on-surface-variant)' } }, formatTime(w.totalTime))
+                                    )))
+                                ) : null,
+                                e('div', null,
+                                    e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, existing ? 'Edit Metrics' : 'Add Metrics'),
+                                    e(MetricForm, { key: dk, fixedDate: fixed, initial: existing, onSave: (entry) => { saveMetric(entry); setToast('Saved'); } })
+                                ),
+                                e('div', null,
+                                    e('div', { className: 'flex items-center justify-between mb-2' },
+                                        e('div', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Photos'),
+                                        e('label', { className: 'flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer active:scale-95', style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' } },
+                                            e(MIcon, { icon: 'add_a_photo', style: { fontSize: '16px' } }), 'Add',
+                                            e('input', { type: 'file', accept: 'image/*', className: 'hidden', onChange: (ev) => { const f = ev.target.files && ev.target.files[0]; if (f) addPhotoFromFile(f, selectedDay); ev.target.value = ''; } })
+                                        )
+                                    ),
+                                    dayPhotos.length ? e('div', { className: 'grid grid-cols-3 gap-2' }, dayPhotos.map(p => e('div', { key: p.id, className: 'relative rounded-xl overflow-hidden', style: { aspectRatio: '3/4', background: 'var(--surface-container-high)' } },
+                                        e('img', { src: p.data, className: 'w-full h-full object-cover', style: { display: 'block' } }),
+                                        e('button', { onClick: () => setConfirmState({ title: 'Delete photo?', message: 'This photo will be removed from this device.', confirmLabel: 'Delete', onConfirm: () => { removePhoto(p.id); setConfirmState(null); } }), className: 'absolute top-1 right-1 w-7 h-7 rounded-full flex items-center justify-center', style: { background: 'rgba(0,0,0,0.55)', color: '#fff' } }, e(MIcon, { icon: 'close', style: { fontSize: '15px' } }))
+                                    ))) : e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, 'No photos for this day.')
+                                )
+                            )
+                        ),
+                        confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null
+                    );
+                })() : null;
+
+                // ---- Month picker overlay ----
+                const pickerOverlay = monthPicker ? e('div', { className: 'fixed inset-0 z-[160] flex items-center justify-center px-6', onClick: () => setMonthPicker(false) },
+                    e('div', { className: 'absolute inset-0', style: { background: 'rgba(0,0,0,0.7)' } }),
+                    e('div', { className: 'relative z-10 w-full max-w-xs rounded-2xl p-4', style: { background: 'var(--surface-container-highest)' }, onClick: (ev) => ev.stopPropagation() },
+                        e('div', { className: 'flex items-center justify-between mb-4' },
+                            navBtn('chevron_left', () => setCalCursor(new Date(year - 1, month, 1).getTime()), 'Previous year'),
+                            e('div', { className: 'text-xl font-black' }, year),
+                            navBtn('chevron_right', () => setCalCursor(new Date(year + 1, month, 1).getTime()), 'Next year')
+                        ),
+                        e('div', { className: 'grid grid-cols-3 gap-2' }, monthNamesFull.map((mn, mi) => e('button', {
+                            key: mi,
+                            onClick: () => { setCalCursor(new Date(year, mi, 1).getTime()); setMonthPicker(false); },
+                            className: 'py-2.5 rounded-xl text-sm font-bold active:scale-95',
+                            style: mi === month ? { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' } : { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)' }
+                        }, mn.slice(0, 3))))
+                    )
+                ) : null;
+
+                return e('div', { className: 'min-h-screen flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' } },
+                    e(TopAppBar, {
+                        title: 'CALENDAR',
+                        rightAction: e('button', { onClick: goToday, className: 'px-3 py-1.5 rounded-lg text-xs font-bold active:scale-95', style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' } }, 'Today')
+                    }),
+                    e('div', { className: 'flex-1 pt-20 px-3 pb-28 overflow-y-auto' },
+                        e('div', { className: 'max-w-lg mx-auto' },
+                            // Month header
+                            e('div', { className: 'flex items-center justify-between mb-4 px-1' },
+                                navBtn('chevron_left', () => shiftMonth(-1), 'Previous month'),
+                                e('button', { onClick: () => setMonthPicker(true), className: 'flex items-center gap-1 active:opacity-70' },
+                                    e('span', { className: 'text-2xl font-black' }, `${monthNamesFull[month]} ${year}`),
+                                    e(MIcon, { icon: 'arrow_drop_down', style: { fontSize: '24px', color: 'var(--on-surface-variant)' } })
+                                ),
+                                navBtn('chevron_right', () => shiftMonth(1), 'Next month')
+                            ),
+                            // Weekday header
+                            e('div', { className: 'grid grid-cols-7 gap-1 mb-1' },
+                                ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((wd, i) => e('div', { key: i, className: 'text-center text-xs font-bold py-1', style: { color: 'var(--on-surface-variant)' } }, wd))
+                            ),
+                            // Day grid
+                            e('div', { className: 'grid grid-cols-7 gap-1' },
+                                cells.map((cell, idx) => {
+                                    if (!cell) return e('div', { key: idx });
+                                    const ck = dayKey(cell.getTime());
+                                    const isToday = ck === todayKey;
+                                    const isFuture = cell.getTime() > Date.now();
+                                    const has = [];
+                                    if (metricDays.has(ck)) has.push(dot('var(--primary-container)'));
+                                    if (photoDays.has(ck)) has.push(dot('#00e5ff'));
+                                    if (workoutDays.has(ck)) has.push(dot('var(--secondary)'));
+                                    return e('button', {
+                                        key: idx,
+                                        onClick: () => { setSelectedDay(new Date(cell.getFullYear(), cell.getMonth(), cell.getDate(), 12, 0, 0, 0).getTime()); },
+                                        className: 'rounded-xl flex flex-col items-center justify-start pt-1.5 active:scale-95 transition-transform',
+                                        style: {
+                                            minHeight: 52,
+                                            background: isToday ? 'rgba(209,252,0,0.14)' : 'var(--surface-container-low)',
+                                            border: isToday ? '1px solid var(--primary-container)' : '1px solid transparent',
+                                            opacity: isFuture ? 0.45 : 1
+                                        }
+                                    },
+                                        e('span', { className: 'text-sm font-bold', style: { color: isToday ? 'var(--primary-container)' : 'var(--on-surface)' } }, cell.getDate()),
+                                        e('div', { className: 'flex gap-0.5 mt-1 h-1.5 items-center' }, has)
+                                    );
+                                })
+                            ),
+                            // Legend
+                            e('div', { className: 'flex items-center justify-center gap-4 mt-4 text-xs', style: { color: 'var(--on-surface-variant)' } },
+                                e('div', { className: 'flex items-center gap-1.5' }, dot('var(--primary-container)'), 'Metrics'),
+                                e('div', { className: 'flex items-center gap-1.5' }, dot('#00e5ff'), 'Photo'),
+                                e('div', { className: 'flex items-center gap-1.5' }, dot('var(--secondary)'), 'Workout')
+                            ),
+                            e('div', { className: 'text-xs text-center mt-3 px-2', style: { color: 'var(--outline)' } }, 'Tap any day to log weight, calories, sleep and photos. Anything logged here is automatically included in your AI recaps.')
+                        )
+                    ),
+                    pickerOverlay,
+                    daySheet,
+                    toast ? e('div', { className: 'fixed left-1/2 -translate-x-1/2 z-[170] px-4 py-2 rounded-xl text-sm font-bold', style: { bottom: 'max(env(safe-area-inset-bottom), 80px)', background: 'var(--primary-container)', color: 'var(--on-primary-container)', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' } }, toast) : null,
+                    e(BottomNavBar, { activeTab: 'month', onTabChange: handleTabChange })
                 );
             }
 
