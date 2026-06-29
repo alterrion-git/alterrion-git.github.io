@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.6.2';
+        const APP_VERSION = '3.7.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -764,7 +764,6 @@
                 { id: 'calendar', icon: 'event_repeat', label: 'Plan' },
                 { id: 'workout', icon: 'fitness_center', label: 'Workout' },
                 { id: 'month', icon: 'calendar_month', label: 'Calendar' },
-                { id: 'progress', icon: 'insights', label: 'Progress' },
                 { id: 'stats', icon: 'bar_chart', label: 'Stats' },
             ];
 
@@ -1027,7 +1026,7 @@
             const [pendingMigration, setPendingMigration] = useState(null);
             const [expandedHistoryIdx, setExpandedHistoryIdx] = useState(null);
             // Progress-tracking state
-            const DEFAULT_PROFILE = { goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null };
+            const DEFAULT_PROFILE = { displayName: '', goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null };
             const [profile, setProfile] = useState(DEFAULT_PROFILE);
             const [metrics, setMetrics] = useState([]); // [{ date, weight, kcal, sleep, steps, note }]
             const [recaps, setRecaps] = useState([]);   // [{ type, date, periodKey, text }]
@@ -1993,6 +1992,18 @@
                 reader.readAsText(file);
             };
 
+            // Display name shown in the app (falls back to email/username).
+            const accountName = () => (profile.displayName && profile.displayName.trim()) || (currentUser && (currentUser.email || currentUser.username)) || 'Athlete';
+            // Open the unified profile/progress hub (reached from the person icon — there is
+            // no longer a bottom-nav tab for it, to save space on cover screens).
+            const openHub = () => { setProgressSub('hub'); setAiError(''); setActiveTab(''); setView('progress'); };
+            const profileBtn = e('button', {
+                onClick: openHub,
+                'aria-label': 'Profile',
+                className: 'w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90',
+                style: { background: 'rgba(209, 252, 0, 0.1)' }
+            }, e(MIcon, { icon: 'person', fill: true, style: { fontSize: '20px', color: 'var(--primary-container)' } }));
+
             // ======================
             // LOADING
             // ======================
@@ -2362,7 +2373,7 @@
                     className: 'min-h-screen flex flex-col',
                     style: { background: 'var(--void)', color: 'var(--on-surface)' }
                 },
-                    e(TopAppBar, { title: 'WORKOUT' }),
+                    e(TopAppBar, { title: 'WORKOUT', rightAction: profileBtn }),
                     e('div', { className: 'flex-1 pt-20 pb-28 px-6 flex flex-col items-center justify-center' },
                         e(MIcon, { icon: 'fitness_center', style: { fontSize: '64px', color: 'var(--surface-container-highest)' } }),
                         e('h2', { className: 'text-2xl font-black mt-6 text-center' }, 'No Active Workout'),
@@ -2443,7 +2454,7 @@
                     className: 'min-h-screen flex flex-col',
                     style: { background: 'var(--void)', color: 'var(--on-surface)' }
                 },
-                    e(TopAppBar, { title: 'STATS' }),
+                    e(TopAppBar, { title: 'STATS', rightAction: profileBtn }),
                     e('div', { className: 'flex-1 pt-20 pb-28 px-4 overflow-y-auto' },
                         totalWorkouts === 0 ?
                             e('div', { className: 'flex flex-col items-center justify-center h-full pt-32' },
@@ -3028,7 +3039,10 @@
                 return e('div', { className: 'min-h-screen flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' } },
                     e(TopAppBar, {
                         title: 'CALENDAR',
-                        rightAction: e('button', { onClick: goToday, className: 'px-3 py-1.5 rounded-lg text-xs font-bold active:scale-95', style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' } }, 'Today')
+                        rightAction: e('div', { className: 'flex items-center gap-2' },
+                            e('button', { onClick: goToday, className: 'px-3 py-1.5 rounded-lg text-xs font-bold active:scale-95', style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' } }, 'Today'),
+                            profileBtn
+                        )
                     }),
                     e('div', { className: 'flex-1 pt-20 px-3 pb-28 overflow-y-auto' },
                         e('div', { className: 'max-w-lg mx-auto' },
@@ -3293,6 +3307,17 @@
                     return shell('SETTINGS', true,
                         e('div', { className: 'space-y-5' },
                             e('div', null,
+                                sectionTitle('Display Name'),
+                                e('input', {
+                                    type: 'text', value: profile.displayName || '',
+                                    onChange: (ev) => updateProfileField('displayName', ev.target.value),
+                                    placeholder: currentUser ? (currentUser.email || currentUser.username) : 'Your name',
+                                    className: 'w-full p-3 rounded-xl outline-none text-base font-bold',
+                                    style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' }
+                                }),
+                                e('div', { className: 'text-xs mt-2 px-1', style: { color: 'var(--outline)' } }, 'Shown instead of your email throughout the app.')
+                            ),
+                            e('div', null,
                                 sectionTitle('OpenAI API Key'),
                                 e(ApiKeyForm, { onChanged: () => setToast('Key updated') })
                             ),
@@ -3342,8 +3367,23 @@
                     e('div', { className: 'font-black text-base' }, title),
                     e('div', { className: 'text-xs mt-0.5', style: { color: 'var(--on-surface-variant)' } }, sub)
                 );
-                return shell('PROGRESS', false,
+                const joined = currentUser ? new Date(currentUser.createdAt).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '';
+                return shell('PROFILE', false,
                     e('div', null,
+                        // Account header
+                        e('div', { className: 'rounded-2xl p-4 mb-5 flex items-center gap-3', style: card },
+                            e('div', { className: 'w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0', style: { background: 'rgba(209, 252, 0, 0.1)' } },
+                                e(MIcon, { icon: 'person', fill: true, style: { fontSize: '28px', color: 'var(--primary-container)' } })),
+                            e('div', { className: 'flex-1 min-w-0' },
+                                e('div', { className: 'font-black text-base truncate' }, accountName()),
+                                e('div', { className: 'text-xs truncate', style: { color: 'var(--on-surface-variant)' } },
+                                    [workoutHistory.length + ' workouts', joined ? 'since ' + joined : null].filter(Boolean).join(' · '))
+                            ),
+                            e('button', {
+                                onClick: () => setConfirmState({ title: 'Log out?', message: 'You can sign back in any time.', confirmLabel: 'Log Out', danger: false, onConfirm: () => { setConfirmState(null); doLogout(); } }),
+                                className: 'px-3 py-2 rounded-lg text-sm font-bold flex-shrink-0 active:scale-95', style: { background: 'var(--surface-container-low)', color: 'var(--error)' }
+                            }, 'Log out')
+                        ),
                         // Snapshot
                         e('div', { className: 'grid grid-cols-3 gap-2 mb-5' },
                             e('div', { className: 'rounded-xl p-3 text-center', style: card },
@@ -3399,14 +3439,9 @@
                 className: 'min-h-screen flex flex-col',
                 style: { background: 'var(--void)', color: 'var(--on-surface)' }
             },
-                profileModal,
                 e(TopAppBar, {
                     title: 'PLAN',
-                    rightAction: e('button', {
-                        onClick: () => setShowProfile(true),
-                        className: 'w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90',
-                        style: { background: 'rgba(209, 252, 0, 0.1)' }
-                    }, e(MIcon, { icon: 'person', fill: true, style: { fontSize: '20px', color: 'var(--primary-container)' } }))
+                    rightAction: profileBtn
                 }),
                 e('main', { className: 'flex-1 pt-20 px-4 pb-28' },
                     // Date header
