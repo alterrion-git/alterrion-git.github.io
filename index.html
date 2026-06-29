@@ -199,7 +199,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.1.0';
+        const APP_VERSION = '3.2.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -261,6 +261,115 @@
                 return res.ok;
             } catch (err) { console.error('Cloud set error:', err); return false; }
         }
+
+        // ============================================
+        // PROGRESS / GOALS / PHOTOS / AI HELPERS
+        // ============================================
+
+        // --- Date helpers for weekly/monthly grouping & gating ---
+        const DAY_MS = 24 * 60 * 60 * 1000;
+        function startOfDay(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
+        function dayKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+        function isoWeekInfo(ts) {
+            const d = new Date(ts); d.setHours(0, 0, 0, 0);
+            d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7)); // nearest Thursday
+            const week1 = new Date(d.getFullYear(), 0, 4);
+            const week = 1 + Math.round(((d - week1) / DAY_MS - 3 + ((week1.getDay() + 6) % 7)) / 7);
+            return { year: d.getFullYear(), week };
+        }
+        function weekKey(ts) { const { year, week } = isoWeekInfo(ts); return `${year}-W${String(week).padStart(2, '0')}`; }
+        function monthKey(ts) { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+        function countDistinct(arr, keyFn) { return new Set(arr.map(keyFn)).size; }
+
+        // --- On-device OpenAI API key (never synced to the world-readable DB) ---
+        const OPENAI_KEY_LS = 'cwa-openai-key';
+        function getOpenAIKey() { try { return localStorage.getItem(OPENAI_KEY_LS) || ''; } catch (err) { return ''; } }
+        function setOpenAIKey(k) { try { if (k) localStorage.setItem(OPENAI_KEY_LS, k); else localStorage.removeItem(OPENAI_KEY_LS); } catch (err) {} }
+
+        // --- IndexedDB store for progress photos (kept local; not in Firebase) ---
+        const PHOTO_DB = 'cwa-photos', PHOTO_STORE = 'photos';
+        function openPhotoDB() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(PHOTO_DB, 1);
+                req.onupgradeneeded = () => {
+                    const db = req.result;
+                    if (!db.objectStoreNames.contains(PHOTO_STORE)) {
+                        const store = db.createObjectStore(PHOTO_STORE, { keyPath: 'id' });
+                        store.createIndex('user', 'user', { unique: false });
+                    }
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+        async function photoAdd(record) {
+            const db = await openPhotoDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(PHOTO_STORE, 'readwrite');
+                tx.objectStore(PHOTO_STORE).put(record);
+                tx.oncomplete = () => resolve(true);
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+        async function photoList(user) {
+            const db = await openPhotoDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(PHOTO_STORE, 'readonly');
+                const req = tx.objectStore(PHOTO_STORE).getAll();
+                req.onsuccess = () => resolve((req.result || []).filter(r => !user || r.user === user).sort((a, b) => b.date - a.date));
+                req.onerror = () => reject(req.error);
+            });
+        }
+        async function photoDelete(id) {
+            const db = await openPhotoDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(PHOTO_STORE, 'readwrite');
+                tx.objectStore(PHOTO_STORE).delete(id);
+                tx.oncomplete = () => resolve(true);
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+        // Downscale an uploaded image to a reasonable max dimension and JPEG-compress it,
+        // so on-device storage stays small and the LLM payload is light.
+        function compressImage(file, maxDim = 1024, quality = 0.8) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                const url = URL.createObjectURL(file);
+                img.onload = () => {
+                    let { width, height } = img;
+                    if (width > height && width > maxDim) { height = Math.round(height * maxDim / width); width = maxDim; }
+                    else if (height > maxDim) { width = Math.round(width * maxDim / height); height = maxDim; }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width; canvas.height = height;
+                    canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+                    URL.revokeObjectURL(url);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                };
+                img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read image')); };
+                img.src = url;
+            });
+        }
+
+        // --- OpenAI multimodal call (chat completions) ---
+        async function callOpenAI(apiKey, content, { model = 'gpt-4o', system, maxTokens = 900 } = {}) {
+            const messages = [];
+            if (system) messages.push({ role: 'system', content: system });
+            messages.push({ role: 'user', content });
+            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.6 })
+            });
+            if (!res.ok) {
+                let detail = '';
+                try { const j = await res.json(); detail = j.error && j.error.message ? j.error.message : ''; } catch (err) {}
+                throw new Error(detail || `OpenAI request failed (${res.status})`);
+            }
+            const data = await res.json();
+            return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+        }
+
+        const RECAP_SYSTEM = "You are an expert strength & physique coach reviewing a client's training and body-composition data. Be specific, honest, and motivating. Reference their actual numbers and stated goal. Give 3-5 concrete, prioritized recommendations for the next period. If progress photos are included, comment briefly and tactfully on visible changes. Keep it concise (under ~300 words), use short paragraphs or bullet points, and avoid medical claims.";
 
         const { useState, useEffect, useRef } = React;
         const e = React.createElement;
@@ -332,6 +441,89 @@
                         }, confirmLabel)
                     )
                 )
+            );
+        }
+
+        // --- Daily metrics entry form (own local state) ---
+        function MetricForm({ onSave }) {
+            const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+            const [weight, setWeight] = useState('');
+            const [kcal, setKcal] = useState('');
+            const [sleep, setSleep] = useState('');
+            const [steps, setSteps] = useState('');
+            const [note, setNote] = useState('');
+            const inputStyle = { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' };
+            const num = (ph, val, set, step) => e('input', {
+                type: 'number', inputMode: 'decimal', step: step || 'any', value: val,
+                onChange: (ev) => set(ev.target.value), placeholder: ph,
+                className: 'w-full p-2.5 rounded-lg outline-none text-base', style: inputStyle
+            });
+            const submit = () => {
+                const ts = new Date(date + 'T12:00:00').getTime();
+                const entry = {
+                    date: ts,
+                    weight: parseFloat(weight) || null,
+                    kcal: parseFloat(kcal) || null,
+                    sleep: parseFloat(sleep) || null,
+                    steps: parseFloat(steps) || null,
+                    note: note.trim(),
+                };
+                if (entry.weight == null && entry.kcal == null && entry.sleep == null && entry.steps == null && !entry.note) return;
+                onSave(entry);
+                setWeight(''); setKcal(''); setSleep(''); setSteps(''); setNote('');
+            };
+            const labeled = (label, node) => e('div', null,
+                e('div', { className: 'text-xs uppercase tracking-widest mb-1', style: { color: 'var(--on-surface-variant)' } }, label), node);
+            return e('div', { className: 'rounded-2xl p-4', style: { background: 'var(--surface-container-highest)' } },
+                e('div', { className: 'mb-3' }, labeled('Date', e('input', {
+                    type: 'date', value: date, onChange: (ev) => setDate(ev.target.value),
+                    className: 'w-full p-2.5 rounded-lg outline-none text-base', style: inputStyle
+                }))),
+                e('div', { className: 'grid grid-cols-2 gap-3 mb-3' },
+                    labeled('Weight (kg)', num('70.5', weight, setWeight)),
+                    labeled('Calories', num('2500', kcal, setKcal)),
+                    labeled('Sleep (h)', num('7.5', sleep, setSleep)),
+                    labeled('Steps', num('8000', steps, setSteps))
+                ),
+                e('div', { className: 'mb-3' }, labeled('Note', e('input', {
+                    type: 'text', value: note, onChange: (ev) => setNote(ev.target.value),
+                    placeholder: 'Optional (energy, soreness, diet…)',
+                    className: 'w-full p-2.5 rounded-lg outline-none text-base', style: inputStyle
+                }))),
+                e('button', {
+                    onClick: submit,
+                    className: 'w-full py-3 rounded-xl font-black text-base transition-all active:scale-95',
+                    style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' }
+                }, 'Save Entry')
+            );
+        }
+
+        // --- OpenAI API key entry (stored on-device only) ---
+        function ApiKeyForm({ onChanged }) {
+            const [val, setVal] = useState(getOpenAIKey());
+            const [show, setShow] = useState(false);
+            const [saved, setSaved] = useState(false);
+            const save = () => { setOpenAIKey(val.trim()); setSaved(true); setTimeout(() => setSaved(false), 1500); if (onChanged) onChanged(); };
+            const clear = () => { setVal(''); setOpenAIKey(''); if (onChanged) onChanged(); };
+            return e('div', { className: 'rounded-2xl p-4', style: { background: 'var(--surface-container-highest)' } },
+                e('div', { className: 'flex items-center gap-2 mb-2' },
+                    e('input', {
+                        type: show ? 'text' : 'password', value: val,
+                        onChange: (ev) => setVal(ev.target.value), placeholder: 'sk-…', autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false,
+                        className: 'flex-1 min-w-0 p-2.5 rounded-lg outline-none text-base',
+                        style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' }
+                    }),
+                    e('button', {
+                        onClick: () => setShow(s => !s),
+                        className: 'px-3 py-2.5 rounded-lg text-sm', style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)' }
+                    }, show ? 'Hide' : 'Show')
+                ),
+                e('div', { className: 'flex gap-2' },
+                    e('button', { onClick: save, className: 'flex-1 py-2.5 rounded-lg font-bold text-sm transition-all active:scale-95', style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' } }, saved ? 'Saved ✓' : 'Save Key'),
+                    e('button', { onClick: clear, className: 'px-4 py-2.5 rounded-lg font-bold text-sm', style: { background: 'var(--surface-container-low)', color: 'var(--error)' } }, 'Clear')
+                ),
+                e('div', { className: 'text-xs mt-3 leading-snug', style: { color: 'var(--outline)' } },
+                    'Stored only on this device (localStorage) — never uploaded to the cloud. Used directly from your browser to call OpenAI for recaps.')
             );
         }
 
@@ -444,6 +636,7 @@
             const tabs = [
                 { id: 'calendar', icon: 'calendar_today', label: 'Calendar' },
                 { id: 'workout', icon: 'fitness_center', label: 'Workout' },
+                { id: 'progress', icon: 'insights', label: 'Progress' },
                 { id: 'stats', icon: 'bar_chart', label: 'Stats' },
             ];
 
@@ -459,16 +652,16 @@
                     paddingBottom: isCover ? '6px' : 'max(env(safe-area-inset-bottom), 12px)',
                     paddingTop: isCover ? '4px' : '12px',
                     borderTop: '1px solid rgba(69, 72, 76, 0.1)',
-                    width: isCover ? '42%' : '100%',
-                    paddingLeft: isCover ? '4px' : '32px',
-                    paddingRight: isCover ? '4px' : '32px',
+                    width: isCover ? '56%' : '100%',
+                    paddingLeft: isCover ? '4px' : '24px',
+                    paddingRight: isCover ? '4px' : '24px',
                     borderRadius: isCover ? '0 20px 0 0' : '0'
                 }
             },
                 tabs.map(tab => {
                     const isActive = activeTab === tab.id;
-                    const btnSize = isCover ? '36px' : '52px';
-                    const iconSize = isCover ? (isActive ? '20px' : '18px') : (isActive ? '28px' : '24px');
+                    const btnSize = isCover ? '32px' : '48px';
+                    const iconSize = isCover ? (isActive ? '18px' : '16px') : (isActive ? '26px' : '23px');
                     return e('div', {
                         key: tab.id,
                         className: 'flex-1 flex justify-center',
@@ -705,6 +898,16 @@
             const [loginPassword, setLoginPassword] = useState('');
             const [pendingMigration, setPendingMigration] = useState(null);
             const [expandedHistoryIdx, setExpandedHistoryIdx] = useState(null);
+            // Progress-tracking state
+            const DEFAULT_PROFILE = { goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null };
+            const [profile, setProfile] = useState(DEFAULT_PROFILE);
+            const [metrics, setMetrics] = useState([]); // [{ date, weight, kcal, sleep, steps, note }]
+            const [recaps, setRecaps] = useState([]);   // [{ type, date, periodKey, text }]
+            const [progressSub, setProgressSub] = useState('hub'); // hub | goals | metrics | photos | recaps | settings
+            const [photos, setPhotos] = useState([]);   // loaded from IndexedDB (local only)
+            const [aiBusy, setAiBusy] = useState(false);
+            const [aiError, setAiError] = useState('');
+            const [toast, setToast] = useState('');
 
             // Cover screen detection (flip phone: nearly square aspect) — shared hook
             const viewport = useViewport();
@@ -740,6 +943,7 @@
                     const loadedHistory = userData.history || [];
                     setWorkouts(loadedWorkouts);
                     setWorkoutHistory(loadedHistory);
+                    hydrateProgress(uname, userData);
                     localStorage.setItem('cwa-user', JSON.stringify({ username: uname, passwordHash: pHash }));
                     // Check for old data to migrate (only if account has no workouts)
                     if (Object.keys(loadedWorkouts).length === 0) {
@@ -760,6 +964,7 @@
                         if (oldData) { setPendingMigration(oldData); setView('migrate'); setAuthLoading(false); localStorage.setItem('cwa-user', JSON.stringify({ username: uname, passwordHash: pHash })); return; }
                     }
                     if (h) setWorkoutHistory(JSON.parse(h));
+                    hydrateProgress(uname, null);
                     localStorage.setItem('cwa-user', JSON.stringify({ username: uname, passwordHash: pHash }));
                 }
                 setView('landing');
@@ -822,6 +1027,11 @@
                 setCurrentUser(null);
                 setWorkouts({});
                 setWorkoutHistory([]);
+                setProfile(DEFAULT_PROFILE);
+                setMetrics([]);
+                setRecaps([]);
+                setPhotos([]);
+                setProgressSub('hub');
                 setView('login');
                 setLoginUsername('');
                 setLoginPassword('');
@@ -842,6 +1052,26 @@
                 }
             };
 
+            // Persist a single progress field (profile / metrics / recaps) locally + cloud.
+            const cloudSaveField = async (field, value) => {
+                if (!currentUser) return;
+                const uname = currentUser.username;
+                try { localStorage.setItem('cwa-' + field + '-' + uname, JSON.stringify(value)); } catch (err) {}
+                if (cloudEnabled()) await cloudSet('users/' + uname + '/' + field, value);
+            };
+
+            // Hydrate progress data from a loaded user record (cloud) or localStorage.
+            const hydrateProgress = (uname, src) => {
+                const pick = (field, fallback) => {
+                    if (src && src[field] != null) return src[field];
+                    try { const raw = localStorage.getItem('cwa-' + field + '-' + uname); if (raw) return JSON.parse(raw); } catch (err) {}
+                    return fallback;
+                };
+                setProfile({ ...DEFAULT_PROFILE, ...(pick('profile', {}) || {}) });
+                setMetrics(pick('metrics', []) || []);
+                setRecaps(pick('recaps', []) || []);
+            };
+
             // --- Tab switching logic ---
             const handleTabChange = (tabId) => {
                 if (tabId === 'calendar') {
@@ -857,6 +1087,11 @@
                     } else {
                         setView('workout-idle');
                     }
+                } else if (tabId === 'progress') {
+                    setActiveTab('progress');
+                    setProgressSub('hub');
+                    setAiError('');
+                    setView('progress');
                 } else if (tabId === 'stats') {
                     setActiveTab('stats');
                     setView('stats');
@@ -877,6 +1112,7 @@
                                     const lw = userData.workouts || {};
                                     setWorkouts(lw);
                                     setWorkoutHistory(userData.history || []);
+                                    hydrateProgress(username, userData);
                                     // Drop straight back into an in-progress workout if there is one.
                                     if (!resumeSessionIfAny(lw, username)) setView('landing');
                                     setIsLoading(false);
@@ -894,6 +1130,7 @@
                                     const lw = w ? JSON.parse(w) : {};
                                     if (w) setWorkouts(lw);
                                     if (h) setWorkoutHistory(JSON.parse(h));
+                                    hydrateProgress(username, null);
                                     if (!resumeSessionIfAny(lw, username)) setView('landing');
                                     setIsLoading(false);
                                     return;
@@ -912,6 +1149,32 @@
                     syncToCloud(workouts, workoutHistory);
                 }
             }, [workouts, workoutHistory]);
+            useEffect(() => { if (!isLoading && currentUser) cloudSaveField('profile', profile); }, [profile]);
+            useEffect(() => { if (!isLoading && currentUser) cloudSaveField('metrics', metrics); }, [metrics]);
+            useEffect(() => { if (!isLoading && currentUser) cloudSaveField('recaps', recaps); }, [recaps]);
+
+            // Load this user's progress photos from IndexedDB whenever the user changes.
+            useEffect(() => {
+                let cancelled = false;
+                if (currentUser) {
+                    photoList(currentUser.username).then(list => { if (!cancelled) setPhotos(list); }).catch(() => {});
+                } else {
+                    setPhotos([]);
+                }
+                return () => { cancelled = true; };
+            }, [currentUser]);
+
+            const refreshPhotos = async () => {
+                if (!currentUser) return;
+                try { setPhotos(await photoList(currentUser.username)); } catch (err) {}
+            };
+
+            // Auto-dismiss transient toast messages.
+            useEffect(() => {
+                if (!toast) return;
+                const t = setTimeout(() => setToast(''), 2200);
+                return () => clearTimeout(t);
+            }, [toast]);
 
             const saveToHistory = (workout, elapsedTime, totalScore, maxScore) => {
                 const entry = {
@@ -1316,6 +1579,140 @@
                     summary.push({ name: exercise.name, change: changeText, hasChanges, points });
                 });
                 return { summary, totalScore, maxScore: liveWorkout.exercises.length * 2 };
+            };
+
+            // ======================
+            // PROGRESS-TRACKING HANDLERS
+            // ======================
+            const updateProfileField = (field, value) => setProfile(prev => ({ ...prev, [field]: value }));
+
+            // Upsert one metrics entry per calendar day.
+            const saveMetric = (entry) => {
+                setMetrics(prev => {
+                    const k = dayKey(entry.date);
+                    const rest = prev.filter(m => dayKey(m.date) !== k);
+                    return [...rest, entry].sort((a, b) => a.date - b.date);
+                });
+            };
+            const deleteMetric = (date) => setMetrics(prev => prev.filter(m => dayKey(m.date) !== dayKey(date)));
+
+            const addPhotoFromFile = async (file, weekTag) => {
+                if (!file || !currentUser) return;
+                try {
+                    const data = await compressImage(file);
+                    const rec = { id: `${currentUser.username}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, user: currentUser.username, date: Date.now(), week: weekKey(Date.now()), data };
+                    await photoAdd(rec);
+                    await refreshPhotos();
+                    setToast('Photo added');
+                } catch (err) { setAiError('Could not add photo: ' + (err.message || err)); }
+            };
+            const removePhoto = async (id) => { try { await photoDelete(id); await refreshPhotos(); } catch (err) {} };
+
+            // All timestamped data points used to judge how much history exists.
+            const allDataDates = () => [
+                ...workoutHistory.map(w => w.date),
+                ...metrics.map(m => m.date),
+                ...photos.map(p => p.date),
+            ].filter(Boolean);
+
+            const distinctWeeks = () => countDistinct(allDataDates(), weekKey);
+            const distinctMonths = () => countDistinct(allDataDates(), monthKey);
+
+            // Gating: weekly needs >=2 weeks of data and none generated for the current
+            // ISO week yet; monthly needs >=2 months and none for the current month.
+            const lastRecap = (type) => recaps.filter(r => r.type === type).sort((a, b) => b.date - a.date)[0];
+            const canGenerate = (type) => {
+                if (!getOpenAIKey()) return { ok: false, reason: 'Add your OpenAI API key in Settings.' };
+                if (type === 'weekly') {
+                    if (distinctWeeks() < 2) return { ok: false, reason: 'Need at least 2 weeks of data.' };
+                    const last = lastRecap('weekly');
+                    if (last && last.periodKey === weekKey(Date.now())) return { ok: false, reason: 'Weekly recap already done this week.' };
+                } else {
+                    if (distinctMonths() < 2) return { ok: false, reason: 'Need at least 2 months of data.' };
+                    const last = lastRecap('monthly');
+                    if (last && last.periodKey === monthKey(Date.now())) return { ok: false, reason: 'Monthly recap already done this month.' };
+                }
+                return { ok: true, reason: '' };
+            };
+
+            // Exercises with "proper history": appear in >=2 logged sessions. Used so the LLM
+            // only reasons about lifts the user has actually stuck with.
+            const buildExerciseTrends = (sinceTs) => {
+                const byName = {};
+                workoutHistory.forEach(w => {
+                    w.exercises.forEach(ex => {
+                        const top = ex.sets.reduce((b, s) => (s.weight > b.weight ? s : b), { reps: 0, weight: 0 });
+                        const vol = ex.sets.reduce((sum, s) => sum + s.reps * s.weight, 0);
+                        (byName[ex.name] = byName[ex.name] || []).push({ date: w.date, topWeight: top.weight, topReps: top.reps, vol });
+                    });
+                });
+                const lines = [];
+                Object.keys(byName).forEach(name => {
+                    const sessions = byName[name].sort((a, b) => a.date - b.date);
+                    if (sessions.length < 2) return; // skip exercises without real history
+                    const recent = sessions.filter(s => s.date >= sinceTs);
+                    const ref = recent.length >= 2 ? recent : sessions.slice(-Math.min(4, sessions.length));
+                    const first = ref[0], last = ref[ref.length - 1];
+                    const dW = (last.topWeight - first.topWeight);
+                    lines.push(`- ${name}: top set ${first.topWeight}kg×${first.topReps} → ${last.topWeight}kg×${last.topReps} (${dW >= 0 ? '+' : ''}${Math.round(dW * 10) / 10}kg) over ${ref.length} sessions`);
+                });
+                return lines;
+            };
+
+            const buildRecapContent = (type) => {
+                const now = Date.now();
+                const periodStart = type === 'weekly' ? now - 7 * DAY_MS : now - 31 * DAY_MS;
+                const workoutsInPeriod = workoutHistory.filter(w => w.date >= periodStart);
+                const metricsInPeriod = metrics.filter(m => m.date >= periodStart);
+                const weights = metricsInPeriod.filter(m => m.weight).map(m => m.weight);
+                const kcals = metricsInPeriod.filter(m => m.kcal).map(m => m.kcal);
+                const sleeps = metricsInPeriod.filter(m => m.sleep).map(m => m.sleep);
+                const avg = (a) => a.length ? Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 10) / 10 : null;
+                const p = profile;
+                const goalLine = [
+                    p.goal ? `Goal: ${p.goal}` : null,
+                    p.split ? `Split: ${p.split}` : null,
+                    p.targetWeight ? `Target weight: ${p.targetWeight}kg` : null,
+                    p.targetBodyFat ? `Target body fat: ${p.targetBodyFat}%` : null,
+                    p.dailyKcal ? `Daily kcal target: ${p.dailyKcal}` : null,
+                ].filter(Boolean).join(' | ') || 'No explicit goals set.';
+                const trends = buildExerciseTrends(periodStart);
+                const lines = [];
+                lines.push(`Period: ${type} (last ${type === 'weekly' ? '7 days' : '~1 month'}).`);
+                lines.push(goalLine);
+                lines.push(`Workouts completed this period: ${workoutsInPeriod.length}.`);
+                if (trends.length) { lines.push('Lift progression (exercises with real history):'); trends.forEach(t => lines.push(t)); }
+                else lines.push('Not enough repeated-exercise history to show lift trends yet.');
+                const bodyBits = [];
+                if (weights.length) bodyBits.push(`weight ${weights[0]}→${weights[weights.length - 1]}kg (avg ${avg(weights)})`);
+                if (kcals.length) bodyBits.push(`avg intake ${avg(kcals)} kcal/day over ${kcals.length} logged days`);
+                if (sleeps.length) bodyBits.push(`avg sleep ${avg(sleeps)}h`);
+                lines.push(bodyBits.length ? `Body metrics: ${bodyBits.join('; ')}.` : 'No body metrics logged this period.');
+                const photosInPeriod = photos.filter(ph => ph.date >= periodStart).sort((a, b) => b.date - a.date).slice(0, 2);
+                lines.push(photosInPeriod.length ? `${photosInPeriod.length} progress photo(s) attached (most recent).` : 'No progress photos this period.');
+                lines.push('\nWrite a concise coaching recap and 3-5 prioritized recommendations for the next period.');
+                const content = [{ type: 'text', text: lines.join('\n') }];
+                photosInPeriod.forEach(ph => content.push({ type: 'image_url', image_url: { url: ph.data } }));
+                return content;
+            };
+
+            const generateRecap = async (type) => {
+                setAiError('');
+                const gate = canGenerate(type);
+                if (!gate.ok) { setAiError(gate.reason); return; }
+                const apiKey = getOpenAIKey();
+                setAiBusy(true);
+                try {
+                    const content = buildRecapContent(type);
+                    const text = await callOpenAI(apiKey, content, { system: RECAP_SYSTEM, maxTokens: type === 'monthly' ? 1100 : 850 });
+                    const now = Date.now();
+                    const periodKey = type === 'weekly' ? weekKey(now) : monthKey(now);
+                    const entry = { type, date: now, periodKey, text };
+                    setRecaps(prev => [...prev.filter(r => !(r.type === type && r.periodKey === periodKey)), entry].sort((a, b) => b.date - a.date));
+                    setToast((type === 'weekly' ? 'Weekly' : 'Monthly') + ' recap ready');
+                } catch (err) {
+                    setAiError(err.message || 'Recap failed');
+                } finally { setAiBusy(false); }
             };
 
             // ======================
@@ -1900,6 +2297,25 @@
                 const contentPadTop = 72;
                 const contentPadBottom = isCoverScreen ? 52 : 112;
 
+                // Partials control: replaces the old "type 0.1 reps" hack with a proper
+                // half-rep stepper. Reps can hold decimals (e.g. 8.5 = 8 reps + 1 partial).
+                const partialFrac = Math.round((currentSet.reps - Math.floor(currentSet.reps)) * 100) / 100;
+                const setReps = (v) => updateLiveSet('reps', Math.max(0, Math.round(v * 100) / 100));
+                const partialRow = e('div', { className: 'flex items-center justify-center gap-2 mt-2' },
+                    e('button', {
+                        onClick: () => setReps(currentSet.reps - 0.5),
+                        className: 'w-9 h-9 rounded-full flex items-center justify-center text-lg font-black active:scale-90 flex-shrink-0',
+                        style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' }
+                    }, '−'),
+                    e('div', { className: 'px-3 py-1.5 rounded-full text-xs font-bold', style: { background: partialFrac ? 'var(--secondary-container)' : 'var(--surface-container-high)', color: partialFrac ? 'var(--on-secondary-container)' : 'var(--on-surface-variant)', minWidth: '92px', textAlign: 'center' } },
+                        partialFrac ? `+½ partial (${fmtNum(currentSet.reps)})` : 'Add ½ partial'),
+                    e('button', {
+                        onClick: () => setReps(currentSet.reps + 0.5),
+                        className: 'w-9 h-9 rounded-full flex items-center justify-center text-lg font-black active:scale-90 flex-shrink-0',
+                        style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--void)' }
+                    }, '+')
+                );
+
                 return e('div', {
                     className: 'h-full flex flex-col',
                     style: { background: 'var(--void)', color: 'var(--on-surface)', overflow: 'hidden' }
@@ -1974,6 +2390,7 @@
                                         style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--void)' }
                                     }, e(ArrowRight, { size: 22 }))
                                 ),
+                                partialRow,
                                 // Notes bar
                                 currentExercise.notes ? e('div', { className: 'flex justify-center mt-2 px-2' },
                                     e('div', {
@@ -1996,6 +2413,7 @@
                                     e(CustomNumberInput, { value: currentSet.reps, onChange: (val) => updateLiveSet('reps', val), label: 'Reps', step: 1, size: boxSize }),
                                     e(CustomNumberInput, { value: currentSet.weight, onChange: (val) => updateLiveSet('weight', val), label: 'Weight (kg)', step: 0.5, size: boxSize })
                                 ),
+                                partialRow,
                                 // Notes bar
                                 currentExercise.notes ? e('div', { className: 'flex justify-center mt-3' },
                                     e('div', {
@@ -2203,6 +2621,260 @@
                         )
                     ),
                     e(BottomNavBar, { activeTab: 'workout', onTabChange: handleTabChange })
+                );
+            }
+
+            // ======================
+            // PROGRESS VIEW (hub: goals / metrics / photos / recaps / settings)
+            // ======================
+            if (view === 'progress') {
+                const card = { background: 'var(--surface-container-highest)' };
+                const sectionTitle = (t) => e('div', { className: 'text-xs uppercase tracking-widest mb-3 px-1', style: { color: 'var(--on-surface-variant)' } }, t);
+                const backToHub = () => setProgressSub('hub');
+                const toastEl = toast ? e('div', {
+                    className: 'fixed left-1/2 -translate-x-1/2 z-[150] px-4 py-2 rounded-xl text-sm font-bold',
+                    style: { bottom: 'max(env(safe-area-inset-bottom), 80px)', background: 'var(--primary-container)', color: 'var(--on-primary-container)', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }
+                }, toast) : null;
+
+                const topBar = (title, withBack) => e(TopAppBar, {
+                    title,
+                    leftAction: withBack ? e('button', {
+                        onClick: backToHub,
+                        className: 'flex items-center gap-1 transition-opacity active:opacity-60',
+                        style: { color: 'var(--on-surface-variant)' }
+                    }, e(ArrowLeft, { size: 20 }), e('span', { className: 'text-sm' }, 'Back')) : null
+                });
+
+                const shell = (title, withBack, children) => e('div', {
+                    className: 'min-h-screen flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' }
+                },
+                    topBar(title, withBack),
+                    e('div', { className: 'flex-1 pt-20 px-4 pb-28 overflow-y-auto' },
+                        e('div', { className: 'max-w-lg mx-auto' }, children)
+                    ),
+                    toastEl,
+                    e(BottomNavBar, { activeTab: 'progress', onTabChange: handleTabChange })
+                );
+
+                const numField = (label, value, onChange, ph, suffix) => e('div', null,
+                    e('div', { className: 'text-xs uppercase tracking-widest mb-1', style: { color: 'var(--on-surface-variant)' } }, label),
+                    e('div', { className: 'flex items-center gap-2' },
+                        e('input', {
+                            type: 'number', inputMode: 'decimal', value: value == null ? '' : value,
+                            onChange: (ev) => onChange(ev.target.value === '' ? null : parseFloat(ev.target.value)),
+                            placeholder: ph,
+                            className: 'w-full p-2.5 rounded-lg outline-none text-base',
+                            style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' }
+                        }),
+                        suffix ? e('span', { className: 'text-sm flex-shrink-0', style: { color: 'var(--on-surface-variant)' } }, suffix) : null
+                    )
+                );
+
+                // ---- GOALS ----
+                if (progressSub === 'goals') {
+                    const goals = ['bulk', 'cut', 'maintain', 'recomp'];
+                    return shell('GOALS', true,
+                        e('div', { className: 'space-y-5' },
+                            e('div', null,
+                                e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Current Goal'),
+                                e('div', { className: 'grid grid-cols-4 gap-2' },
+                                    goals.map(g => e('button', {
+                                        key: g,
+                                        onClick: () => updateProfileField('goal', profile.goal === g ? '' : g),
+                                        className: 'py-2.5 rounded-xl text-sm font-bold capitalize transition-all active:scale-95',
+                                        style: profile.goal === g
+                                            ? { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' }
+                                            : { background: 'var(--surface-container-highest)', color: 'var(--on-surface-variant)' }
+                                    }, g))
+                                )
+                            ),
+                            e('div', null,
+                                e('div', { className: 'text-xs uppercase tracking-widest mb-1', style: { color: 'var(--on-surface-variant)' } }, 'Training Split / Plan'),
+                                e('input', {
+                                    type: 'text', value: profile.split || '',
+                                    onChange: (ev) => updateProfileField('split', ev.target.value),
+                                    placeholder: 'e.g., Push / Pull / Legs',
+                                    className: 'w-full p-2.5 rounded-lg outline-none text-base',
+                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' }
+                                })
+                            ),
+                            e('div', { className: 'grid grid-cols-2 gap-3' },
+                                numField('Target Weight', profile.targetWeight, (v) => updateProfileField('targetWeight', v), '75', 'kg'),
+                                numField('Target Body Fat', profile.targetBodyFat, (v) => updateProfileField('targetBodyFat', v), '12', '%'),
+                                numField('Daily Calories', profile.dailyKcal, (v) => updateProfileField('dailyKcal', v), '2800', 'kcal'),
+                                numField('Height', profile.heightCm, (v) => updateProfileField('heightCm', v), '180', 'cm')
+                            ),
+                            e('div', { className: 'text-xs leading-snug px-1', style: { color: 'var(--outline)' } },
+                                'These goals are saved automatically and given to the AI as context for your recaps.')
+                        )
+                    );
+                }
+
+                // ---- DAILY METRICS ----
+                if (progressSub === 'metrics') {
+                    const recent = metrics.slice().sort((a, b) => b.date - a.date).slice(0, 30);
+                    return shell('DAILY LOG', true,
+                        e('div', null,
+                            e(MetricForm, { onSave: (entry) => { saveMetric(entry); setToast('Saved'); } }),
+                            recent.length > 0 ? e('div', { className: 'mt-6' },
+                                sectionTitle('Recent Entries'),
+                                e('div', { className: 'space-y-2' },
+                                    recent.map((m) => {
+                                        const d = new Date(m.date);
+                                        const bits = [
+                                            m.weight != null ? `${fmtNum(m.weight)}kg` : null,
+                                            m.kcal != null ? `${fmtNum(m.kcal)}kcal` : null,
+                                            m.sleep != null ? `${fmtNum(m.sleep)}h` : null,
+                                            m.steps != null ? `${fmtNum(m.steps)} steps` : null,
+                                        ].filter(Boolean).join(' · ');
+                                        return e('div', { key: m.date, className: 'rounded-xl p-3 flex items-center gap-3', style: card },
+                                            e('div', { className: 'w-12 text-center flex-shrink-0' },
+                                                e('div', { className: 'text-sm font-black', style: { color: 'var(--primary-fixed-dim)' } }, d.getDate()),
+                                                e('div', { className: 'text-xs uppercase', style: { color: 'var(--on-surface-variant)' } }, d.toLocaleDateString('en-GB', { month: 'short' }))
+                                            ),
+                                            e('div', { className: 'flex-1 min-w-0' },
+                                                e('div', { className: 'text-sm font-bold truncate' }, bits || '—'),
+                                                m.note ? e('div', { className: 'text-xs truncate', style: { color: 'var(--on-surface-variant)' } }, m.note) : null
+                                            ),
+                                            e('button', {
+                                                onClick: () => setConfirmState({ title: 'Delete entry?', message: `Metrics for ${d.toLocaleDateString('en-GB')} will be removed.`, confirmLabel: 'Delete', onConfirm: () => { deleteMetric(m.date); setConfirmState(null); } }),
+                                                className: 'p-2 rounded-lg flex-shrink-0', style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)' }
+                                            }, e(MIcon, { icon: 'delete', style: { fontSize: '18px' } }))
+                                        );
+                                    })
+                                )
+                            ) : e('div', { className: 'mt-6 text-center text-sm', style: { color: 'var(--outline)' } }, 'No entries yet.')
+                        ),
+                        confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null
+                    );
+                }
+
+                // ---- PHOTOS ----
+                if (progressSub === 'photos') {
+                    const byWeek = {};
+                    photos.forEach(p => { (byWeek[p.week] = byWeek[p.week] || []).push(p); });
+                    const weeks = Object.keys(byWeek).sort().reverse();
+                    return shell('PROGRESS PHOTOS', true,
+                        e('div', null,
+                            e('label', {
+                                className: 'w-full mb-5 py-3 rounded-xl flex items-center justify-center gap-2 font-black text-base cursor-pointer transition-all active:scale-95',
+                                style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' }
+                            },
+                                e(MIcon, { icon: 'add_a_photo', style: { fontSize: '22px' } }), 'Add Photo',
+                                e('input', {
+                                    type: 'file', accept: 'image/*', className: 'hidden',
+                                    onChange: (ev) => { const f = ev.target.files && ev.target.files[0]; if (f) addPhotoFromFile(f); ev.target.value = ''; }
+                                })
+                            ),
+                            weeks.length === 0 ? e('div', { className: 'text-center text-sm mt-8', style: { color: 'var(--outline)' } }, 'No photos yet. Add a weekly progress pic to start tracking visual change.')
+                                : weeks.map(wk => e('div', { key: wk, className: 'mb-6' },
+                                    sectionTitle(wk.replace('-W', ' · Week ')),
+                                    e('div', { className: 'grid grid-cols-3 gap-2' },
+                                        byWeek[wk].map(p => e('div', { key: p.id, className: 'relative rounded-xl overflow-hidden', style: { aspectRatio: '3/4', background: 'var(--surface-container-high)' } },
+                                            e('img', { src: p.data, className: 'w-full h-full object-cover', style: { display: 'block' } }),
+                                            e('button', {
+                                                onClick: () => setConfirmState({ title: 'Delete photo?', message: 'This progress photo will be permanently removed from this device.', confirmLabel: 'Delete', onConfirm: () => { removePhoto(p.id); setConfirmState(null); } }),
+                                                className: 'absolute top-1 right-1 w-7 h-7 rounded-full flex items-center justify-center', style: { background: 'rgba(0,0,0,0.55)', color: '#fff' }
+                                            }, e(MIcon, { icon: 'close', style: { fontSize: '16px' } })),
+                                            e('div', { className: 'absolute bottom-0 left-0 right-0 px-1.5 py-0.5 text-[10px]', style: { background: 'rgba(0,0,0,0.5)', color: '#fff' } }, new Date(p.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))
+                                        ))
+                                    )
+                                )),
+                            e('div', { className: 'text-xs leading-snug px-1 mt-2', style: { color: 'var(--outline)' } },
+                                'Photos stay on this device only. They are sent to the AI just for the moment a recap is generated.'),
+                            confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null
+                        )
+                    );
+                }
+
+                // ---- AI RECAPS ----
+                if (progressSub === 'recaps') {
+                    const weeklyGate = canGenerate('weekly');
+                    const monthlyGate = canGenerate('monthly');
+                    const list = recaps.slice().sort((a, b) => b.date - a.date);
+                    const genBtn = (type, gate) => e('button', {
+                        onClick: () => generateRecap(type),
+                        disabled: aiBusy || !gate.ok,
+                        className: 'flex-1 py-3 rounded-xl font-black text-sm transition-all active:scale-95',
+                        style: (gate.ok && !aiBusy)
+                            ? { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' }
+                            : { background: 'var(--surface-container-highest)', color: 'var(--outline)' }
+                    }, aiBusy ? 'Thinking…' : (type === 'weekly' ? 'Weekly Recap' : 'Monthly Recap'));
+                    return shell('AI RECAPS', true,
+                        e('div', null,
+                            e('div', { className: 'flex gap-3 mb-2' }, genBtn('weekly', weeklyGate), genBtn('monthly', monthlyGate)),
+                            e('div', { className: 'flex gap-3 mb-3' },
+                                e('div', { className: 'flex-1 text-xs leading-snug px-1', style: { color: weeklyGate.ok ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }, weeklyGate.ok ? 'Ready' : weeklyGate.reason),
+                                e('div', { className: 'flex-1 text-xs leading-snug px-1', style: { color: monthlyGate.ok ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }, monthlyGate.ok ? 'Ready' : monthlyGate.reason)
+                            ),
+                            aiError ? e('div', { className: 'text-sm mb-3 px-1', style: { color: 'var(--error)' } }, aiError) : null,
+                            list.length === 0 ? e('div', { className: 'text-center text-sm mt-8', style: { color: 'var(--outline)' } }, 'No recaps yet. Generate one once you have a couple of weeks of data.')
+                                : e('div', { className: 'space-y-3 mt-2' },
+                                    list.map((r, i) => e('div', { key: r.date + '-' + i, className: 'rounded-xl p-4', style: card },
+                                        e('div', { className: 'flex items-center justify-between mb-2' },
+                                            e('span', { className: 'text-xs uppercase tracking-widest font-bold', style: { color: 'var(--primary-fixed-dim)' } }, `${r.type} · ${r.periodKey}`),
+                                            e('span', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, new Date(r.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))
+                                        ),
+                                        e('div', { className: 'text-sm leading-relaxed', style: { color: 'var(--on-surface)', whiteSpace: 'pre-wrap' } }, r.text)
+                                    ))
+                                )
+                        )
+                    );
+                }
+
+                // ---- SETTINGS ----
+                if (progressSub === 'settings') {
+                    return shell('SETTINGS', true,
+                        e('div', { className: 'space-y-5' },
+                            e('div', null,
+                                sectionTitle('OpenAI API Key'),
+                                e(ApiKeyForm, { onChanged: () => setToast('Key updated') })
+                            ),
+                            e('div', null,
+                                sectionTitle('Account'),
+                                e('div', { className: 'rounded-2xl p-4 flex items-center gap-2', style: card },
+                                    e(MIcon, { icon: cloudEnabled() ? 'cloud_done' : 'cloud_off', style: { fontSize: '20px', color: cloudEnabled() ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }),
+                                    e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, cloudEnabled() ? 'Cloud sync active' : 'Offline · local only')
+                                )
+                            )
+                        )
+                    );
+                }
+
+                // ---- HUB ----
+                const latestWeight = metrics.filter(m => m.weight != null).sort((a, b) => b.date - a.date)[0];
+                const hubCard = (icon, title, sub, target) => e('button', {
+                    onClick: () => setProgressSub(target),
+                    className: 'rounded-2xl p-4 flex flex-col items-start text-left transition-all active:scale-95',
+                    style: card
+                },
+                    e('div', { className: 'w-10 h-10 rounded-xl flex items-center justify-center mb-2', style: { background: 'rgba(209, 252, 0, 0.1)' } },
+                        e(MIcon, { icon, style: { fontSize: '22px', color: 'var(--primary-container)' } })),
+                    e('div', { className: 'font-black text-base' }, title),
+                    e('div', { className: 'text-xs mt-0.5', style: { color: 'var(--on-surface-variant)' } }, sub)
+                );
+                return shell('PROGRESS', false,
+                    e('div', null,
+                        // Snapshot
+                        e('div', { className: 'grid grid-cols-3 gap-2 mb-5' },
+                            e('div', { className: 'rounded-xl p-3 text-center', style: card },
+                                e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } }, distinctWeeks()),
+                                e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'Weeks data')),
+                            e('div', { className: 'rounded-xl p-3 text-center', style: card },
+                                e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } }, latestWeight ? fmtNum(latestWeight.weight) : '—'),
+                                e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'Weight kg')),
+                            e('div', { className: 'rounded-xl p-3 text-center', style: card },
+                                e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } }, profile.goal ? profile.goal[0].toUpperCase() + profile.goal.slice(1) : '—'),
+                                e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'Goal'))
+                        ),
+                        e('div', { className: 'grid grid-cols-2 gap-3' },
+                            hubCard('flag', 'Goals', 'Bulk/cut, targets', 'goals'),
+                            hubCard('monitor_weight', 'Daily Log', 'Weight, kcal, sleep', 'metrics'),
+                            hubCard('photo_camera', 'Photos', `${photos.length} saved`, 'photos'),
+                            hubCard('auto_awesome', 'AI Recaps', 'Weekly & monthly', 'recaps'),
+                            hubCard('key', 'Settings', 'OpenAI key', 'settings')
+                        )
+                    )
                 );
             }
 
