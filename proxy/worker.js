@@ -15,7 +15,9 @@
 //   - Optional plain var  ALLOW_ORIGIN (defaults to the GitHub Pages origin).
 
 const DEFAULT_ALLOW = 'https://alterrion-git.github.io';
-const DEFAULT_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+// Override with the AI_MODEL var if this is ever deprecated. See the current
+// catalog: https://developers.cloudflare.com/workers-ai/models/
+const DEFAULT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 export default {
   async fetch(request, env) {
