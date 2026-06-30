@@ -1,56 +1,55 @@
-# CWA AI Recap proxy (Cloudflare Worker + Gemini)
+# CWA AI Recap proxy (Cloudflare Worker + Workers AI)
 
-This tiny Worker holds your **Google Gemini API key** so the app never exposes
-it. The app sends text only (workout/metrics summary); the Worker calls Gemini
-and returns the recap text. Both the Worker and the Gemini free tier cost **$0**
-at this app's scale, and **no credit card** is required.
+This tiny Worker runs the recap model **on Cloudflare (Workers AI)**. There is
+**no external API key** and **no regional free-tier limits** (Google's Gemini
+free tier is unavailable / `limit: 0` in some regions like the EU — this avoids
+that). The free daily allocation easily covers gated weekly/monthly recaps.
 
-## 1. Get a free Gemini API key
-1. Go to <https://aistudio.google.com/apikey> (sign in with Google).
-2. **Create API key** → copy it (starts with `AIza…`). The free tier is enabled
-   by default — no billing needed.
+The app sends `{ system, prompt, maxTokens }` (text only) and gets `{ text }`.
 
-## 2. Create the Cloudflare Worker
+## 1. Create the Worker
 1. Sign up free at <https://workers.cloudflare.com> (no card).
-2. Dashboard → **Workers & Pages → Create → Create Worker**. Give it a name
-   like `cwa-recap`. Click **Deploy** (the starter), then **Edit code**.
-3. Delete the starter code, paste the contents of [`worker.js`](./worker.js),
-   and click **Deploy**.
+2. **Workers & Pages → Create → Workers → "Start with Hello World!"** → name it
+   (e.g. `cwa-recap`) → **Deploy** → **Edit code**.
+3. Delete the starter code, paste [`worker.js`](./worker.js), **Deploy**.
 
-## 3. Add your key as a secret
-In the Worker → **Settings → Variables and Secrets**:
-- Add **Secret** `GEMINI_API_KEY` = your `AIza…` key. (Use "Encrypt".)
-- (Optional) Add plain variable `GEMINI_MODEL` = `gemini-2.0-flash`
-  (or `gemini-1.5-flash`) if you want a specific model.
-- (Optional) Add `ALLOW_ORIGIN` if your app isn't on
+## 2. Add the Workers AI binding (this is the important step)
+In the Worker → **Settings → Bindings → Add binding → Workers AI**:
+- **Variable name:** `AI`  (exactly that)
+- Save, then **Deploy** again.
+
+That's it — no API key needed. Workers AI is billed in "neurons"; the free
+allocation (10,000 neurons/day) is far more than gated recaps use.
+
+### Optional
+- Plain variable `AI_MODEL` to change the model. Default is
+  `@cf/meta/llama-3.1-8b-instruct` (fast, low cost). For higher quality try
+  `@cf/meta/llama-3.3-70b-instruct-fp8-fast`.
+- Plain variable `ALLOW_ORIGIN` if the app isn't on
   `https://alterrion-git.github.io`.
-- **Deploy** again so the secret takes effect.
 
-## 4. Point the app at it
-Copy the Worker URL (e.g. `https://cwa-recap.<you>.workers.dev`) and paste it
-into `index.html`:
+## 3. Point the app at it
+Copy the Worker URL (e.g. `https://cwa-recap.<you>.workers.dev`) into
+`index.html`:
 
 ```js
 const LLM_PROXY_URL = 'https://cwa-recap.<you>.workers.dev';
 ```
 
-Commit/deploy the app. AI recaps now work for every signed-in user with **no
-API key needed** — gated to once per week / once per month as before.
+Then in the app: **Profile → Settings → AI Recaps → Test connection** should say
+"Recap service works ✓".
 
-## Test it
+## Test from a terminal (optional)
 ```bash
 curl -X POST https://cwa-recap.<you>.workers.dev \
   -H 'Content-Type: application/json' \
   -H 'Origin: https://alterrion-git.github.io' \
-  -d '{"system":"You are a coach.","prompt":"Say hello in one short sentence."}'
+  -d '{"system":"You are a coach.","prompt":"Say hi in one sentence."}'
 ```
 Expect `{"text":"..."}`.
 
-## Notes / hardening (optional, later)
-- The Worker only accepts requests whose `Origin` is your app — this stops
-  casual browser abuse. Non-browser clients can spoof `Origin`, so if you go
-  fully public, add a shared secret header or Cloudflare rate-limiting.
-- Gemini's free tier is rate-limited per minute/day. Because recaps are gated
-  weekly/monthly per user, normal usage stays well within it. If the quota is
-  hit, recaps simply return an error until it resets — there is no bill.
-- Swap models by changing `GEMINI_MODEL`; nothing in the app changes.
+## Notes
+- The Worker only accepts requests whose `Origin` is your app (stops casual
+  browser abuse). For a fully public release, add a shared secret or
+  Cloudflare rate-limiting.
+- Swap models any time via `AI_MODEL`; the app never changes.
