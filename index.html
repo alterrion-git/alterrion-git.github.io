@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.8.2';
+        const APP_VERSION = '3.8.3';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -794,10 +794,10 @@
                 // and size the buttons to use that space for big, easy tap targets — while
                 // staying clear of the bottom-right cameras.
                 const vw = vpW || window.innerWidth || 360;
-                const nTabs = tabs.length, gap = 2, padL = 6, padR = 6;
-                const targetW = Math.min(vw * 0.52, 250); // ~first-box edge, capped
+                const nTabs = tabs.length, gap = 3, padL = 6, padR = 8;
+                const targetW = Math.min(vw * 0.62, 290); // bottom-left, well clear of cameras
                 let cell = Math.floor((targetW - padL - padR - nTabs * gap * 2) / nTabs);
-                cell = Math.max(34, Math.min(46, cell));
+                cell = Math.max(34, Math.min(52, cell));
                 const navWidth = nTabs * (cell + gap * 2) + padL + padR;
                 return e('nav', {
                     className: 'fixed bottom-0 left-0 z-50',
@@ -2647,11 +2647,14 @@
                 // Cover layout packs [arrow][reps][weight][arrow] in one row, so the two
                 // boxes must share the width left after the arrows; they are also capped by
                 // the (short) available height. Full layout only shares width.
+                // Cover row is [arrow][reps][weight][arrow]; reserve ~110px for the two compact
+                // arrows + gaps + side padding, the rest is split between the two boxes (also
+                // capped by the short height). Bigger than before to fill the empty space.
                 const boxSize = isCoverScreen
-                    ? Math.max(86, Math.min(148, Math.floor((viewport.w - 136) / 2), Math.floor(viewport.h * 0.46)))
+                    ? Math.max(104, Math.min(180, Math.floor((viewport.w - 112) / 2), Math.floor(viewport.h * 0.62)))
                     : Math.max(110, Math.min(168, Math.floor((viewport.w - 52) / 2)));
                 const contentPadTop = 72;
-                const contentPadBottom = isCoverScreen ? 66 : 112;
+                const contentPadBottom = isCoverScreen ? 56 : 112;
 
                 // Partials control: 0.1-rep stepper (e.g. 8.3 = 8 reps + 3 partials). Replaces
                 // the old manual "type 0.1 reps" hack. Rounded to 1 decimal to avoid float dust.
@@ -2679,10 +2682,18 @@
                     // TopAppBar: CWA left, workout name center, sets left right
                     e(TopAppBar, {
                         title: liveWorkout.name.toUpperCase(),
-                        leftAction: e('span', {
-                            className: 'font-black italic text-xl tracking-tighter',
-                            style: { color: 'var(--primary-container)' }
-                        }, 'CWA'),
+                        // End/discard lives in the always-visible top bar (the bottom of a cover
+                        // screen scrolls, so a bottom button could be hidden).
+                        leftAction: e('button', {
+                            onClick: () => setConfirmState({
+                                title: 'Discard workout?',
+                                message: 'Your progress for this session will be discarded and not saved to history.',
+                                confirmLabel: 'Discard',
+                                onConfirm: () => { cancelWorkout(); setConfirmState(null); }
+                            }),
+                            className: 'flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-opacity active:opacity-70',
+                            style: { background: 'var(--surface-container-high)', color: 'var(--on-surface-variant)' }
+                        }, e(MIcon, { icon: 'close', style: { fontSize: '16px' } }), 'End'),
                         rightAction: e('div', { className: 'flex items-center gap-2' },
                             e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Sets'),
                             e('span', { className: 'text-lg font-black', style: { color: 'var(--on-surface)' } }, getTotalSetsRemaining())
@@ -2727,24 +2738,24 @@
                         isCoverScreen ?
                             // COVER LAYOUT: arrow + counters + arrow in one row, notes below
                             e('div', null,
-                                e('div', { className: 'flex items-center justify-center gap-2 mt-2' },
+                                e('div', { className: 'flex items-center justify-center gap-1.5 mt-2' },
                                     e('button', {
                                         onClick: prevSet,
                                         disabled: !canGoPrev(),
-                                        className: 'p-2 rounded-2xl transition-all active:scale-90 flex-shrink-0',
+                                        className: 'p-1.5 rounded-xl transition-all active:scale-90 flex-shrink-0',
                                         style: {
                                             background: canGoPrev() ? 'var(--surface-container-highest)' : 'var(--surface-container-low)',
                                             color: canGoPrev() ? 'var(--on-surface)' : 'var(--outline-variant)',
                                             opacity: canGoPrev() ? 1 : 0.3
                                         }
-                                    }, e(ArrowLeft, { size: 22 })),
+                                    }, e(ArrowLeft, { size: 18 })),
                                     e(CustomNumberInput, { value: currentSet.reps, onChange: (val) => updateLiveSet('reps', val), label: 'Reps', step: 1, size: boxSize }),
                                     e(CustomNumberInput, { value: currentSet.weight, onChange: (val) => updateLiveSet('weight', val), label: 'Weight (kg)', step: 0.5, size: boxSize }),
                                     e('button', {
                                         onClick: nextSet,
-                                        className: 'p-2 rounded-2xl transition-all active:scale-90 flex-shrink-0',
+                                        className: 'p-1.5 rounded-xl transition-all active:scale-90 flex-shrink-0',
                                         style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--void)' }
-                                    }, e(ArrowRight, { size: 22 }))
+                                    }, e(ArrowRight, { size: 18 }))
                                 ),
                                 partialRow,
                                 // Notes bar
@@ -2803,8 +2814,8 @@
                                     }, e(ArrowRight, { size: 24 }))
                                 )
                             ),
-                        // Next exercise indicator (bottom left) + discard (bottom right)
-                        e('div', { className: 'mt-auto pt-3 flex justify-between items-center px-2 gap-2' },
+                        // Next exercise indicator (bottom left). End/discard is in the top bar.
+                        e('div', { className: 'mt-auto pt-3 flex justify-start items-center px-2' },
                             nextExName ? e('div', {
                                 className: 'flex items-center gap-2 px-3 py-1.5 rounded-xl',
                                 style: { background: 'var(--surface-container-highest)' }
@@ -2814,17 +2825,7 @@
                                     className: 'text-sm font-bold',
                                     style: { color: nextExName === 'Finish' ? 'var(--primary-container)' : 'var(--on-surface)' }
                                 }, nextExName)
-                            ) : e('div', null),
-                            e('button', {
-                                onClick: () => setConfirmState({
-                                    title: 'Discard workout?',
-                                    message: 'Your progress for this session will be discarded and not saved to history.',
-                                    confirmLabel: 'Discard',
-                                    onConfirm: () => { cancelWorkout(); setConfirmState(null); }
-                                }),
-                                className: 'flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-opacity active:opacity-70 flex-shrink-0',
-                                style: { background: 'var(--surface-container-high)', color: 'var(--on-surface-variant)' }
-                            }, e(MIcon, { icon: 'close', style: { fontSize: '16px' } }), 'End')
+                            ) : null
                         )
                     ),
                     confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null,
