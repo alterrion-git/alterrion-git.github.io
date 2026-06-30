@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.8.1';
+        const APP_VERSION = '3.8.2';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -790,19 +790,15 @@
             // need — so it adapts to any cover-screen size and never reaches the cameras.
             // Full screen keeps the normal full-width bar.
             if (isCover) {
-                // Explicit pixel width = N buttons (each with side margins) + padding.
-                // Deterministic so it never collapses or stretches into the bottom-right
-                // camera zone. Shrinks the buttons if a very narrow cover screen would push
-                // the pill past ~56% of the width (keeps clear of the cameras).
+                // Fill the bottom-left up to ~the edge of the first Plan box (~half the width),
+                // and size the buttons to use that space for big, easy tap targets — while
+                // staying clear of the bottom-right cameras.
                 const vw = vpW || window.innerWidth || 360;
-                let cell = 34, gap = 4;
-                let navWidth = tabs.length * (cell + gap * 2) + 14;
-                if (navWidth > vw * 0.56) {
-                    const scale = Math.max(0.72, (vw * 0.56) / navWidth);
-                    cell = Math.round(cell * scale);
-                    gap = Math.max(2, Math.round(gap * scale));
-                    navWidth = tabs.length * (cell + gap * 2) + 12;
-                }
+                const nTabs = tabs.length, gap = 2, padL = 6, padR = 6;
+                const targetW = Math.min(vw * 0.52, 250); // ~first-box edge, capped
+                let cell = Math.floor((targetW - padL - padR - nTabs * gap * 2) / nTabs);
+                cell = Math.max(34, Math.min(46, cell));
+                const navWidth = nTabs * (cell + gap * 2) + padL + padR;
                 return e('nav', {
                     className: 'fixed bottom-0 left-0 z-50',
                     style: {
@@ -811,13 +807,13 @@
                         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
                         borderTop: '1px solid rgba(69, 72, 76, 0.12)',
                         borderRight: '1px solid rgba(69, 72, 76, 0.12)',
-                        borderRadius: '0 16px 0 0',
+                        borderRadius: '0 18px 0 0',
                         right: 'auto',
                         width: navWidth + 'px',
-                        height: 'calc(40px + env(safe-area-inset-bottom))',
+                        height: 'calc(' + (cell + 8) + 'px + env(safe-area-inset-bottom))',
                         paddingBottom: 'env(safe-area-inset-bottom)',
-                        paddingLeft: 'max(env(safe-area-inset-left), 5px)',
-                        paddingRight: '5px'
+                        paddingLeft: 'max(env(safe-area-inset-left), ' + padL + 'px)',
+                        paddingRight: padR + 'px'
                     }
                 },
                     tabs.map(tab => {
@@ -2478,9 +2474,9 @@
                 const totalSets = workoutHistory.reduce((sum, w) => {
                     return sum + w.exercises.reduce((eSum, ex) => eSum + ex.sets.length, 0);
                 }, 0);
-                const totalReps = workoutHistory.reduce((sum, w) => {
+                const totalReps = Math.round(workoutHistory.reduce((sum, w) => {
                     return sum + w.exercises.reduce((eSum, ex) => eSum + ex.sets.reduce((sSum, s) => sSum + s.reps, 0), 0);
-                }, 0);
+                }, 0) * 10) / 10;
                 // Avg workout time (filter outliers: <40min or >90min)
                 const validTimes = workoutHistory.map(w => w.totalTime).filter(t => t >= 2400 && t <= 5400);
                 const avgTime = validTimes.length > 0 ? Math.round(validTimes.reduce((a, b) => a + b, 0) / validTimes.length) : 0;
@@ -2540,21 +2536,6 @@
                                 statCard('speed', totalReps, 'Total Reps'),
                                 statCard('calendar_month', weeklyAvg + '/wk', 'Frequency')
                             ),
-                            // Personal best
-                            bestWeight > 0 ? e('div', {
-                                className: 'rounded-xl p-4 mb-6 flex items-center gap-4',
-                                style: { background: 'var(--surface-container-highest)' }
-                            },
-                                e('div', {
-                                    className: 'w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0',
-                                    style: { background: 'rgba(209, 252, 0, 0.1)' }
-                                }, e(MIcon, { icon: 'emoji_events', fill: true, style: { fontSize: '28px', color: 'var(--primary-container)' } })),
-                                e('div', null,
-                                    e('div', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Personal Best'),
-                                    e('div', { className: 'font-black text-lg' }, `${fmtNum(bestWeight)} kg`),
-                                    e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, bestExName)
-                                )
-                            ) : null,
                             // Workout History
                             last10.length > 0 ? e('div', null,
                                 e('div', { className: 'text-xs uppercase tracking-widest mb-3 px-1', style: { color: 'var(--on-surface-variant)' } }, 'Recent Workouts'),
