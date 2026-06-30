@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.10.0';
+        const APP_VERSION = '3.10.1';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -257,7 +257,7 @@
         // Recaps call this proxy instead of a model directly, so the Gemini API key stays
         // server-side (never in this public client). Deploy the worker in proxy/worker.js,
         // then paste its URL here. While empty, AI recaps are shown as "not configured".
-        const LLM_PROXY_URL = ''; // e.g. 'https://cwa-recap.<you>.workers.dev'
+        const LLM_PROXY_URL = 'https://crimson-waterfall-9438.blackrivercz.workers.dev';
         const proxyEnabled = () => LLM_PROXY_URL.length > 0;
 
         // Ask the recap proxy for a coaching recap. Sends only text (system + prompt).
@@ -3376,9 +3376,23 @@
                         e('div', { className: 'space-y-5' },
                             e('div', null,
                                 sectionTitle('AI Recaps'),
-                                e('div', { className: 'rounded-2xl p-4 flex items-center gap-2', style: card },
-                                    e(MIcon, { icon: proxyEnabled() ? 'auto_awesome' : 'cloud_off', style: { fontSize: '20px', color: proxyEnabled() ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }),
-                                    e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, proxyEnabled() ? 'Recaps enabled — no API key needed' : 'Recaps not configured yet')
+                                e('div', { className: 'rounded-2xl p-4', style: card },
+                                    e('div', { className: 'flex items-center gap-2 mb-3' },
+                                        e(MIcon, { icon: proxyEnabled() ? 'auto_awesome' : 'cloud_off', style: { fontSize: '20px', color: proxyEnabled() ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }),
+                                        e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, proxyEnabled() ? 'Recaps enabled — no API key needed' : 'Recaps not configured yet')
+                                    ),
+                                    proxyEnabled() ? e('button', {
+                                        onClick: async () => {
+                                            setAiError(''); setAiBusy(true);
+                                            try { await callRecapProxy('You are a fitness coach.', 'Reply with exactly: OK', 30); setToast('Recap service works ✓'); }
+                                            catch (err) { setAiError(err.message || 'Test failed'); }
+                                            finally { setAiBusy(false); }
+                                        },
+                                        disabled: aiBusy,
+                                        className: 'w-full py-2.5 rounded-lg font-bold text-sm active:scale-95',
+                                        style: { background: 'var(--surface-container-low)', color: aiBusy ? 'var(--outline)' : 'var(--primary-fixed-dim)' }
+                                    }, aiBusy ? 'Testing…' : 'Test connection') : null,
+                                    aiError ? e('div', { className: 'text-sm mt-3 leading-snug', style: { color: 'var(--error)' } }, aiError) : null
                                 )
                             ),
                             e('div', null,
