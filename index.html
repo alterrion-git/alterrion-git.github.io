@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.8.3';
+        const APP_VERSION = '3.9.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -506,7 +506,7 @@
             return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
         }
 
-        const RECAP_SYSTEM = "You are an expert strength & physique coach reviewing a client's training and body-composition data. Be specific, honest, and motivating. Reference their actual numbers and stated goal. Give 3-5 concrete, prioritized recommendations for the next period. If progress photos are included, comment briefly and tactfully on visible changes. Keep it concise (under ~300 words), use short paragraphs or bullet points, and avoid medical claims.";
+        const RECAP_SYSTEM = "You are an expert strength & physique coach reviewing a client's training and body-composition data. Be specific, honest, and motivating. Reference their actual numbers and stated goal. Give 3-5 concrete, prioritized recommendations for the next period. Keep it concise (under ~300 words), use short paragraphs or bullet points, and avoid medical claims.";
 
         const { useState, useEffect, useRef } = React;
         const e = React.createElement;
@@ -1983,12 +1983,12 @@
                 if (kcals.length) bodyBits.push(`avg intake ${avg(kcals)} kcal/day over ${kcals.length} logged days`);
                 if (sleeps.length) bodyBits.push(`avg sleep ${avg(sleeps)}h`);
                 lines.push(bodyBits.length ? `Body metrics: ${bodyBits.join('; ')}.` : 'No body metrics logged this period.');
-                const photosInPeriod = photos.filter(ph => ph.date >= periodStart).sort((a, b) => b.date - a.date).slice(0, 2);
-                lines.push(photosInPeriod.length ? `${photosInPeriod.length} progress photo(s) attached (most recent).` : 'No progress photos this period.');
+                // Progress photos are intentionally NOT sent to the LLM — they stay on-device
+                // as private logs. We only note the count for context.
+                const photoCount = photos.filter(ph => ph.date >= periodStart).length;
+                if (photoCount) lines.push(`(${photoCount} private progress photo(s) logged this period — not shared.)`);
                 lines.push('\nWrite a concise coaching recap and 3-5 prioritized recommendations for the next period.');
-                const content = [{ type: 'text', text: lines.join('\n') }];
-                photosInPeriod.forEach(ph => content.push({ type: 'image_url', image_url: { url: ph.data } }));
-                return content;
+                return lines.join('\n');
             };
 
             const generateRecap = async (type) => {
@@ -3307,7 +3307,7 @@
                                     )
                                 )),
                             e('div', { className: 'text-xs leading-snug px-1 mt-2', style: { color: 'var(--outline)' } },
-                                'Photos stay on this device only. They are sent to the AI just for the moment a recap is generated.')
+                                'Private logs: photos stay on this device only — never uploaded to the cloud and never sent to the AI.')
                         )
                     );
                 }
