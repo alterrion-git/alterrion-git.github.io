@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.7.0';
+        const APP_VERSION = '3.8.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -216,16 +216,30 @@
             setTimeout(() => { window.scrollTo(0, 1); }, 100);
         });
 
-        // NOTE: We deliberately do NOT reload the page on resize/orientation/fold changes.
-        // Reloading was destructive — it dropped the user out of an in-progress workout and
-        // felt like "the app closed". The React layout is now fully reactive to viewport
-        // changes (see useViewport), so switching between cover screen and main screen,
-        // folding/unfolding, rotating, or keyboard show/hide all re-layout in place.
-        // We just re-broadcast a resize so any throttled listeners settle after the change.
-        const nudgeResize = () => { setTimeout(() => window.dispatchEvent(new Event('resize')), 120); };
-        window.addEventListener('orientationchange', nudgeResize);
+        // The React layout reacts to most viewport changes in place (see useViewport) — URL
+        // bar, keyboard, rotation, lock/unlock all re-layout without a reload.
+        // BUT a true fold/unfold (cover screen <-> main screen) swaps the whole display, and
+        // some browsers keep a stale layout viewport across that transition, leaving the app
+        // visibly clipped on the right/bottom. For that ONE case we do a debounced reload.
+        // It's safe now: the in-progress workout and view are persisted and auto-resume, so a
+        // reload lands the user right back where they were instead of "closing" the app.
+        let __lastW = window.innerWidth, __lastH = window.innerHeight;
+        const __coverOf = (w, h) => h < w * 1.2; // cover screen = short relative to width
+        const onBigResize = () => {
+            const w = window.innerWidth, h = window.innerHeight;
+            // The decisive fold signal is the cover<->main classification flipping. A huge
+            // single-dimension jump is a fallback. Keyboard/URL-bar height changes are smaller
+            // and don't flip the classification on a normal main screen, so they won't reload.
+            const flipped = __coverOf(__lastW, __lastH) !== __coverOf(w, h);
+            const huge = Math.abs(w - __lastW) > 300 || Math.abs(h - __lastH) > 500;
+            __lastW = w; __lastH = h;
+            if (flipped || huge) window.location.reload();
+        };
+        let __rzT;
+        window.addEventListener('resize', () => { clearTimeout(__rzT); __rzT = setTimeout(onBigResize, 250); });
+        window.addEventListener('orientationchange', () => setTimeout(onBigResize, 200));
         if (window.screen && window.screen.orientation) {
-            window.screen.orientation.addEventListener('change', nudgeResize);
+            window.screen.orientation.addEventListener('change', () => setTimeout(onBigResize, 200));
         }
 
         // ============================================
@@ -770,32 +784,35 @@
             // Detect narrow cover screen (flip phones: nearly square or landscape aspect)
             const { isCover } = useViewport();
 
+            // Full-width on every screen (the old partial-width pill couldn't fit all tabs on
+            // a cover screen). Honour display-cutout / rounded-corner safe areas on all sides
+            // (flip cover screens have a camera cutout) via env(safe-area-inset-*).
             return e('nav', {
-                className: 'fixed bottom-0 left-0 z-50 flex items-end',
+                className: 'fixed bottom-0 left-0 right-0 z-50 flex items-end justify-around',
                 style: {
-                    background: 'rgba(16, 20, 23, 0.85)',
+                    background: 'rgba(16, 20, 23, 0.92)',
                     backdropFilter: 'blur(20px)',
                     WebkitBackdropFilter: 'blur(20px)',
-                    paddingBottom: isCover ? '6px' : 'max(env(safe-area-inset-bottom), 12px)',
-                    paddingTop: isCover ? '4px' : '12px',
+                    paddingBottom: isCover ? 'max(env(safe-area-inset-bottom), 4px)' : 'max(env(safe-area-inset-bottom), 12px)',
+                    paddingTop: isCover ? '3px' : '12px',
                     borderTop: '1px solid rgba(69, 72, 76, 0.1)',
-                    width: isCover ? (tabs.length >= 5 ? '70%' : '56%') : '100%',
-                    paddingLeft: isCover ? '4px' : '20px',
-                    paddingRight: isCover ? '4px' : '20px',
-                    borderRadius: isCover ? '0 20px 0 0' : '0'
+                    width: '100%',
+                    paddingLeft: isCover ? 'max(env(safe-area-inset-left), 6px)' : '20px',
+                    paddingRight: isCover ? 'max(env(safe-area-inset-right), 6px)' : '20px'
                 }
             },
                 tabs.map(tab => {
                     const isActive = activeTab === tab.id;
                     const btnSize = isCover ? '32px' : '48px';
-                    const iconSize = isCover ? (isActive ? '18px' : '16px') : (isActive ? '26px' : '23px');
+                    const iconSize = isCover ? (isActive ? '19px' : '17px') : (isActive ? '26px' : '23px');
                     return e('div', {
                         key: tab.id,
                         className: 'flex-1 flex justify-center',
-                        style: { height: isCover ? '40px' : '56px', alignItems: 'flex-start' }
+                        style: { height: isCover ? '38px' : '56px', alignItems: 'flex-start' }
                     },
                         e('button', {
                             onClick: () => onTabChange(tab.id),
+                            'aria-label': tab.label,
                             className: 'flex items-center justify-center rounded-full transition-all duration-300 active:scale-90',
                             style: isActive ? {
                                 width: btnSize,
@@ -803,7 +820,7 @@
                                 background: 'linear-gradient(45deg, #d1fc00, #c4ec00)',
                                 color: 'var(--void)',
                                 boxShadow: '0 0 20px rgba(209, 252, 0, 0.3)',
-                                transform: isCover ? 'translateY(-6px)' : 'translateY(-12px)'
+                                transform: isCover ? 'translateY(-4px)' : 'translateY(-12px)'
                             } : {
                                 width: btnSize,
                                 height: btnSize,
@@ -1802,14 +1819,17 @@
                         if (repsDiff > 0) { totalRepsIncrease += repsDiff; hasChanges = true; }
                         if (weightDiff > maxWeightIncrease) { maxWeightIncrease = weightDiff; if (weightDiff > 0) hasChanges = true; }
                     });
+                    // Round to kill floating-point dust (e.g. 0.1+0.1+0.1 = 0.30000000004).
+                    totalRepsIncrease = Math.round(totalRepsIncrease * 100) / 100;
+                    maxWeightIncrease = Math.round(maxWeightIncrease * 100) / 100;
                     if (maxWeightIncrease > 0) points = 2;
                     else if (totalRepsIncrease >= 2) points = 2;
-                    else if (totalRepsIncrease === 1) points = 1;
+                    else if (totalRepsIncrease >= 1) points = 1;
                     totalScore += points;
                     let changeText = 'No change';
-                    if (totalRepsIncrease > 0 && maxWeightIncrease > 0) changeText = `Increased reps by ${totalRepsIncrease} and weight by ${maxWeightIncrease}kg`;
-                    else if (totalRepsIncrease > 0) changeText = `Increased reps by ${totalRepsIncrease}`;
-                    else if (maxWeightIncrease > 0) changeText = `Increased weight by ${maxWeightIncrease}kg`;
+                    if (totalRepsIncrease > 0 && maxWeightIncrease > 0) changeText = `Increased reps by ${fmtNum(totalRepsIncrease)} and weight by ${fmtNum(maxWeightIncrease)}kg`;
+                    else if (totalRepsIncrease > 0) changeText = `Increased reps by ${fmtNum(totalRepsIncrease)}`;
+                    else if (maxWeightIncrease > 0) changeText = `Increased weight by ${fmtNum(maxWeightIncrease)}kg`;
                     summary.push({ name: exercise.name, change: changeText, hasChanges, points });
                 });
                 return { summary, totalScore, maxScore: liveWorkout.exercises.length * 2 };
@@ -2487,7 +2507,7 @@
                                 }, e(MIcon, { icon: 'emoji_events', fill: true, style: { fontSize: '28px', color: 'var(--primary-container)' } })),
                                 e('div', null,
                                     e('div', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Personal Best'),
-                                    e('div', { className: 'font-black text-lg' }, `${bestWeight} kg`),
+                                    e('div', { className: 'font-black text-lg' }, `${fmtNum(bestWeight)} kg`),
                                     e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, bestExName)
                                 )
                             ) : null,
@@ -2560,7 +2580,7 @@
                                                         },
                                                             e('span', { className: 'text-sm truncate flex-1' }, ex.name),
                                                             e('span', { className: 'text-xs flex-shrink-0 ml-2', style: { color: 'var(--on-surface-variant)' } },
-                                                                `${ex.sets.length}×${topSet.reps}@${topSet.weight}kg`)
+                                                                `${ex.sets.length}×${fmtNum(topSet.reps)}@${fmtNum(topSet.weight)}kg`)
                                                         );
                                                     })
                                                 ),
@@ -2606,22 +2626,22 @@
                     ? Math.max(86, Math.min(148, Math.floor((viewport.w - 136) / 2), Math.floor(viewport.h * 0.46)))
                     : Math.max(110, Math.min(168, Math.floor((viewport.w - 52) / 2)));
                 const contentPadTop = 72;
-                const contentPadBottom = isCoverScreen ? 52 : 112;
+                const contentPadBottom = isCoverScreen ? 66 : 112;
 
-                // Partials control: replaces the old "type 0.1 reps" hack with a proper
-                // half-rep stepper. Reps can hold decimals (e.g. 8.5 = 8 reps + 1 partial).
-                const partialFrac = Math.round((currentSet.reps - Math.floor(currentSet.reps)) * 100) / 100;
-                const setReps = (v) => updateLiveSet('reps', Math.max(0, Math.round(v * 100) / 100));
+                // Partials control: 0.1-rep stepper (e.g. 8.3 = 8 reps + 3 partials). Replaces
+                // the old manual "type 0.1 reps" hack. Rounded to 1 decimal to avoid float dust.
+                const setReps = (v) => updateLiveSet('reps', Math.max(0, Math.round(v * 10) / 10));
+                const partialFrac = Math.round((currentSet.reps - Math.floor(currentSet.reps)) * 10) / 10;
                 const partialRow = e('div', { className: 'flex items-center justify-center gap-2 mt-2' },
                     e('button', {
-                        onClick: () => setReps(currentSet.reps - 0.5),
+                        onClick: () => setReps(currentSet.reps - 0.1),
                         className: 'w-9 h-9 rounded-full flex items-center justify-center text-lg font-black active:scale-90 flex-shrink-0',
                         style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' }
                     }, '−'),
-                    e('div', { className: 'px-3 py-1.5 rounded-full text-xs font-bold', style: { background: partialFrac ? 'var(--secondary-container)' : 'var(--surface-container-high)', color: partialFrac ? 'var(--on-secondary-container)' : 'var(--on-surface-variant)', minWidth: '92px', textAlign: 'center' } },
-                        partialFrac ? `+½ partial (${fmtNum(currentSet.reps)})` : 'Add ½ partial'),
+                    e('div', { className: 'px-3 py-1.5 rounded-full text-xs font-bold', style: { background: partialFrac ? 'var(--secondary-container)' : 'var(--surface-container-high)', color: partialFrac ? 'var(--on-secondary-container)' : 'var(--on-surface-variant)', minWidth: '104px', textAlign: 'center' } },
+                        partialFrac ? `+${fmtNum(partialFrac)} partial` : 'Add 0.1 partial'),
                     e('button', {
-                        onClick: () => setReps(currentSet.reps + 0.5),
+                        onClick: () => setReps(currentSet.reps + 0.1),
                         className: 'w-9 h-9 rounded-full flex items-center justify-center text-lg font-black active:scale-90 flex-shrink-0',
                         style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--void)' }
                     }, '+')
@@ -2922,7 +2942,7 @@
                                             style: { background: 'var(--surface-container-lowest)' }
                                         },
                                             e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } },
-                                                `${hist.length} sessions \u2022 ${hist[hist.length - 1].maxWeight}kg`
+                                                `${hist.length} sessions \u2022 ${fmtNum(hist[hist.length - 1].maxWeight)}kg`
                                             ),
                                             e(Sparkline, { data: hist, width: 100, height: 28 })
                                         ) : null
@@ -3307,17 +3327,6 @@
                     return shell('SETTINGS', true,
                         e('div', { className: 'space-y-5' },
                             e('div', null,
-                                sectionTitle('Display Name'),
-                                e('input', {
-                                    type: 'text', value: profile.displayName || '',
-                                    onChange: (ev) => updateProfileField('displayName', ev.target.value),
-                                    placeholder: currentUser ? (currentUser.email || currentUser.username) : 'Your name',
-                                    className: 'w-full p-3 rounded-xl outline-none text-base font-bold',
-                                    style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' }
-                                }),
-                                e('div', { className: 'text-xs mt-2 px-1', style: { color: 'var(--outline)' } }, 'Shown instead of your email throughout the app.')
-                            ),
-                            e('div', null,
                                 sectionTitle('OpenAI API Key'),
                                 e(ApiKeyForm, { onChanged: () => setToast('Key updated') })
                             ),
@@ -3375,7 +3384,19 @@
                             e('div', { className: 'w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0', style: { background: 'rgba(209, 252, 0, 0.1)' } },
                                 e(MIcon, { icon: 'person', fill: true, style: { fontSize: '28px', color: 'var(--primary-container)' } })),
                             e('div', { className: 'flex-1 min-w-0' },
-                                e('div', { className: 'font-black text-base truncate' }, accountName()),
+                                // Editable display name (tap to rename, right here in the profile).
+                                e('div', { className: 'flex items-center gap-1' },
+                                    e('input', {
+                                        type: 'text', value: profile.displayName || '',
+                                        onChange: (ev) => updateProfileField('displayName', ev.target.value),
+                                        onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
+                                        placeholder: (currentUser && (currentUser.email || currentUser.username)) || 'Your name',
+                                        'aria-label': 'Display name',
+                                        className: 'w-full font-black text-base bg-transparent outline-none truncate',
+                                        style: { color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' }
+                                    }),
+                                    e(MIcon, { icon: 'edit', style: { fontSize: '15px', color: 'var(--outline)', flexShrink: 0 } })
+                                ),
                                 e('div', { className: 'text-xs truncate', style: { color: 'var(--on-surface-variant)' } },
                                     [workoutHistory.length + ' workouts', joined ? 'since ' + joined : null].filter(Boolean).join(' · '))
                             ),
@@ -3401,7 +3422,7 @@
                             hubCard('monitor_weight', 'Daily Log', 'Weight, kcal, sleep', 'metrics'),
                             hubCard('photo_camera', 'Photos', `${photos.length} saved`, 'photos'),
                             hubCard('auto_awesome', 'AI Recaps', 'Weekly & monthly', 'recaps'),
-                            hubCard('key', 'Settings', 'OpenAI key', 'settings')
+                            hubCard('settings', 'Settings', 'AI key, backup, security', 'settings')
                         )
                     )
                 );
