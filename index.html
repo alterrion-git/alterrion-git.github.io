@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.9.0';
+        const APP_VERSION = '3.10.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -250,6 +250,29 @@
         const FIREBASE_DB_URL = 'https://workout-app-423a6-default-rtdb.europe-west1.firebasedatabase.app'; // e.g. 'https://your-project-default-rtdb.europe-west1.firebasedatabase.app'
 
         const cloudEnabled = () => FIREBASE_DB_URL.length > 0;
+
+        // ============================================
+        // AI RECAP PROXY (Gemini via a Cloudflare Worker)
+        // ============================================
+        // Recaps call this proxy instead of a model directly, so the Gemini API key stays
+        // server-side (never in this public client). Deploy the worker in proxy/worker.js,
+        // then paste its URL here. While empty, AI recaps are shown as "not configured".
+        const LLM_PROXY_URL = ''; // e.g. 'https://cwa-recap.<you>.workers.dev'
+        const proxyEnabled = () => LLM_PROXY_URL.length > 0;
+
+        // Ask the recap proxy for a coaching recap. Sends only text (system + prompt).
+        async function callRecapProxy(system, prompt, maxTokens = 900) {
+            const res = await fetch(LLM_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ system, prompt, maxTokens })
+            });
+            let data = {};
+            try { data = await res.json(); } catch (err) {}
+            if (!res.ok) throw new Error((data && data.error) || `Recap service error (${res.status})`);
+            if (!data.text) throw new Error('The recap came back empty — try again.');
+            return data.text;
+        }
 
         // ============================================
         // FIREBASE AUTH (optional, secure mode) — OFF until you paste a Web API key.
@@ -1917,7 +1940,7 @@
             // ISO week yet; monthly needs >=2 months and none for the current month.
             const lastRecap = (type) => recaps.filter(r => r.type === type).sort((a, b) => b.date - a.date)[0];
             const canGenerate = (type) => {
-                if (!getOpenAIKey()) return { ok: false, reason: 'Add your OpenAI API key in Settings.' };
+                if (!proxyEnabled()) return { ok: false, reason: 'AI recaps are not configured yet.' };
                 if (type === 'weekly') {
                     if (distinctWeeks() < 2) return { ok: false, reason: 'Need at least 2 weeks of data.' };
                     const last = lastRecap('weekly');
@@ -1995,11 +2018,10 @@
                 setAiError('');
                 const gate = canGenerate(type);
                 if (!gate.ok) { setAiError(gate.reason); return; }
-                const apiKey = getOpenAIKey();
                 setAiBusy(true);
                 try {
-                    const content = buildRecapContent(type);
-                    const text = await callOpenAI(apiKey, content, { system: RECAP_SYSTEM, maxTokens: type === 'monthly' ? 1100 : 850 });
+                    const prompt = buildRecapContent(type);
+                    const text = await callRecapProxy(RECAP_SYSTEM, prompt, type === 'monthly' ? 1100 : 850);
                     const now = Date.now();
                     const periodKey = type === 'weekly' ? weekKey(now) : monthKey(now);
                     const entry = { type, date: now, periodKey, text };
@@ -3353,8 +3375,11 @@
                     return shell('SETTINGS', true,
                         e('div', { className: 'space-y-5' },
                             e('div', null,
-                                sectionTitle('OpenAI API Key'),
-                                e(ApiKeyForm, { onChanged: () => setToast('Key updated') })
+                                sectionTitle('AI Recaps'),
+                                e('div', { className: 'rounded-2xl p-4 flex items-center gap-2', style: card },
+                                    e(MIcon, { icon: proxyEnabled() ? 'auto_awesome' : 'cloud_off', style: { fontSize: '20px', color: proxyEnabled() ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }),
+                                    e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, proxyEnabled() ? 'Recaps enabled — no API key needed' : 'Recaps not configured yet')
+                                )
                             ),
                             e('div', null,
                                 sectionTitle('Backup & Restore'),
@@ -3448,7 +3473,7 @@
                             hubCard('monitor_weight', 'Daily Log', 'Weight, kcal, sleep', 'metrics'),
                             hubCard('photo_camera', 'Photos', `${photos.length} saved`, 'photos'),
                             hubCard('auto_awesome', 'AI Recaps', 'Weekly & monthly', 'recaps'),
-                            hubCard('settings', 'Settings', 'AI key, backup, security', 'settings')
+                            hubCard('settings', 'Settings', 'Backup, account, security', 'settings')
                         )
                     )
                 );
