@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.8.0';
+        const APP_VERSION = '3.8.1';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -782,53 +782,97 @@
             ];
 
             // Detect narrow cover screen (flip phones: nearly square or landscape aspect)
-            const { isCover } = useViewport();
+            const { isCover, w: vpW } = useViewport();
 
-            // Full-width on every screen (the old partial-width pill couldn't fit all tabs on
-            // a cover screen). Honour display-cutout / rounded-corner safe areas on all sides
-            // (flip cover screens have a camera cutout) via env(safe-area-inset-*).
+            // Cover screen (flip): the cameras sit in the BOTTOM-RIGHT, so the nav must stay
+            // in the bottom-LEFT and never stretch across. We use an auto-width pill anchored
+            // bottom-left (rounded on its top-right) that is only as wide as the 4 buttons
+            // need — so it adapts to any cover-screen size and never reaches the cameras.
+            // Full screen keeps the normal full-width bar.
+            if (isCover) {
+                // Explicit pixel width = N buttons (each with side margins) + padding.
+                // Deterministic so it never collapses or stretches into the bottom-right
+                // camera zone. Shrinks the buttons if a very narrow cover screen would push
+                // the pill past ~56% of the width (keeps clear of the cameras).
+                const vw = vpW || window.innerWidth || 360;
+                let cell = 34, gap = 4;
+                let navWidth = tabs.length * (cell + gap * 2) + 14;
+                if (navWidth > vw * 0.56) {
+                    const scale = Math.max(0.72, (vw * 0.56) / navWidth);
+                    cell = Math.round(cell * scale);
+                    gap = Math.max(2, Math.round(gap * scale));
+                    navWidth = tabs.length * (cell + gap * 2) + 12;
+                }
+                return e('nav', {
+                    className: 'fixed bottom-0 left-0 z-50',
+                    style: {
+                        display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center',
+                        background: 'rgba(16, 20, 23, 0.94)',
+                        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+                        borderTop: '1px solid rgba(69, 72, 76, 0.12)',
+                        borderRight: '1px solid rgba(69, 72, 76, 0.12)',
+                        borderRadius: '0 16px 0 0',
+                        right: 'auto',
+                        width: navWidth + 'px',
+                        height: 'calc(40px + env(safe-area-inset-bottom))',
+                        paddingBottom: 'env(safe-area-inset-bottom)',
+                        paddingLeft: 'max(env(safe-area-inset-left), 5px)',
+                        paddingRight: '5px'
+                    }
+                },
+                    tabs.map(tab => {
+                        const isActive = activeTab === tab.id;
+                        return e('button', {
+                            key: tab.id,
+                            onClick: () => onTabChange(tab.id), 'aria-label': tab.label,
+                            className: 'flex items-center justify-center rounded-full transition-all duration-300 active:scale-90',
+                            style: Object.assign({ width: cell + 'px', height: cell + 'px', margin: '0 ' + gap + 'px', flexShrink: 0, flexGrow: 0 },
+                                isActive
+                                    ? { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--void)', boxShadow: '0 0 14px rgba(209, 252, 0, 0.3)' }
+                                    : { background: 'transparent', color: 'var(--outline)' })
+                        }, e(MIcon, { icon: tab.icon, fill: isActive, style: { fontSize: Math.round(cell * (isActive ? 0.58 : 0.52)) + 'px' } }));
+                    })
+                );
+            }
+
             return e('nav', {
                 className: 'fixed bottom-0 left-0 right-0 z-50 flex items-end justify-around',
                 style: {
                     background: 'rgba(16, 20, 23, 0.92)',
                     backdropFilter: 'blur(20px)',
                     WebkitBackdropFilter: 'blur(20px)',
-                    paddingBottom: isCover ? 'max(env(safe-area-inset-bottom), 4px)' : 'max(env(safe-area-inset-bottom), 12px)',
-                    paddingTop: isCover ? '3px' : '12px',
+                    paddingBottom: 'max(env(safe-area-inset-bottom), 12px)',
+                    paddingTop: '12px',
                     borderTop: '1px solid rgba(69, 72, 76, 0.1)',
                     width: '100%',
-                    paddingLeft: isCover ? 'max(env(safe-area-inset-left), 6px)' : '20px',
-                    paddingRight: isCover ? 'max(env(safe-area-inset-right), 6px)' : '20px'
+                    paddingLeft: '20px',
+                    paddingRight: '20px'
                 }
             },
                 tabs.map(tab => {
                     const isActive = activeTab === tab.id;
-                    const btnSize = isCover ? '32px' : '48px';
-                    const iconSize = isCover ? (isActive ? '19px' : '17px') : (isActive ? '26px' : '23px');
                     return e('div', {
                         key: tab.id,
                         className: 'flex-1 flex justify-center',
-                        style: { height: isCover ? '38px' : '56px', alignItems: 'flex-start' }
+                        style: { height: '56px', alignItems: 'flex-start' }
                     },
                         e('button', {
                             onClick: () => onTabChange(tab.id),
                             'aria-label': tab.label,
                             className: 'flex items-center justify-center rounded-full transition-all duration-300 active:scale-90',
                             style: isActive ? {
-                                width: btnSize,
-                                height: btnSize,
+                                width: '48px', height: '48px',
                                 background: 'linear-gradient(45deg, #d1fc00, #c4ec00)',
                                 color: 'var(--void)',
                                 boxShadow: '0 0 20px rgba(209, 252, 0, 0.3)',
-                                transform: isCover ? 'translateY(-4px)' : 'translateY(-12px)'
+                                transform: 'translateY(-12px)'
                             } : {
-                                width: btnSize,
-                                height: btnSize,
+                                width: '48px', height: '48px',
                                 background: 'transparent',
                                 color: 'var(--outline)',
                                 transform: 'translateY(0)'
                             }
-                        }, e(MIcon, { icon: tab.icon, fill: isActive, style: { fontSize: iconSize } }))
+                        }, e(MIcon, { icon: tab.icon, fill: isActive, style: { fontSize: isActive ? '26px' : '23px' } }))
                     );
                 })
             );
