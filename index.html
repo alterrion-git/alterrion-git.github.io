@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.11.0';
+        const APP_VERSION = '3.12.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -1132,7 +1132,8 @@
             const [pendingMigration, setPendingMigration] = useState(null);
             const [expandedHistoryIdx, setExpandedHistoryIdx] = useState(null);
             // Progress-tracking state
-            const DEFAULT_PROFILE = { displayName: '', goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null };
+            const DEFAULT_PROFILE = { displayName: '', goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null, notes: '' };
+            const PROFILE_NOTES_MAX = 800;
             const [profile, setProfile] = useState(DEFAULT_PROFILE);
             const [metrics, setMetrics] = useState([]); // [{ date, weight, kcal, sleep, steps, note }]
             const [recaps, setRecaps] = useState([]);   // legacy one-shot recaps (kept for old data)
@@ -2025,6 +2026,7 @@
                 const todayW = workouts[todayName];
                 const lines = [];
                 lines.push(`Profile: ${goal}.`);
+                if (p.notes && p.notes.trim()) lines.push(`User's own notes (their training style, preferences, limitations, diet, etc.): ${p.notes.trim()}`);
                 lines.push(`Training: ${workoutHistory.length} sessions logged all-time, ${last4w} in the last 4 weeks. Weekly plan days: ${DAYS.filter(d => workouts[d]).map(d => d + '=' + workouts[d].name).join(', ') || 'none'}.`);
                 lines.push(`Today is ${todayName}; today's planned workout: ${todayW ? todayW.name : 'rest / none'}.`);
                 if (trends.length) { lines.push('Recent lift trends (exercises with real history):'); trends.slice(0, 12).forEach(t => lines.push(t)); }
@@ -3285,8 +3287,21 @@
                                 numField('Daily Calories', profile.dailyKcal, (v) => updateProfileField('dailyKcal', v), '2800', 'kcal'),
                                 numField('Height', profile.heightCm, (v) => updateProfileField('heightCm', v), '180', 'cm')
                             ),
+                            e('div', null,
+                                e('div', { className: 'flex items-center justify-between mb-1' },
+                                    e('div', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'About / Extra Notes'),
+                                    e('div', { className: 'text-xs', style: { color: 'var(--outline)' } }, `${(profile.notes || '').length}/${PROFILE_NOTES_MAX}`)
+                                ),
+                                e('textarea', {
+                                    value: profile.notes || '', rows: 4, maxLength: PROFILE_NOTES_MAX,
+                                    onChange: (ev) => updateProfileField('notes', ev.target.value.slice(0, PROFILE_NOTES_MAX)),
+                                    placeholder: 'Anything the coach should know: training style, experience, injuries/limitations, diet preferences, schedule, equipment, what you want to work on…',
+                                    className: 'w-full p-2.5 rounded-lg outline-none text-sm leading-relaxed resize-none',
+                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' }
+                                })
+                            ),
                             e('div', { className: 'text-xs leading-snug px-1', style: { color: 'var(--outline)' } },
-                                'These goals are saved automatically and given to the AI as context for your recaps.')
+                                'Saved automatically and given to your AI Coach as context.')
                         )
                     );
                 }
