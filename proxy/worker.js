@@ -45,15 +45,39 @@ export default {
     let body;
     try { body = await request.json(); } catch (e) { return json({ error: 'Bad JSON' }, 400); }
 
-    const system = String(body.system || '').slice(0, 4000);
+    const system = String(body.system || '').slice(0, 6000);
     const prompt = String(body.prompt || '').slice(0, 12000);
-    const maxTokens = Math.min(Math.max(parseInt(body.maxTokens, 10) || 900, 64), 2048);
-    if (!prompt) return json({ error: 'Empty prompt' }, 400);
+    const turns = Array.isArray(body.messages) ? body.messages : null; // chat history
+    const user = String(body.user || '').slice(0, 128);
+    const maxTokens = Math.min(Math.max(parseInt(body.maxTokens, 10) || 700, 64), 2048);
+    if (!turns && !prompt) return json({ error: 'Empty prompt' }, 400);
+
+    // Optional server-side daily cap per user. Only active if a KV namespace is
+    // bound as RL (Settings > Bindings > KV namespace, variable name RL). Without
+    // it, the app's client-side 5/day limit still applies.
+    const DAILY_LIMIT = parseInt(env.DAILY_LIMIT || '5', 10);
+    if (env.RL && user) {
+      const day = new Date().toISOString().slice(0, 10);
+      const key = `rl:${user}:${day}`;
+      const used = parseInt((await env.RL.get(key)) || '0', 10);
+      if (used >= DAILY_LIMIT) return json({ error: `Daily message limit reached (${DAILY_LIMIT}/day). Resets tomorrow.` }, 429);
+      // best-effort increment; expires after 2 days
+      try { await env.RL.put(key, String(used + 1), { expirationTtl: 172800 }); } catch (e) {}
+    }
 
     const model = env.AI_MODEL || DEFAULT_MODEL;
     const messages = [];
     if (system) messages.push({ role: 'system', content: system });
-    messages.push({ role: 'user', content: prompt });
+    if (turns) {
+      for (const m of turns.slice(-24)) {
+        if (m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content) {
+          messages.push({ role: m.role, content: m.content.slice(0, 6000) });
+        }
+      }
+    } else {
+      messages.push({ role: 'user', content: prompt });
+    }
+    if (messages.length === (system ? 1 : 0)) return json({ error: 'No message content' }, 400);
 
     let out;
     try {

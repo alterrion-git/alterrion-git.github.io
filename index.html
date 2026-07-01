@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.10.1';
+        const APP_VERSION = '3.11.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -260,19 +260,24 @@
         const LLM_PROXY_URL = 'https://crimson-waterfall-9438.blackrivercz.workers.dev';
         const proxyEnabled = () => LLM_PROXY_URL.length > 0;
 
-        // Ask the recap proxy for a coaching recap. Sends only text (system + prompt).
-        async function callRecapProxy(system, prompt, maxTokens = 900) {
+        // Ask the AI proxy. body = { system, prompt } (one-shot) or
+        // { system, messages:[{role,content}], user } (chat). Returns text.
+        async function callAIProxy(body) {
             const res = await fetch(LLM_PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ system, prompt, maxTokens })
+                body: JSON.stringify(body)
             });
             let data = {};
             try { data = await res.json(); } catch (err) {}
-            if (!res.ok) throw new Error((data && data.error) || `Recap service error (${res.status})`);
-            if (!data.text) throw new Error('The recap came back empty — try again.');
+            if (!res.ok) throw new Error((data && data.error) || `AI service error (${res.status})`);
+            if (!data.text) throw new Error('The response came back empty — try again.');
             return data.text;
         }
+
+        const ASSISTANT_SYSTEM = "You are Coach, a friendly, knowledgeable strength-training and fitness assistant built into a workout-tracking app. Help with training, programming, technique, exercise selection, nutrition, recovery and motivation. You are given the user's own logged data below — reference their real numbers, goals and trends when it's relevant, but you can also answer general fitness questions. Be concise and practical (a few short paragraphs or bullets). Avoid medical claims; for pain, injury or medical concerns, suggest seeing a qualified professional.";
+
+        const DAILY_AI_LIMIT = 5;
 
         // ============================================
         // FIREBASE AUTH (optional, secure mode) — OFF until you paste a Web API key.
@@ -688,6 +693,27 @@
                 ),
                 e('div', { className: 'text-xs mt-3 leading-snug', style: { color: 'var(--outline)' } },
                     'Stored only on this device (localStorage) — never uploaded to the cloud. Used directly from your browser to call OpenAI for recaps.')
+            );
+        }
+
+        // --- Chat input bar (self-managed text; grows to a few lines) ---
+        function ChatInput({ onSend, disabled, placeholder }) {
+            const [text, setText] = useState('');
+            const send = () => { const t = text.trim(); if (!t || disabled) return; onSend(t); setText(''); };
+            return e('div', { className: 'flex items-end gap-2' },
+                e('textarea', {
+                    value: text, rows: 1, placeholder: placeholder || 'Ask your coach…',
+                    onChange: (ev) => setText(ev.target.value),
+                    onKeyDown: (ev) => { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); send(); } },
+                    className: 'flex-1 min-w-0 px-3 py-2.5 rounded-2xl outline-none text-base resize-none',
+                    style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)', maxHeight: '120px' }
+                }),
+                e('button', {
+                    onClick: send, disabled,
+                    'aria-label': 'Send',
+                    className: 'w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 active:scale-90',
+                    style: { background: disabled ? 'var(--surface-container-highest)' : 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: disabled ? 'var(--outline)' : 'var(--void)' }
+                }, e(MIcon, { icon: 'arrow_upward', style: { fontSize: '22px' } }))
             );
         }
 
@@ -1109,12 +1135,15 @@
             const DEFAULT_PROFILE = { displayName: '', goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null };
             const [profile, setProfile] = useState(DEFAULT_PROFILE);
             const [metrics, setMetrics] = useState([]); // [{ date, weight, kcal, sleep, steps, note }]
-            const [recaps, setRecaps] = useState([]);   // [{ type, date, periodKey, text }]
-            const [progressSub, setProgressSub] = useState('hub'); // hub | goals | metrics | photos | recaps | settings
+            const [recaps, setRecaps] = useState([]);   // legacy one-shot recaps (kept for old data)
+            const [chat, setChat] = useState([]);       // [{ role:'user'|'assistant', content, ts }]
+            const [aiUsage, setAiUsage] = useState({ date: '', count: 0 }); // per-day AI message counter (synced)
+            const [progressSub, setProgressSub] = useState('hub'); // hub | goals | metrics | photos | chat | settings
             const [photos, setPhotos] = useState([]);   // loaded from IndexedDB (local only)
             const [aiBusy, setAiBusy] = useState(false);
             const [aiError, setAiError] = useState('');
             const [toast, setToast] = useState('');
+            const chatScrollRef = useRef(null);
             // Month calendar: cursor = first-of-month being shown; selectedDay = day sheet open
             const [calCursor, setCalCursor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime(); });
             const [selectedDay, setSelectedDay] = useState(null); // ms at noon of the picked day, or null
@@ -1298,6 +1327,8 @@
                 setProfile(DEFAULT_PROFILE);
                 setMetrics([]);
                 setRecaps([]);
+                setChat([]);
+                setAiUsage({ date: '', count: 0 });
                 setPhotos([]);
                 setProgressSub('hub');
                 setView('login');
@@ -1356,6 +1387,8 @@
                 setProfile({ ...DEFAULT_PROFILE, ...(pick('profile', {}) || {}) });
                 setMetrics(pick('metrics', []) || []);
                 setRecaps(pick('recaps', []) || []);
+                setChat(pick('chat', []) || []);
+                setAiUsage(pick('aiUsage', { date: '', count: 0 }) || { date: '', count: 0 });
             };
 
             // --- Tab switching logic ---
@@ -1452,6 +1485,14 @@
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('profile', profile); }, [profile]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('metrics', metrics); }, [metrics]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('recaps', recaps); }, [recaps]);
+            useEffect(() => { if (!isLoading && currentUser) cloudSaveField('chat', chat); }, [chat]);
+            useEffect(() => { if (!isLoading && currentUser) cloudSaveField('aiUsage', aiUsage); }, [aiUsage]);
+            // Keep the chat scrolled to the newest message.
+            useEffect(() => {
+                if (progressSub === 'chat' && chatScrollRef.current) {
+                    chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+                }
+            }, [chat, aiBusy, progressSub]);
 
             // Load this user's progress photos from IndexedDB whenever the user changes.
             useEffect(() => {
@@ -1936,23 +1977,6 @@
             const distinctWeeks = () => countDistinct(allDataDates(), weekKey);
             const distinctMonths = () => countDistinct(allDataDates(), monthKey);
 
-            // Gating: weekly needs >=2 weeks of data and none generated for the current
-            // ISO week yet; monthly needs >=2 months and none for the current month.
-            const lastRecap = (type) => recaps.filter(r => r.type === type).sort((a, b) => b.date - a.date)[0];
-            const canGenerate = (type) => {
-                if (!proxyEnabled()) return { ok: false, reason: 'AI recaps are not configured yet.' };
-                if (type === 'weekly') {
-                    if (distinctWeeks() < 2) return { ok: false, reason: 'Need at least 2 weeks of data.' };
-                    const last = lastRecap('weekly');
-                    if (last && last.periodKey === weekKey(Date.now())) return { ok: false, reason: 'Weekly recap already done this week.' };
-                } else {
-                    if (distinctMonths() < 2) return { ok: false, reason: 'Need at least 2 months of data.' };
-                    const last = lastRecap('monthly');
-                    if (last && last.periodKey === monthKey(Date.now())) return { ok: false, reason: 'Monthly recap already done this month.' };
-                }
-                return { ok: true, reason: '' };
-            };
-
             // Exercises with "proper history": appear in >=2 logged sessions. Used so the LLM
             // only reasons about lifts the user has actually stuck with.
             const buildExerciseTrends = (sinceTs) => {
@@ -1977,60 +2001,68 @@
                 return lines;
             };
 
-            const buildRecapContent = (type) => {
+            // Compact snapshot of the user's real data, given to the assistant as context so
+            // it can reference their actual training/body when relevant.
+            const buildAssistantContext = () => {
                 const now = Date.now();
-                const periodStart = type === 'weekly' ? now - 7 * DAY_MS : now - 31 * DAY_MS;
-                const workoutsInPeriod = workoutHistory.filter(w => w.date >= periodStart);
-                const metricsInPeriod = metrics.filter(m => m.date >= periodStart);
-                const weights = metricsInPeriod.filter(m => m.weight).map(m => m.weight);
-                const kcals = metricsInPeriod.filter(m => m.kcal).map(m => m.kcal);
-                const sleeps = metricsInPeriod.filter(m => m.sleep).map(m => m.sleep);
-                const avg = (a) => a.length ? Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 10) / 10 : null;
                 const p = profile;
-                const goalLine = [
-                    p.goal ? `Goal: ${p.goal}` : null,
-                    p.split ? `Split: ${p.split}` : null,
-                    p.targetWeight ? `Target weight: ${p.targetWeight}kg` : null,
-                    p.targetBodyFat ? `Target body fat: ${p.targetBodyFat}%` : null,
-                    p.dailyKcal ? `Daily kcal target: ${p.dailyKcal}` : null,
-                ].filter(Boolean).join(' | ') || 'No explicit goals set.';
-                const trends = buildExerciseTrends(periodStart);
+                const goal = [
+                    p.goal ? `goal ${p.goal}` : null,
+                    p.split ? `split ${p.split}` : null,
+                    p.targetWeight ? `target ${p.targetWeight}kg` : null,
+                    p.targetBodyFat ? `target ${p.targetBodyFat}% body fat` : null,
+                    p.dailyKcal ? `${p.dailyKcal} kcal/day target` : null,
+                    p.heightCm ? `height ${p.heightCm}cm` : null,
+                ].filter(Boolean).join(', ') || 'none set';
+                const last4w = workoutHistory.filter(w => w.date >= now - 28 * DAY_MS).length;
+                const trends = buildExerciseTrends(now - 42 * DAY_MS);
+                const m4 = metrics.filter(m => m.date >= now - 28 * DAY_MS);
+                const avg = (arr) => arr.length ? Math.round(arr.reduce((x, y) => x + y, 0) / arr.length * 10) / 10 : null;
+                const latestW = metrics.filter(m => m.weight != null).sort((a, b) => b.date - a.date)[0];
+                const kc = avg(m4.filter(m => m.kcal).map(m => m.kcal));
+                const sl = avg(m4.filter(m => m.sleep).map(m => m.sleep));
+                const todayName = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
+                const todayW = workouts[todayName];
                 const lines = [];
-                lines.push(`Period: ${type} (last ${type === 'weekly' ? '7 days' : '~1 month'}).`);
-                lines.push(goalLine);
-                lines.push(`Workouts completed this period: ${workoutsInPeriod.length}.`);
-                if (trends.length) { lines.push('Lift progression (exercises with real history):'); trends.forEach(t => lines.push(t)); }
-                else lines.push('Not enough repeated-exercise history to show lift trends yet.');
-                const bodyBits = [];
-                if (weights.length) bodyBits.push(`weight ${weights[0]}→${weights[weights.length - 1]}kg (avg ${avg(weights)})`);
-                if (kcals.length) bodyBits.push(`avg intake ${avg(kcals)} kcal/day over ${kcals.length} logged days`);
-                if (sleeps.length) bodyBits.push(`avg sleep ${avg(sleeps)}h`);
-                lines.push(bodyBits.length ? `Body metrics: ${bodyBits.join('; ')}.` : 'No body metrics logged this period.');
-                // Progress photos are intentionally NOT sent to the LLM — they stay on-device
-                // as private logs. We only note the count for context.
-                const photoCount = photos.filter(ph => ph.date >= periodStart).length;
-                if (photoCount) lines.push(`(${photoCount} private progress photo(s) logged this period — not shared.)`);
-                lines.push('\nWrite a concise coaching recap and 3-5 prioritized recommendations for the next period.');
+                lines.push(`Profile: ${goal}.`);
+                lines.push(`Training: ${workoutHistory.length} sessions logged all-time, ${last4w} in the last 4 weeks. Weekly plan days: ${DAYS.filter(d => workouts[d]).map(d => d + '=' + workouts[d].name).join(', ') || 'none'}.`);
+                lines.push(`Today is ${todayName}; today's planned workout: ${todayW ? todayW.name : 'rest / none'}.`);
+                if (trends.length) { lines.push('Recent lift trends (exercises with real history):'); trends.slice(0, 12).forEach(t => lines.push(t)); }
+                const body = [];
+                if (latestW) body.push(`latest weight ${fmtNum(latestW.weight)}kg`);
+                if (kc) body.push(`avg intake ~${kc} kcal/day (last 4w)`);
+                if (sl) body.push(`avg sleep ~${sl}h`);
+                if (body.length) lines.push('Body: ' + body.join(', ') + '.');
                 return lines.join('\n');
             };
 
-            const generateRecap = async (type) => {
-                setAiError('');
-                const gate = canGenerate(type);
-                if (!gate.ok) { setAiError(gate.reason); return; }
-                setAiBusy(true);
+            const aiUsedToday = () => (aiUsage.date === dayKey(Date.now()) ? aiUsage.count : 0);
+
+            const sendChat = async (text) => {
+                if (!proxyEnabled()) { setAiError('AI coach is not configured yet.'); return; }
+                const today = dayKey(Date.now());
+                const used = aiUsedToday();
+                if (used >= DAILY_AI_LIMIT) { setAiError(`Daily limit reached (${DAILY_AI_LIMIT} messages/day). Resets tomorrow.`); return; }
+                const next = [...chat, { role: 'user', content: text, ts: Date.now() }];
+                setChat(next);
+                setAiBusy(true); setAiError('');
                 try {
-                    const prompt = buildRecapContent(type);
-                    const text = await callRecapProxy(RECAP_SYSTEM, prompt, type === 'monthly' ? 1100 : 850);
-                    const now = Date.now();
-                    const periodKey = type === 'weekly' ? weekKey(now) : monthKey(now);
-                    const entry = { type, date: now, periodKey, text };
-                    setRecaps(prev => [...prev.filter(r => !(r.type === type && r.periodKey === periodKey)), entry].sort((a, b) => b.date - a.date));
-                    setToast((type === 'weekly' ? 'Weekly' : 'Monthly') + ' recap ready');
+                    const system = ASSISTANT_SYSTEM + "\n\n--- The user's logged data (reference if relevant) ---\n" + buildAssistantContext();
+                    const window = next.slice(-16).map(m => ({ role: m.role, content: m.content }));
+                    const reply = await callAIProxy({ system, messages: window, user: currentUser ? currentUser.username : '', maxTokens: 700 });
+                    setChat(prev => [...prev, { role: 'assistant', content: reply, ts: Date.now() }]);
+                    setAiUsage({ date: today, count: used + 1 }); // count only successful replies
                 } catch (err) {
-                    setAiError(err.message || 'Recap failed');
+                    setAiError(err.message || 'Message failed');
                 } finally { setAiBusy(false); }
             };
+
+            const clearChat = () => setConfirmState({
+                title: 'Clear conversation?',
+                message: 'This deletes your entire coach chat history.',
+                confirmLabel: 'Clear',
+                onConfirm: () => { setChat([]); setConfirmState(null); }
+            });
 
             // --- Full backup export / import (JSON). Also the migration path between
             // accounts / auth methods, since photos live on-device. ---
@@ -3334,38 +3366,73 @@
                     );
                 }
 
-                // ---- AI RECAPS ----
-                if (progressSub === 'recaps') {
-                    const weeklyGate = canGenerate('weekly');
-                    const monthlyGate = canGenerate('monthly');
-                    const list = recaps.slice().sort((a, b) => b.date - a.date);
-                    const genBtn = (type, gate) => e('button', {
-                        onClick: () => generateRecap(type),
-                        disabled: aiBusy || !gate.ok,
-                        className: 'flex-1 py-3 rounded-xl font-black text-sm transition-all active:scale-95',
-                        style: (gate.ok && !aiBusy)
-                            ? { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' }
-                            : { background: 'var(--surface-container-highest)', color: 'var(--outline)' }
-                    }, aiBusy ? 'Thinking…' : (type === 'weekly' ? 'Weekly Recap' : 'Monthly Recap'));
-                    return shell('AI RECAPS', true,
-                        e('div', null,
-                            e('div', { className: 'flex gap-3 mb-2' }, genBtn('weekly', weeklyGate), genBtn('monthly', monthlyGate)),
-                            e('div', { className: 'flex gap-3 mb-3' },
-                                e('div', { className: 'flex-1 text-xs leading-snug px-1', style: { color: weeklyGate.ok ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }, weeklyGate.ok ? 'Ready' : weeklyGate.reason),
-                                e('div', { className: 'flex-1 text-xs leading-snug px-1', style: { color: monthlyGate.ok ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }, monthlyGate.ok ? 'Ready' : monthlyGate.reason)
-                            ),
-                            aiError ? e('div', { className: 'text-sm mb-3 px-1', style: { color: 'var(--error)' } }, aiError) : null,
-                            list.length === 0 ? e('div', { className: 'text-center text-sm mt-8', style: { color: 'var(--outline)' } }, 'No recaps yet. Generate one once you have a couple of weeks of data.')
-                                : e('div', { className: 'space-y-3 mt-2' },
-                                    list.map((r, i) => e('div', { key: r.date + '-' + i, className: 'rounded-xl p-4', style: card },
-                                        e('div', { className: 'flex items-center justify-between mb-2' },
-                                            e('span', { className: 'text-xs uppercase tracking-widest font-bold', style: { color: 'var(--primary-fixed-dim)' } }, `${r.type} · ${r.periodKey}`),
-                                            e('span', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, new Date(r.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))
-                                        ),
-                                        e('div', { className: 'text-sm leading-relaxed', style: { color: 'var(--on-surface)', whiteSpace: 'pre-wrap' } }, r.text)
-                                    ))
-                                )
-                        )
+                // ---- AI COACH CHAT ----
+                if (progressSub === 'chat') {
+                    const today = dayKey(Date.now());
+                    const remaining = Math.max(0, DAILY_AI_LIMIT - aiUsedToday());
+                    const dayLabel = (ts) => {
+                        const k = dayKey(ts);
+                        if (k === today) return 'Today';
+                        if (k === dayKey(Date.now() - DAY_MS)) return 'Yesterday';
+                        return new Date(ts).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                    };
+                    // group messages by calendar day
+                    const groups = [];
+                    let curKey = null;
+                    chat.forEach(m => {
+                        const k = dayKey(m.ts);
+                        if (k !== curKey) { curKey = k; groups.push({ ts: m.ts, msgs: [] }); }
+                        groups[groups.length - 1].msgs.push(m);
+                    });
+                    const bubble = (m, key) => {
+                        const isUser = m.role === 'user';
+                        return e('div', { key, className: 'flex mb-2 ' + (isUser ? 'justify-end' : 'justify-start') },
+                            e('div', {
+                                className: 'px-3.5 py-2.5 text-sm leading-relaxed',
+                                style: {
+                                    maxWidth: '86%', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+                                    background: isUser ? 'var(--primary-container)' : 'var(--surface-container-highest)',
+                                    color: isUser ? 'var(--on-primary-container)' : 'var(--on-surface)',
+                                    borderRadius: isUser ? '18px 18px 6px 18px' : '18px 18px 18px 6px'
+                                }
+                            }, m.content)
+                        );
+                    };
+                    const suggestions = ["How's my recent progress?", 'What should I focus on next?', "Suggest a warm-up for today's workout", 'Am I training each muscle enough?'];
+                    return e('div', { className: 'fixed inset-0 flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' } },
+                        // Header
+                        e('div', { className: 'flex items-center justify-between px-3 flex-shrink-0', style: { minHeight: '56px', paddingTop: 'env(safe-area-inset-top)', background: 'var(--surface-container-low)' } },
+                            e('button', { onClick: backToHub, className: 'flex items-center gap-1 active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(ArrowLeft, { size: 20 }), e('span', { className: 'text-sm' }, 'Back')),
+                            e('div', { className: 'font-black uppercase tracking-tighter text-base', style: { color: 'var(--primary-container)' } }, 'AI COACH'),
+                            chat.length ? e('button', { onClick: clearChat, 'aria-label': 'Clear chat', className: 'p-1.5 active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(MIcon, { icon: 'delete_sweep', style: { fontSize: '20px' } })) : e('div', { style: { width: '28px' } })
+                        ),
+                        // Messages
+                        e('div', { ref: chatScrollRef, className: 'flex-1 overflow-y-auto px-3 py-3', style: { minHeight: 0 } },
+                            e('div', { className: 'max-w-lg mx-auto' },
+                                chat.length === 0 ? e('div', { className: 'pt-8' },
+                                    e('div', { className: 'flex flex-col items-center text-center mb-6' },
+                                        e('div', { className: 'w-14 h-14 rounded-2xl flex items-center justify-center mb-3', style: { background: 'rgba(209, 252, 0, 0.1)' } }, e(MIcon, { icon: 'sports_gymnastics', fill: true, style: { fontSize: '32px', color: 'var(--primary-container)' } })),
+                                        e('div', { className: 'font-black text-lg' }, 'Your AI Coach'),
+                                        e('div', { className: 'text-sm mt-1 px-4', style: { color: 'var(--on-surface-variant)' } }, 'Ask about training, technique, programming, nutrition or recovery. It can see your logged workouts and goals.')
+                                    ),
+                                    e('div', { className: 'space-y-2' }, suggestions.map((s, i) => e('button', {
+                                        key: i, onClick: () => { if (!aiBusy && remaining > 0 && proxyEnabled()) sendChat(s); },
+                                        className: 'w-full text-left px-4 py-3 rounded-xl text-sm active:scale-[0.98]', style: { background: 'var(--surface-container-high)', color: 'var(--on-surface)' }
+                                    }, s)))
+                                ) : groups.map((g, gi) => e('div', { key: gi },
+                                    e('div', { className: 'text-center my-3' }, e('span', { className: 'text-xs px-2.5 py-0.5 rounded-full', style: { background: 'var(--surface-container-high)', color: 'var(--on-surface-variant)' } }, dayLabel(g.ts))),
+                                    g.msgs.map((m, mi) => bubble(m, gi + '-' + mi))
+                                )),
+                                aiBusy ? e('div', { className: 'flex justify-start mb-2' }, e('div', { className: 'px-3.5 py-2.5 text-sm', style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface-variant)', borderRadius: '18px 18px 18px 6px' } }, 'Coach is thinking…')) : null
+                            )
+                        ),
+                        // Input
+                        e('div', { className: 'flex-shrink-0 px-3 pt-2', style: { paddingBottom: 'max(env(safe-area-inset-bottom), 8px)', background: 'var(--surface-container-low)', borderTop: '1px solid var(--outline-variant)' } },
+                            aiError ? e('div', { className: 'text-xs mb-1.5 px-1', style: { color: 'var(--error)' } }, aiError) : null,
+                            e(ChatInput, { onSend: sendChat, disabled: aiBusy || remaining <= 0 || !proxyEnabled(), placeholder: !proxyEnabled() ? 'AI not configured' : (remaining <= 0 ? 'Daily limit reached — resets tomorrow' : 'Ask your coach…') }),
+                            e('div', { className: 'text-center mt-1', style: { fontSize: '10px', color: 'var(--outline)' } }, proxyEnabled() ? `${remaining}/${DAILY_AI_LIMIT} messages left today` : 'AI not configured yet')
+                        ),
+                        confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null
                     );
                 }
 
@@ -3384,7 +3451,7 @@
                                     proxyEnabled() ? e('button', {
                                         onClick: async () => {
                                             setAiError(''); setAiBusy(true);
-                                            try { await callRecapProxy('You are a fitness coach.', 'Reply with exactly: OK', 30); setToast('Recap service works ✓'); }
+                                            try { await callAIProxy({ system: 'You are a fitness coach.', prompt: 'Reply with exactly: OK', maxTokens: 30 }); setToast('AI service works ✓'); }
                                             catch (err) { setAiError(err.message || 'Test failed'); }
                                             finally { setAiBusy(false); }
                                         },
@@ -3486,7 +3553,7 @@
                             hubCard('flag', 'Goals', 'Bulk/cut, targets', 'goals'),
                             hubCard('monitor_weight', 'Daily Log', 'Weight, kcal, sleep', 'metrics'),
                             hubCard('photo_camera', 'Photos', `${photos.length} saved`, 'photos'),
-                            hubCard('auto_awesome', 'AI Recaps', 'Weekly & monthly', 'recaps'),
+                            hubCard('forum', 'AI Coach', 'Chat & advice', 'chat'),
                             hubCard('settings', 'Settings', 'Backup, account, security', 'settings')
                         )
                     )
@@ -3549,7 +3616,7 @@
                             if (isToday && workout) {
                                 return e('div', {
                                     key: day,
-                                    className: 'rounded-xl p-5 flex flex-col justify-between min-h-[160px] relative overflow-hidden',
+                                    className: 'rounded-xl p-5 flex flex-col justify-between h-[160px] relative overflow-hidden',
                                     style: {
                                         background: 'var(--primary-container)',
                                         boxShadow: '0 0 30px rgba(209, 252, 0, 0.15)'
@@ -3559,14 +3626,14 @@
                                         className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
                                         style: { background: 'rgba(76, 93, 0, 0.2)', color: 'var(--on-primary-container)' }
                                     }, getDateForDay(day)),
-                                    e('div', null,
+                                    e('div', { style: { paddingRight: '3.5rem' } },
                                         e('span', {
-                                            className: 'text-xs uppercase tracking-widest font-bold',
+                                            className: 'text-xs uppercase tracking-widest font-bold block truncate',
                                             style: { color: 'var(--on-primary-container)' }
                                         }, `${day} \u2022 Today`),
                                         e('h3', {
                                             className: 'font-black text-xl mt-1 leading-tight',
-                                            style: { color: 'var(--on-primary-container)' }
+                                            style: { color: 'var(--on-primary-container)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }
                                         }, workout.name)
                                     ),
                                     e('div', { className: 'flex items-center gap-2 justify-end mt-4' },
@@ -3590,7 +3657,7 @@
                             if (isToday && !workout) {
                                 return e('div', {
                                     key: day,
-                                    className: 'rounded-xl p-5 flex flex-col justify-between min-h-[160px] relative',
+                                    className: 'rounded-xl p-5 flex flex-col justify-between h-[160px] relative',
                                     style: {
                                         background: 'var(--primary-container)',
                                         boxShadow: '0 0 30px rgba(209, 252, 0, 0.15)'
@@ -3618,16 +3685,16 @@
                             if (workout) {
                                 return e('div', {
                                     key: day,
-                                    className: 'rounded-xl p-5 flex flex-col justify-between min-h-[160px] relative',
+                                    className: 'rounded-xl p-5 flex flex-col justify-between h-[160px] relative',
                                     style: { background: 'var(--surface-container-highest)' }
                                 },
                                     e('div', {
                                         className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
                                         style: { background: 'rgba(248, 249, 254, 0.06)', color: 'var(--on-surface-variant)' }
                                     }, getDateForDay(day)),
-                                    e('div', null,
-                                        e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, day),
-                                        e('h3', { className: 'font-bold text-xl mt-1', style: { color: 'var(--on-surface)' } }, workout.name)
+                                    e('div', { style: { paddingRight: '3.5rem' } },
+                                        e('span', { className: 'text-xs uppercase tracking-widest block truncate', style: { color: 'var(--on-surface-variant)' } }, day),
+                                        e('h3', { className: 'font-bold text-xl mt-1', style: { color: 'var(--on-surface)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, workout.name)
                                     ),
                                     e('div', { className: 'flex items-center gap-2 justify-end mt-4' },
                                         e('button', {
@@ -3649,7 +3716,7 @@
                             // Rest day (no workout)
                             return e('div', {
                                 key: day,
-                                className: 'rounded-xl p-5 flex flex-col justify-between min-h-[160px] relative',
+                                className: 'rounded-xl p-5 flex flex-col justify-between h-[160px] relative',
                                 style: { background: 'var(--surface-container-low)', border: '1px dashed rgba(69, 72, 76, 0.2)' }
                             },
                                 e('div', {

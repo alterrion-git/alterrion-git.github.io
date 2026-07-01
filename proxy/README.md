@@ -48,8 +48,21 @@ curl -X POST https://cwa-recap.<you>.workers.dev \
 ```
 Expect `{"text":"..."}`.
 
+## Optional: server-side daily limit (recommended for public use)
+The app already caps each user to 5 AI messages/day, but that's client-side.
+To enforce it on the server (so nobody can bypass it and drain the free
+allocation):
+1. Cloudflare → **Storage & Databases → KV → Create namespace** (e.g. `cwa-rl`).
+2. Worker → **Settings → Bindings → Add → KV namespace** → variable name **`RL`**
+   → pick that namespace → **Deploy**.
+3. (Optional) plain variable `DAILY_LIMIT` (defaults to `5`).
+
+With `RL` bound, the Worker counts requests per user per day and returns 429
+past the limit. Without it, only the app's client-side limit applies.
+
 ## Notes
 - The Worker only accepts requests whose `Origin` is your app (stops casual
-  browser abuse). For a fully public release, add a shared secret or
-  Cloudflare rate-limiting.
+  browser abuse). For a fully public release, also add the KV limit above.
 - Swap models any time via `AI_MODEL`; the app never changes.
+- The app sends `{ system, messages: [...], user, maxTokens }` for chat, or
+  `{ system, prompt }` for the Settings "Test connection" ping.
