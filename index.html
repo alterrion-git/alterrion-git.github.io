@@ -203,7 +203,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.12.0';
+        const APP_VERSION = '3.13.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -1041,6 +1041,13 @@
         function fmtNum(v) {
             if (typeof v !== 'number' || isNaN(v)) return '0';
             return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
+        }
+
+        // Normalise a raw workout score (points / maxPoints, which varies with exercise count)
+        // to a consistent whole number out of 10.
+        function scoreOutOf10(score, maxScore) {
+            if (!maxScore || maxScore <= 0) return 0;
+            return Math.max(0, Math.min(10, Math.round((score / maxScore) * 10)));
         }
 
         function CustomNumberInput({ value, onChange, label, step = 1, size = 168 }) {
@@ -2029,7 +2036,40 @@
                 if (p.notes && p.notes.trim()) lines.push(`User's own notes (their training style, preferences, limitations, diet, etc.): ${p.notes.trim()}`);
                 lines.push(`Training: ${workoutHistory.length} sessions logged all-time, ${last4w} in the last 4 weeks. Weekly plan days: ${DAYS.filter(d => workouts[d]).map(d => d + '=' + workouts[d].name).join(', ') || 'none'}.`);
                 lines.push(`Today is ${todayName}; today's planned workout: ${todayW ? todayW.name : 'rest / none'}.`);
-                if (trends.length) { lines.push('Recent lift trends (exercises with real history):'); trends.slice(0, 12).forEach(t => lines.push(t)); }
+
+                // Full current program: every planned day with each exercise's set scheme.
+                const fmtSets = (ex) => {
+                    const sets = ex.sets || [];
+                    if (!sets.length) return '';
+                    const same = sets.every(s => s.reps === sets[0].reps && s.weight === sets[0].weight);
+                    if (same) return `${sets.length}×${fmtNum(sets[0].reps)}@${fmtNum(sets[0].weight)}kg`;
+                    return sets.map(s => `${fmtNum(s.reps)}@${fmtNum(s.weight)}kg`).join(', ');
+                };
+                const planDays = DAYS.filter(d => workouts[d]);
+                if (planDays.length) {
+                    lines.push('Current program (planned exercises, sets×reps@weight):');
+                    planDays.forEach(d => {
+                        const w = workouts[d];
+                        lines.push(`  ${d} — ${w.name}: ${w.exercises.map(ex => `${ex.name} ${fmtSets(ex)}${ex.notes ? ' [' + ex.notes + ']' : ''}`).join('; ')}`);
+                    });
+                }
+
+                // Most recent actually-performed sets per exercise (from history), so the
+                // coach can compare plan vs. performance and suggest progression.
+                const latestByEx = {};
+                workoutHistory.slice().sort((a, b) => a.date - b.date).forEach(w => {
+                    w.exercises.forEach(ex => { latestByEx[ex.name] = { date: w.date, sets: ex.sets }; });
+                });
+                const exNames = Object.keys(latestByEx);
+                if (exNames.length) {
+                    lines.push('Most recent performed sets per exercise:');
+                    exNames.slice(0, 40).forEach(name => {
+                        const rec = latestByEx[name];
+                        const setsStr = rec.sets.map(s => `${fmtNum(s.reps)}@${fmtNum(s.weight)}kg`).join(', ');
+                        lines.push(`  ${name}: ${setsStr}`);
+                    });
+                }
+                if (trends.length) { lines.push('Lift progression (top set, first→latest):'); trends.slice(0, 20).forEach(t => lines.push(t)); }
                 const body = [];
                 if (latestW) body.push(`latest weight ${fmtNum(latestW.weight)}kg`);
                 if (kc) body.push(`avg intake ~${kc} kcal/day (last 4w)`);
@@ -2634,7 +2674,7 @@
                                                     return e('div', {
                                                         className: 'text-xs font-black px-1.5 py-0.5 rounded-lg flex-shrink-0',
                                                         style: { background: bg, color: fg, boxShadow: level >= 3 ? `0 0 8px ${bg}40` : 'none' }
-                                                    }, `${w.score}/${w.maxScore}`);
+                                                    }, `${scoreOutOf10(w.score, w.maxScore)}/10`);
                                                 })() : null,
                                                 // Expand arrow
                                                 e(MIcon, { icon: isExpanded ? 'expand_less' : 'expand_more', style: { fontSize: '20px', color: 'var(--outline)' } })
@@ -2965,8 +3005,8 @@
                                     style: { background: 'var(--surface-container-low)' }
                                 },
                                     e(MIcon, { icon: 'trending_up', style: { fontSize: '20px', color: 'var(--primary-fixed-dim)', marginBottom: '4px' } }),
-                                    e('div', { className: 'text-xl font-black', style: { color: 'var(--primary-fixed-dim)' } }, `${totalScore}/${maxScore}`),
-                                    e('div', { className: 'text-xs uppercase tracking-widest mt-0.5', style: { color: 'var(--on-surface-variant)' } }, 'Points')
+                                    e('div', { className: 'text-xl font-black', style: { color: 'var(--primary-fixed-dim)' } }, `${scoreOutOf10(totalScore, maxScore)}/10`),
+                                    e('div', { className: 'text-xs uppercase tracking-widest mt-0.5', style: { color: 'var(--on-surface-variant)' } }, 'Score')
                                 )
                             ),
                             // Battery score bar
@@ -3638,14 +3678,14 @@
                                     }
                                 },
                                     e('div', {
-                                        className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
-                                        style: { background: 'rgba(76, 93, 0, 0.2)', color: 'var(--on-primary-container)' }
-                                    }, getDateForDay(day)),
-                                    e('div', { style: { paddingRight: '3.5rem' } },
+                                        className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-black',
+                                        style: { background: 'rgba(76, 93, 0, 0.25)', color: 'var(--on-primary-container)' }
+                                    }, 'TODAY'),
+                                    e('div', { style: { paddingRight: '3.25rem' } },
                                         e('span', {
-                                            className: 'text-xs uppercase tracking-widest font-bold block truncate',
-                                            style: { color: 'var(--on-primary-container)' }
-                                        }, `${day} \u2022 Today`),
+                                            className: 'text-xs uppercase tracking-wide font-bold',
+                                            style: { color: 'var(--on-primary-container)', whiteSpace: 'nowrap' }
+                                        }, day),
                                         e('h3', {
                                             className: 'font-black text-xl mt-1 leading-tight',
                                             style: { color: 'var(--on-primary-container)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }
@@ -3679,11 +3719,11 @@
                                     }
                                 },
                                     e('div', {
-                                        className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
-                                        style: { background: 'rgba(76, 93, 0, 0.2)', color: 'var(--on-primary-container)' }
-                                    }, getDateForDay(day)),
-                                    e('div', null,
-                                        e('span', { className: 'text-xs uppercase tracking-widest font-bold', style: { color: 'var(--on-primary-container)' } }, `${day} \u2022 Today`),
+                                        className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-black',
+                                        style: { background: 'rgba(76, 93, 0, 0.25)', color: 'var(--on-primary-container)' }
+                                    }, 'TODAY'),
+                                    e('div', { style: { paddingRight: '3.25rem' } },
+                                        e('span', { className: 'text-xs uppercase tracking-wide font-bold', style: { color: 'var(--on-primary-container)', whiteSpace: 'nowrap' } }, day),
                                         e('h3', { className: 'font-medium text-lg mt-1 italic', style: { color: 'var(--on-primary-container)', opacity: 0.7 } }, 'Rest Day')
                                     ),
                                     e('div', { className: 'flex justify-end mt-4' },
@@ -3707,8 +3747,8 @@
                                         className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
                                         style: { background: 'rgba(248, 249, 254, 0.06)', color: 'var(--on-surface-variant)' }
                                     }, getDateForDay(day)),
-                                    e('div', { style: { paddingRight: '3.5rem' } },
-                                        e('span', { className: 'text-xs uppercase tracking-widest block truncate', style: { color: 'var(--on-surface-variant)' } }, day),
+                                    e('div', { style: { paddingRight: '3.25rem' } },
+                                        e('span', { className: 'text-xs uppercase tracking-wide', style: { color: 'var(--on-surface-variant)', whiteSpace: 'nowrap' } }, day),
                                         e('h3', { className: 'font-bold text-xl mt-1', style: { color: 'var(--on-surface)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, workout.name)
                                     ),
                                     e('div', { className: 'flex items-center gap-2 justify-end mt-4' },
@@ -3738,8 +3778,8 @@
                                     className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
                                     style: { background: 'rgba(248, 249, 254, 0.03)', color: 'var(--on-surface-variant)' }
                                 }, getDateForDay(day)),
-                                e('div', null,
-                                    e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, day),
+                                e('div', { style: { paddingRight: '3.25rem' } },
+                                    e('span', { className: 'text-xs uppercase tracking-wide', style: { color: 'var(--on-surface-variant)', whiteSpace: 'nowrap' } }, day),
                                     e('h3', { className: 'font-medium text-lg mt-1 italic', style: { color: 'var(--on-surface-variant)', opacity: 0.6 } }, 'Rest Day')
                                 ),
                                 e('div', { className: 'flex justify-end mt-4' },
