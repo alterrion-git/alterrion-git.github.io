@@ -11,9 +11,36 @@
     <meta name="screen-orientation" content="portrait">
     <link rel="manifest" href="manifest.json">
     <title>CWA - Workout Tracker</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <!-- Fonts are self-hosted (fonts/) so they're cached with the app and work offline.
+         Loading them from Google Fonts meant a slow/failed load showed icon names as raw
+         text ("bar_chart") and swapped Inter for a differently-sized system font. -->
+    <link rel="preload" href="fonts/material-symbols.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
     <style>
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-display: swap;
+            font-weight: 100 900;
+            src: url(fonts/inter-latin-ext-wght-normal.woff2) format('woff2-variations');
+            unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+        }
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-display: swap;
+            font-weight: 100 900;
+            src: url(fonts/inter-latin-wght-normal.woff2) format('woff2-variations');
+            unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+        }
+        /* Icon subset built by tools/build-icons.py; icons are addressed by codepoint (ICON_CP). */
+        @font-face {
+            font-family: 'Material Symbols Outlined';
+            font-style: normal;
+            font-weight: 100 700;
+            font-display: block;
+            src: url(fonts/material-symbols.woff2) format('woff2');
+        }
         * {
             margin: 0;
             padding: 0;
@@ -22,6 +49,10 @@
         }
         
         html {
+            /* Stop Android/iOS from "boosting" text sizes per block, which made font
+               sizes differ between screens and between visits. */
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
             height: 100%;
             height: 100dvh;
             overflow: hidden;
@@ -91,6 +122,19 @@
         }
 
         .material-symbols-outlined {
+            font-family: 'Material Symbols Outlined';
+            font-weight: normal;
+            font-style: normal;
+            font-size: 24px;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            display: inline-block;
+            white-space: nowrap;
+            word-wrap: normal;
+            direction: ltr;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
         }
 
@@ -203,7 +247,7 @@
     <div id="root"></div>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.13.0';
+        const APP_VERSION = '3.14.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -328,13 +372,24 @@
                 'auth/network-request-failed': 'Network error — check your connection.',
                 'auth/unauthorized-domain': 'This domain is not authorized in Firebase Auth settings.',
             };
+            if (err && err.message === 'offline-no-cache') return "Couldn't reach the server — check your connection and try again.";
             return map[c] || (err && err.message) || 'Authentication failed';
         }
+        // Resolves to `fallback` if `promise` hasn't settled within `ms`. Used on every startup
+        // network step: on a weak signal requests often hang instead of failing, which left
+        // the app on "Loading..." indefinitely.
+        function withTimeout(promise, ms, fallback) {
+            return new Promise((resolve) => {
+                const t = setTimeout(() => resolve(fallback), ms);
+                Promise.resolve(promise).then((v) => { clearTimeout(t); resolve(v); }, () => { clearTimeout(t); resolve(fallback); });
+            });
+        }
         // Returns a fresh idToken from the SDK (auto-refreshing), or null if not signed in.
+        // A refresh needs the network (tokens last 1h), so it's capped too.
         async function fbValidToken() {
             const a = fbInit();
             if (!a || !a.currentUser) return null;
-            try { return await a.currentUser.getIdToken(); } catch (e) { return null; }
+            return withTimeout(a.currentUser.getIdToken(), 8000, null);
         }
         // Resolves the persisted user once on startup (works offline from cached state).
         function fbCurrentUserOnce() {
@@ -342,10 +397,17 @@
             if (!a) return Promise.resolve(null);
             return new Promise((resolve) => { const off = a.onAuthStateChanged((u) => { off(); resolve(u || null); }); });
         }
+        // Only needed when returning from the signInWithRedirect fallback; it talks to the
+        // auth server, so skip it on normal launches.
+        const REDIRECT_FLAG = 'cwa-google-redirect';
+        const LAST_FB_USER = 'cwa-last-fb-user'; // { uid, email } of the last account opened on this device
         async function fbGetRedirectUser() {
             const a = fbInit();
             if (!a) return null;
-            try { const r = await a.getRedirectResult(); return (r && r.user) || null; } catch (e) { return null; }
+            let pending = false;
+            try { pending = sessionStorage.getItem(REDIRECT_FLAG) === '1'; sessionStorage.removeItem(REDIRECT_FLAG); } catch (e) {}
+            if (!pending) return null;
+            try { const r = await withTimeout(a.getRedirectResult(), 10000, null); return (r && r.user) || null; } catch (e) { return null; }
         }
         async function fbSignInEmail(email, password) { const a = fbInit(); if (!a) throw new Error('Sign-in unavailable (offline?)'); return (await a.signInWithEmailAndPassword(email, password)).user; }
         async function fbRegisterEmail(email, password) { const a = fbInit(); if (!a) throw new Error('Sign-up unavailable (offline?)'); return (await a.createUserWithEmailAndPassword(email, password)).user; }
@@ -363,6 +425,7 @@
             } catch (err) {
                 const c = err && err.code;
                 if (c === 'auth/popup-blocked' || c === 'auth/operation-not-supported-in-this-environment') {
+                    try { sessionStorage.setItem(REDIRECT_FLAG, '1'); } catch (e) {}
                     await a.signInWithRedirect(provider);
                     return null; // page navigates; tryAutoLogin completes it on return
                 }
@@ -379,15 +442,30 @@
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
-        async function cloudGet(path) {
-            if (!cloudEnabled()) return null;
+        // fetch() with an abort after `ms` (a stalled request otherwise never settles).
+        async function fetchWithTimeout(url, opts = {}, ms = 10000) {
+            const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const t = ctrl ? setTimeout(() => ctrl.abort(), ms) : null;
+            try { return await fetch(url, ctrl ? { ...opts, signal: ctrl.signal } : opts); }
+            finally { if (t) clearTimeout(t); }
+        }
+
+        // Reads a DB path. { ok: true, data } on a real answer (data is null when the path is
+        // empty); { ok: false } when the cloud couldn't be reached/read — callers must not
+        // treat that as "no data" (e.g. by creating a fresh record over the real one).
+        async function cloudRead(path, ms = 10000) {
+            if (!cloudEnabled()) return { ok: false };
             try {
                 let q = '';
-                if (fbAuthEnabled()) { const t = await fbValidToken(); if (!t) return null; q = `?auth=${t}`; }
-                const res = await fetch(`${FIREBASE_DB_URL}/${path}.json${q}`);
-                if (!res.ok) return null;
-                return await res.json();
-            } catch (err) { console.error('Cloud get error:', err); return null; }
+                if (fbAuthEnabled()) { const t = await fbValidToken(); if (!t) return { ok: false }; q = `?auth=${t}`; }
+                const res = await fetchWithTimeout(`${FIREBASE_DB_URL}/${path}.json${q}`, {}, ms);
+                if (!res.ok) return { ok: false };
+                return { ok: true, data: await res.json() };
+            } catch (err) { console.error('Cloud get error:', err); return { ok: false }; }
+        }
+        async function cloudGet(path) {
+            const r = await cloudRead(path);
+            return r.ok ? r.data : null;
         }
 
         async function cloudSet(path, data) {
@@ -395,13 +473,34 @@
             try {
                 let q = '';
                 if (fbAuthEnabled()) { const t = await fbValidToken(); if (!t) return false; q = `?auth=${t}`; }
-                const res = await fetch(`${FIREBASE_DB_URL}/${path}.json${q}`, {
+                const res = await fetchWithTimeout(`${FIREBASE_DB_URL}/${path}.json${q}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
-                });
+                }, 30000);
                 return res.ok;
             } catch (err) { console.error('Cloud set error:', err); return false; }
+        }
+
+        // Fields whose latest local change never reached the cloud (offline / failed write).
+        // On the next load these win over the older cloud copy, so a workout logged without
+        // signal isn't overwritten; the normal sync then pushes it up and clears the mark.
+        // Local copies live at 'cwa-<field>-<user>' (workouts, history, profile, metrics, ...).
+        function unsyncedGet(user) {
+            try { return JSON.parse(localStorage.getItem('cwa-unsynced-' + user) || '[]'); } catch (e) { return []; }
+        }
+        function unsyncedMark(user, field, synced) {
+            try {
+                const set = new Set(unsyncedGet(user));
+                if (synced) set.delete(field); else set.add(field);
+                if (set.size) localStorage.setItem('cwa-unsynced-' + user, JSON.stringify([...set]));
+                else localStorage.removeItem('cwa-unsynced-' + user);
+            } catch (e) {}
+        }
+        function preferUnsyncedLocal(user, field, cloudValue) {
+            if (!unsyncedGet(user).includes(field)) return cloudValue;
+            try { const raw = localStorage.getItem('cwa-' + field + '-' + user); if (raw != null) return JSON.parse(raw); } catch (e) {}
+            return cloudValue;
         }
 
         // ============================================
@@ -751,10 +850,15 @@
         );
 
         // Material icon helper
+        // Icons render by codepoint from the self-hosted subset font (fonts/material-symbols.woff2),
+        // so a missing font shows nothing instead of the icon's name as text. New icon? Add it to
+        // tools/build-icons.py, rebuild, and paste the printed ICON_CP here.
+        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","delete":"e872","delete_sweep":"e16c","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","fitness_center":"eb43","flag":"e153","forum":"e0bf","history":"e28e","info":"e88e","local_fire_department":"ea05","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
         const MIcon = ({ icon, fill = false, className = '', style = {} }) => e('span', {
             className: `material-symbols-outlined ${className}`,
+            'aria-hidden': true,
             style: { fontVariationSettings: fill ? "'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24" : "'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24", ...style }
-        }, icon);
+        }, ICON_CP[icon] ? String.fromCodePoint(parseInt(ICON_CP[icon], 16)) : '');
 
         // Mini sparkline graph for exercise history
         function Sparkline({ data, width = 120, height = 32, color = '#c4ec00' }) {
@@ -1181,21 +1285,27 @@
             // cache instead of wiping the view; only create a fresh record for a truly new uid.
             const loadFbUser = async (u) => {
                 const uid = u.uid;
-                let userData = await cloudGet('users/' + uid);
+                const read = await cloudRead('users/' + uid);
+                let userData = read.ok ? read.data : null;
                 if (!userData) {
                     const localW = localStorage.getItem('cwa-workouts-' + uid);
                     if (localW != null) {
                         userData = { email: u.email || '', createdAt: Date.now(), workouts: JSON.parse(localW || '{}') , history: JSON.parse(localStorage.getItem('cwa-history-' + uid) || '[]') };
-                    } else {
+                    } else if (read.ok) {
                         // Genuinely new account (first sign-in) — create an empty record.
                         userData = { email: u.email || '', createdAt: Date.now(), workouts: {}, history: [] };
                         await cloudSet('users/' + uid, userData);
+                    } else {
+                        // Cloud unreachable and nothing cached on this device: don't start an empty
+                        // account (its first sync would overwrite the real data). Ask to retry.
+                        throw new Error('offline-no-cache');
                     }
                 }
+                try { localStorage.setItem(LAST_FB_USER, JSON.stringify({ uid, email: u.email || '' })); } catch (e) {}
                 setCurrentUser({ username: uid, email: u.email || userData.email || '', createdAt: userData.createdAt || Date.now() });
-                const lw = sanitizeWorkouts(userData.workouts || {});
+                const lw = sanitizeWorkouts(preferUnsyncedLocal(uid, 'workouts', userData.workouts) || {});
                 setWorkouts(lw);
-                setWorkoutHistory(userData.history || []);
+                setWorkoutHistory(preferUnsyncedLocal(uid, 'history', userData.history) || []);
                 hydrateProgress(uid, userData);
                 if (!resumeSessionIfAny(lw, uid)) setView('landing');
                 setIsLoading(false);
@@ -1233,8 +1343,8 @@
                     if (!userData) { setAuthError('User not found. Register first.'); setAuthLoading(false); return; }
                     if (userData.passwordHash !== pHash) { setAuthError('Wrong password'); setAuthLoading(false); return; }
                     setCurrentUser({ username: uname, createdAt: userData.createdAt || Date.now() });
-                    const loadedWorkouts = sanitizeWorkouts(userData.workouts || {});
-                    const loadedHistory = userData.history || [];
+                    const loadedWorkouts = sanitizeWorkouts(preferUnsyncedLocal(uname, 'workouts', userData.workouts) || {});
+                    const loadedHistory = preferUnsyncedLocal(uname, 'history', userData.history) || [];
                     setWorkouts(loadedWorkouts);
                     setWorkoutHistory(loadedHistory);
                     hydrateProgress(uname, userData);
@@ -1344,6 +1454,7 @@
                 setLoginPassword('');
                 setShowProfile(false);
                 localStorage.removeItem('cwa-user');
+                localStorage.removeItem(LAST_FB_USER);
                 fbSignOut();
             };
 
@@ -1369,8 +1480,8 @@
                         const job = syncRef.current.pending;
                         syncRef.current.pending = null;
                         try {
-                            await cloudSet('users/' + job.uname + '/workouts', job.w);
-                            await cloudSet('users/' + job.uname + '/history', job.h);
+                            unsyncedMark(job.uname, 'workouts', await cloudSet('users/' + job.uname + '/workouts', job.w));
+                            unsyncedMark(job.uname, 'history', await cloudSet('users/' + job.uname + '/history', job.h));
                         } catch (err) {}
                     }
                     syncRef.current.running = false;
@@ -1382,13 +1493,13 @@
                 if (!currentUser) return;
                 const uname = currentUser.username;
                 try { localStorage.setItem('cwa-' + field + '-' + uname, JSON.stringify(value)); } catch (err) {}
-                if (cloudEnabled()) await cloudSet('users/' + uname + '/' + field, value);
+                if (cloudEnabled()) unsyncedMark(uname, field, await cloudSet('users/' + uname + '/' + field, value));
             };
 
             // Hydrate progress data from a loaded user record (cloud) or localStorage.
             const hydrateProgress = (uname, src) => {
                 const pick = (field, fallback) => {
-                    if (src && src[field] != null) return src[field];
+                    if (src && src[field] != null) return preferUnsyncedLocal(uname, field, src[field]);
                     try { const raw = localStorage.getItem('cwa-' + field + '-' + uname); if (raw) return JSON.parse(raw); } catch (err) {}
                     return fallback;
                 };
@@ -1436,9 +1547,21 @@
                     if (fbAuthEnabled()) {
                         try {
                             await fbGetRedirectUser(); // finishes a Google redirect sign-in if returning from one
-                            const u = await fbCurrentUserOnce();
+                            // The SDK re-checks a persisted account with Google before reporting it,
+                            // which can stall for a minute on a weak signal. After 6s, open the last
+                            // signed-in account from this device's copy instead; cloud writes resume
+                            // once the SDK catches up (unsynced changes are kept, see unsyncedMark).
+                            const u = await withTimeout(fbCurrentUserOnce(), 6000, undefined);
                             if (u) { await loadFbUser(u); return; }
-                        } catch (err) { console.log('FB auto-login failed:', err); }
+                            if (u === undefined) {
+                                let last = null;
+                                try { last = JSON.parse(localStorage.getItem(LAST_FB_USER) || 'null'); } catch (e) {}
+                                if (last && last.uid && localStorage.getItem('cwa-workouts-' + last.uid) != null) { await loadFbUser(last); return; }
+                            }
+                        } catch (err) {
+                            console.log('FB auto-login failed:', err);
+                            if (err && err.message === 'offline-no-cache') setAuthError(fbMapError(err));
+                        }
                         setIsLoading(false);
                         return;
                     }
@@ -1450,9 +1573,9 @@
                                 const userData = await cloudGet('users/' + username);
                                 if (userData && userData.passwordHash === passwordHash) {
                                     setCurrentUser({ username, createdAt: userData.createdAt || Date.now() });
-                                    const lw = sanitizeWorkouts(userData.workouts || {});
+                                    const lw = sanitizeWorkouts(preferUnsyncedLocal(username, 'workouts', userData.workouts) || {});
                                     setWorkouts(lw);
-                                    setWorkoutHistory(userData.history || []);
+                                    setWorkoutHistory(preferUnsyncedLocal(username, 'history', userData.history) || []);
                                     hydrateProgress(username, userData);
                                     // Drop straight back into an in-progress workout if there is one.
                                     if (!resumeSessionIfAny(lw, username)) setView('landing');
@@ -3234,7 +3357,7 @@
                                 e('div', { className: 'flex items-center gap-1.5' }, dot('#00e5ff'), 'Photo'),
                                 e('div', { className: 'flex items-center gap-1.5' }, dot('var(--secondary)'), 'Workout')
                             ),
-                            e('div', { className: 'text-xs text-center mt-3 px-2', style: { color: 'var(--outline)' } }, 'Tap any day to log weight, calories, sleep and photos. Anything logged here is automatically included in your AI recaps.')
+                            e('div', { className: 'text-xs text-center mt-3 px-2', style: { color: 'var(--outline)' } }, 'Tap any day to log weight, calories, sleep and photos. Anything logged here is shared with your AI Coach as context.')
                         )
                     ),
                     pickerOverlay,
@@ -3497,11 +3620,11 @@
                     return shell('SETTINGS', true,
                         e('div', { className: 'space-y-5' },
                             e('div', null,
-                                sectionTitle('AI Recaps'),
+                                sectionTitle('AI Coach'),
                                 e('div', { className: 'rounded-2xl p-4', style: card },
                                     e('div', { className: 'flex items-center gap-2 mb-3' },
                                         e(MIcon, { icon: proxyEnabled() ? 'auto_awesome' : 'cloud_off', style: { fontSize: '20px', color: proxyEnabled() ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }),
-                                        e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, proxyEnabled() ? 'Recaps enabled — no API key needed' : 'Recaps not configured yet')
+                                        e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, proxyEnabled() ? 'AI Coach enabled — no API key needed' : 'AI Coach not configured yet')
                                     ),
                                     proxyEnabled() ? e('button', {
                                         onClick: async () => {

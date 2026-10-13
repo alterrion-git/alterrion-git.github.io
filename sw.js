@@ -1,10 +1,20 @@
 // Service Worker with Cache Versioning
-const CACHE_VERSION = 'v3.13.0'; // UPDATE THIS WITH EACH NEW VERSION!
+const CACHE_VERSION = 'v3.14.0'; // UPDATE THIS WITH EACH NEW VERSION!
 const CACHE_NAME = `workout-tracker-${CACHE_VERSION}`;
 
-const urlsToCache = [
+// Same-origin app shell: must all cache, or the install fails (and the old SW keeps serving).
+const APP_SHELL = [
   './',
   './index.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
+  './fonts/material-symbols.woff2',
+  './fonts/inter-latin-wght-normal.woff2',
+  './fonts/inter-latin-ext-wght-normal.woff2'
+];
+// Third-party libraries: cached best-effort, so one slow/failed CDN can't break the install.
+const CDN_LIBS = [
   'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
   'https://cdn.tailwindcss.com',
@@ -12,46 +22,49 @@ const urlsToCache = [
   'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js'
 ];
 
-// Install event - cache resources
+// How long a page load waits for the network before showing the cached copy. Without
+// this, a weak signal (request neither succeeds nor fails) left the app on a blank screen.
+const PAGE_NETWORK_TIMEOUT_MS = 3000;
+
 self.addEventListener('install', (event) => {
-  console.log('Service Worker installing with version:', CACHE_VERSION);
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => {
-        console.log('Opened cache');
-        return cache.addAll(urlsToCache);
-      })
-      .then(() => self.skipWaiting()) // Force activation immediately
+      .then((cache) => cache.addAll(APP_SHELL).then(() =>
+        Promise.all(CDN_LIBS.map((u) => cache.add(u).catch(() => {})))))
+      .then(() => self.skipWaiting())
   );
 });
 
-// Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
-  console.log('Service Worker activating version:', CACHE_VERSION);
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          // Delete old caches that don't match current version
-          if (cacheName.startsWith('workout-tracker-') && cacheName !== CACHE_NAME) {
-            console.log('Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    }).then(() => self.clients.claim()) // Take control of all pages immediately
+    caches.keys().then((cacheNames) => Promise.all(
+      cacheNames.map((cacheName) => {
+        if (cacheName.startsWith('workout-tracker-') && cacheName !== CACHE_NAME) {
+          return caches.delete(cacheName);
+        }
+      })
+    )).then(() => self.clients.claim())
   );
 });
+
+// Cached app shell for a navigation. index.html first: it's the entry refreshed on every
+// successful page load (the './' entry is only written at install).
+async function cachedPage(req) {
+  return (await caches.match('./index.html'))
+    || (await caches.match(req, { ignoreSearch: true }))
+    || (await caches.match('./'));
+}
 
 // Fetch strategy:
 //  - Network-only (never cache): Firebase, Google APIs, the AI worker.
-//  - Network-FIRST for the page/HTML (navigations): so an installed PWA always
-//    picks up the latest index.html when online, and only falls back to cache
-//    offline. This is what stops the "phone stuck on old version" problem.
-//  - Cache-first for other static assets (React/Tailwind/Firebase SDK/icons).
+//  - Pages: network-first so an installed PWA picks up the latest index.html, but give up
+//    after PAGE_NETWORK_TIMEOUT_MS and show the cached copy (the fresh copy still lands in
+//    the cache for next launch).
+//  - Everything else (libraries, fonts, icons): cache-first.
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = req.url;
+  if (req.method !== 'GET') return;
 
   if (url.includes('firebaseio.com') || url.includes('googleapis.com') || url.includes('firebasedatabase.app') || url.includes('config.js') || url.includes('.workers.dev')) {
     event.respondWith(fetch(req).catch(() => new Response('', { status: 503 })));
@@ -59,32 +72,46 @@ self.addEventListener('fetch', (event) => {
   }
 
   const accept = req.headers.get('accept') || '';
-  const isPage = req.mode === 'navigate' || (req.method === 'GET' && accept.includes('text/html'));
+  const isPage = req.mode === 'navigate' || accept.includes('text/html');
 
   if (isPage) {
-    // Network-first for the app shell.
-    event.respondWith(
-      fetch(req)
-        .then((response) => {
-          if (response && response.status === 200) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-          }
-          return response;
-        })
-        .catch(() => caches.match(req).then((r) => r || caches.match('./index.html') || caches.match('./')))
-    );
+    const network = fetch(req).then((response) => {
+      if (response && response.status === 200) {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy));
+      }
+      return response;
+    });
+    event.waitUntil(network.catch(() => {}));
+    event.respondWith(new Promise((resolve) => {
+      let done = false;
+      const useCache = async () => {
+        if (done) return;
+        const cached = await cachedPage(req);
+        if (cached && !done) { done = true; resolve(cached); }
+      };
+      const timer = setTimeout(useCache, PAGE_NETWORK_TIMEOUT_MS);
+      network.then((response) => {
+        clearTimeout(timer);
+        if (!done) { done = true; resolve(response); }
+      }).catch(async () => {
+        clearTimeout(timer);
+        await useCache();
+        if (!done) { done = true; resolve(Response.error()); }
+      });
+    }));
     return;
   }
 
-  // Cache-first for static assets.
   event.respondWith(
     caches.match(req).then((response) => {
       if (response) return response;
       return fetch(req).then((res) => {
-        if (!res || res.status !== 200 || res.type !== 'basic') return res;
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        // Cache successful same-origin/CORS responses and opaque CDN script responses.
+        if (res && (res.ok || res.type === 'opaque')) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        }
         return res;
       });
     })
