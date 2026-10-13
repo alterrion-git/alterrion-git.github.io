@@ -13,26 +13,24 @@
     <title>CWA - Workout Tracker</title>
     <!-- Fonts are self-hosted (fonts/) so they're cached with the app and work offline.
          Loading them from Google Fonts meant a slow/failed load showed icon names as raw
-         text ("bar_chart") and swapped Inter for a differently-sized system font. -->
+         text ("bar_chart") and swapped the app font for a differently-sized system font. -->
     <link rel="preload" href="fonts/material-symbols.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="fonts/barlow-latin-400.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="fonts/barlow-condensed-latin-800.woff2" as="font" type="font/woff2" crossorigin>
     <style>
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-display: swap;
-            font-weight: 100 900;
-            src: url(fonts/inter-latin-ext-wght-normal.woff2) format('woff2-variations');
-            unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
-        }
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-display: swap;
-            font-weight: 100 900;
-            src: url(fonts/inter-latin-wght-normal.woff2) format('woff2-variations');
-            unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
-        }
+        /* Barlow (text) + Barlow Condensed (titles, numbers): self-hosted, static weights. */
+        @font-face { font-family: 'Barlow'; font-style: normal; font-display: swap; font-weight: 100 400; src: url(fonts/barlow-latin-400.woff2) format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+        @font-face { font-family: 'Barlow'; font-style: normal; font-display: swap; font-weight: 100 400; src: url(fonts/barlow-latin-ext-400.woff2) format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+        @font-face { font-family: 'Barlow'; font-style: normal; font-display: swap; font-weight: 500; src: url(fonts/barlow-latin-500.woff2) format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+        @font-face { font-family: 'Barlow'; font-style: normal; font-display: swap; font-weight: 500; src: url(fonts/barlow-latin-ext-500.woff2) format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+        @font-face { font-family: 'Barlow'; font-style: normal; font-display: swap; font-weight: 600; src: url(fonts/barlow-latin-600.woff2) format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+        @font-face { font-family: 'Barlow'; font-style: normal; font-display: swap; font-weight: 600; src: url(fonts/barlow-latin-ext-600.woff2) format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+        @font-face { font-family: 'Barlow'; font-style: normal; font-display: swap; font-weight: 700 900; src: url(fonts/barlow-latin-700.woff2) format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+        @font-face { font-family: 'Barlow'; font-style: normal; font-display: swap; font-weight: 700 900; src: url(fonts/barlow-latin-ext-700.woff2) format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+        @font-face { font-family: 'Barlow Condensed'; font-style: normal; font-display: swap; font-weight: 100 700; src: url(fonts/barlow-condensed-latin-700.woff2) format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+        @font-face { font-family: 'Barlow Condensed'; font-style: normal; font-display: swap; font-weight: 100 700; src: url(fonts/barlow-condensed-latin-ext-700.woff2) format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+        @font-face { font-family: 'Barlow Condensed'; font-style: normal; font-display: swap; font-weight: 800 900; src: url(fonts/barlow-condensed-latin-800.woff2) format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+        @font-face { font-family: 'Barlow Condensed'; font-style: normal; font-display: swap; font-weight: 800 900; src: url(fonts/barlow-condensed-latin-ext-800.woff2) format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
         /* Icon subset built by tools/build-icons.py; icons are addressed by codepoint (ICON_CP). */
         @font-face {
             font-family: 'Material Symbols Outlined';
@@ -83,16 +81,33 @@
             --outline: #737679;
             --outline-variant: #45484c;
             --secondary: #efe754;
+            --warn: #ffb547;
             --secondary-container: #656100;
             --on-secondary-container: #fffac3;
             --tertiary: #ffeb9c;
             --error: #ff7351;
             --error-container: #b92902;
             --on-error-container: #ffd2c8;
+            /* Nutrition: macro colours (rings, bars, timeline) */
+            --macro-p: #ff7a6b;
+            --macro-c: #ffb547;
+            --macro-f: #5cb8ff;
+            --macro-fib: #7ed69a;
+            --macro-sug: #ff8fc8;
+            --macro-salt: #b9c2cc;
         }
+        /* Display type: anything in font-black (screen titles, big numbers, primary
+           buttons) uses the condensed cut — the "refined" look from design option A. */
+        .font-black, .font-display { font-family: 'Barlow Condensed', 'Barlow', sans-serif; font-weight: 800; letter-spacing: 0.01em; font-size-adjust: none; }
+        input::placeholder, textarea::placeholder { color: var(--outline); opacity: 1; }
+        @keyframes cwa-spin { to { transform: rotate(360deg); } }
+        .cwa-spin { animation: cwa-spin 0.9s linear infinite; }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Barlow', -apple-system, BlinkMacSystemFont, sans-serif;
+            /* Barlow's lowercase is ~7% smaller than Inter's; match Inter's x-height so text
+               reads at the same size as before the font switch. */
+            font-size-adjust: 0.546;
             background: var(--void);
             color: var(--on-surface);
             overflow-x: hidden;
@@ -236,7 +251,7 @@
                         "on-error-container": "#ffd2c8",
                     },
                     fontFamily: {
-                        "inter": ["Inter", "sans-serif"],
+                        "display": ["Barlow Condensed", "Barlow", "sans-serif"],
                     },
                 },
             },
@@ -245,9 +260,12 @@
 </head>
 <body>
     <div id="root"></div>
+    <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
+         script below, which renders it; keep ?v= in sync with APP_VERSION. -->
+    <script src="js/nutrition.js?v=3.16.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.14.0';
+        const APP_VERSION = '3.16.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -453,15 +471,62 @@
         // Reads a DB path. { ok: true, data } on a real answer (data is null when the path is
         // empty); { ok: false } when the cloud couldn't be reached/read — callers must not
         // treat that as "no data" (e.g. by creating a fresh record over the real one).
-        async function cloudRead(path, ms = 10000) {
+        // `params` is an extra query string (e.g. a range filter); `authQ` lets a caller that
+        // fires many reads at once fetch the token a single time (see cloudAuthQuery).
+        async function cloudRead(path, ms = 10000, params = '', authQ) {
             if (!cloudEnabled()) return { ok: false };
             try {
-                let q = '';
-                if (fbAuthEnabled()) { const t = await fbValidToken(); if (!t) return { ok: false }; q = `?auth=${t}`; }
-                const res = await fetchWithTimeout(`${FIREBASE_DB_URL}/${path}.json${q}`, {}, ms);
+                const a = authQ !== undefined ? authQ : await cloudAuthQuery();
+                if (a === null) return { ok: false };
+                const qs = [a, params].filter(Boolean).join('&');
+                const res = await fetchWithTimeout(`${FIREBASE_DB_URL}/${path}.json${qs ? '?' + qs : ''}`, {}, ms);
                 if (!res.ok) return { ok: false };
                 return { ok: true, data: await res.json() };
             } catch (err) { console.error('Cloud get error:', err); return { ok: false }; }
+        }
+        // '' when no auth is needed, 'auth=<token>' when signed in, null when the token
+        // isn't available (signed out / offline) — reads must then fail, not run anonymously.
+        async function cloudAuthQuery() {
+            if (!fbAuthEnabled()) return '';
+            const t = await fbValidToken();
+            return t ? `auth=${t}` : null;
+        }
+
+        // The user record minus old food-diary days. The food log grows every day, so instead
+        // of one GET of users/<id> (which would download all of it on every launch) the known
+        // fields are read in parallel and the log only for the last FOOD_LOG_RECENT_DAYS.
+        // Older days come from this device's copy or loadFoodRange (calendar / date browsing).
+        const USER_FIELDS = ['email', 'createdAt', 'passwordHash', 'workouts', 'history', 'profile', 'metrics', 'recaps', 'chat', 'aiUsage', 'foods'];
+        const FOOD_LOG_RECENT_DAYS = 62;
+        function foodRangeParams(startKey, endKey) {
+            return 'orderBy=' + encodeURIComponent('"$key"')
+                + '&startAt=' + encodeURIComponent(JSON.stringify(startKey))
+                + (endKey ? '&endAt=' + encodeURIComponent(JSON.stringify(endKey)) : '');
+        }
+        async function cloudReadUser(user, ms = 10000) {
+            if (!cloudEnabled()) return { ok: false };
+            const a = await cloudAuthQuery();
+            if (a === null) return { ok: false };
+            const base = 'users/' + user;
+            const since = dayKey(Date.now() - FOOD_LOG_RECENT_DAYS * DAY_MS);
+            const res = await Promise.all([
+                ...USER_FIELDS.map(f => cloudRead(base + '/' + f, ms, '', a)),
+                cloudRead(base + '/foodLog', ms, foodRangeParams(since), a),
+            ]);
+            if (res.some(r => !r.ok)) return { ok: false };
+            const data = {};
+            let any = false;
+            USER_FIELDS.forEach((f, i) => { if (res[i].data != null) { data[f] = res[i].data; any = true; } });
+            const log = res[USER_FIELDS.length].data;
+            if (log && typeof log === 'object' && Object.keys(log).length) { data.foodLog = log; any = true; }
+            if (!any) return { ok: true, data: null };
+            data.foodLogSince = since;
+            return { ok: true, data };
+        }
+        // Food-diary days in [startKey, endKey] from the cloud: { ok, data: { 'YYYY-MM-DD': [...] } }.
+        async function cloudReadFoodRange(user, startKey, endKey) {
+            const r = await cloudRead('users/' + user + '/foodLog', 10000, foodRangeParams(startKey, endKey));
+            return r.ok ? { ok: true, data: (r.data && typeof r.data === 'object') ? r.data : {} } : { ok: false };
         }
         async function cloudGet(path) {
             const r = await cloudRead(path);
@@ -501,6 +566,51 @@
             if (!unsyncedGet(user).includes(field)) return cloudValue;
             try { const raw = localStorage.getItem('cwa-' + field + '-' + user); if (raw != null) return JSON.parse(raw); } catch (e) {}
             return cloudValue;
+        }
+
+        // --- Food diary: local copy + merge with the cloud (see cloudReadUser) ---
+        // Local: 'cwa-foodLog-<user>' = { 'YYYY-MM-DD': [entries] } (every day logged on this device).
+        // Cloud: users/<user>/foodLog/<YYYY-MM-DD> = [entries], written one day at a time.
+        // Unsynced days are tracked as 'foodLog/<day>' in unsyncedMark.
+        function readLocalFoodLog(user) {
+            try { const v = JSON.parse(localStorage.getItem('cwa-foodLog-' + user) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; }
+        }
+        function writeLocalFoodLog(user, log) {
+            try { localStorage.setItem('cwa-foodLog-' + user, JSON.stringify(log)); } catch (e) {}
+        }
+        // cloudLog: days read from the cloud (undefined = no cloud read happened). since: the
+        // first day that read covered (days from `since` on are authoritative in the cloud, so a
+        // day deleted on another device disappears here too); older local days are kept.
+        // Days changed here but never uploaded keep the local version.
+        function mergeFoodLog(user, cloudLog, since) {
+            const local = readLocalFoodLog(user);
+            if (cloudLog === undefined) return local;
+            const out = {};
+            Object.keys(local).forEach(d => { if (!since || d < since) out[d] = local[d]; });
+            Object.keys(cloudLog || {}).forEach(d => { if (Array.isArray(cloudLog[d]) && cloudLog[d].length) out[d] = cloudLog[d]; });
+            unsyncedGet(user).forEach(f => {
+                if (!f.startsWith('foodLog/')) return;
+                const d = f.slice(8);
+                if (local[d] && local[d].length) out[d] = local[d]; else delete out[d];
+            });
+            return out;
+        }
+
+        // Food photo → { name, brand, barcode, unit, source, per100: {...}, servingGrams } via the
+        // AI worker (proxy/worker.js, task 'food-photo').
+        async function callFoodVision(image, user) {
+            const res = await fetchWithTimeout(LLM_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task: 'food-photo', image, user: user || '' })
+            }, 45000);
+            let data = {};
+            try { data = await res.json(); } catch (err) {}
+            // An AI worker deployed before food photos existed answers "Empty prompt".
+            const outdated = 'The AI worker needs updating to read food photos (redeploy proxy/worker.js).';
+            if (!res.ok) throw new Error(data && data.error === 'Empty prompt' ? outdated : ((data && data.error) || `AI service error (${res.status})`));
+            if (!data.food) throw new Error(data.text ? outdated : 'No food found in the photo.');
+            return data.food;
         }
 
         // ============================================
@@ -853,7 +963,7 @@
         // Icons render by codepoint from the self-hosted subset font (fonts/material-symbols.woff2),
         // so a missing font shows nothing instead of the icon's name as text. New icon? Add it to
         // tools/build-icons.py, rebuild, and paste the printed ICON_CP here.
-        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","delete":"e872","delete_sweep":"e16c","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","fitness_center":"eb43","flag":"e153","forum":"e0bf","history":"e28e","info":"e88e","local_fire_department":"ea05","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
+        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","bolt":"ea0b","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","content_copy":"e14d","delete":"e872","delete_sweep":"e16c","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","fitness_center":"eb43","flag":"e153","flash_off":"e3e6","flash_on":"e3e7","forum":"e0bf","history":"e28e","info":"e88e","local_fire_department":"ea05","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","play_arrow":"e037","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","tune":"e429","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
         const MIcon = ({ icon, fill = false, className = '', style = {} }) => e('span', {
             className: `material-symbols-outlined ${className}`,
             'aria-hidden': true,
@@ -909,13 +1019,13 @@
                 // Left: CWA branding or back button
                 e('div', { className: 'flex items-center min-w-[60px]' },
                     leftAction || e('span', {
-                        className: 'font-black italic text-xl tracking-tighter',
+                        className: 'font-black italic text-2xl tracking-tight',
                         style: { color: 'var(--primary-container)' }
                     }, 'CWA')
                 ),
                 // Center: screen title
                 e('h1', {
-                    className: 'font-black uppercase tracking-tighter text-lg',
+                    className: 'font-black uppercase tracking-wide text-xl',
                     style: { color: 'var(--primary-container)' }
                 }, title || ''),
                 // Right: action buttons
@@ -930,6 +1040,7 @@
             const tabs = [
                 { id: 'calendar', icon: 'event_repeat', label: 'Plan' },
                 { id: 'workout', icon: 'fitness_center', label: 'Workout' },
+                { id: 'food', icon: 'restaurant', label: 'Food' },
                 { id: 'month', icon: 'calendar_month', label: 'Calendar' },
                 { id: 'stats', icon: 'bar_chart', label: 'Stats' },
             ];
@@ -1243,13 +1354,19 @@
             const [pendingMigration, setPendingMigration] = useState(null);
             const [expandedHistoryIdx, setExpandedHistoryIdx] = useState(null);
             // Progress-tracking state
-            const DEFAULT_PROFILE = { displayName: '', goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null, notes: '' };
+            // proteinG..saltMaxG: daily nutrition targets; null = automatic (see CWANutrition.targetsFor).
+            const DEFAULT_PROFILE = { displayName: '', goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null, notes: '', proteinG: null, carbsG: null, fatG: null, fibreG: null, sugarMaxG: null, saltMaxG: null };
             const PROFILE_NOTES_MAX = 800;
             const [profile, setProfile] = useState(DEFAULT_PROFILE);
             const [metrics, setMetrics] = useState([]); // [{ date, weight, kcal, sleep, steps, note }]
             const [recaps, setRecaps] = useState([]);   // legacy one-shot recaps (kept for old data)
             const [chat, setChat] = useState([]);       // [{ role:'user'|'assistant', content, ts }]
             const [aiUsage, setAiUsage] = useState({ date: '', count: 0 }); // per-day AI message counter (synced)
+            // Nutrition (js/nutrition.js): diary per day, custom foods, the day shown in the Food tab.
+            const [foodLog, setFoodLog] = useState({});   // { 'YYYY-MM-DD': [entry] }
+            const [foods, setFoods] = useState({});       // custom foods { id: food }
+            const [foodDate, setFoodDate] = useState(() => dayKey(Date.now()));
+            const foodRangesRef = useRef(new Set());      // older diary ranges already fetched
             const [progressSub, setProgressSub] = useState('hub'); // hub | goals | metrics | photos | chat | settings
             const [photos, setPhotos] = useState([]);   // loaded from IndexedDB (local only)
             const [aiBusy, setAiBusy] = useState(false);
@@ -1285,7 +1402,7 @@
             // cache instead of wiping the view; only create a fresh record for a truly new uid.
             const loadFbUser = async (u) => {
                 const uid = u.uid;
-                const read = await cloudRead('users/' + uid);
+                const read = await cloudReadUser(uid);
                 let userData = read.ok ? read.data : null;
                 if (!userData) {
                     const localW = localStorage.getItem('cwa-workouts-' + uid);
@@ -1447,6 +1564,8 @@
                 setRecaps([]);
                 setChat([]);
                 setAiUsage({ date: '', count: 0 });
+                setFoodLog({});
+                setFoods({});
                 setPhotos([]);
                 setProgressSub('hub');
                 setView('login');
@@ -1508,6 +1627,70 @@
                 setRecaps(pick('recaps', []) || []);
                 setChat(pick('chat', []) || []);
                 setAiUsage(pick('aiUsage', { date: '', count: 0 }) || { date: '', count: 0 });
+                setFoods(pick('foods', {}) || {});
+                // cloudReadUser marks how far back its diary read went (foodLogSince); a record
+                // without it (offline fallback, legacy full read) leaves the local days alone.
+                const cloudLog = src && src.foodLogSince ? (src.foodLog || {}) : (src ? src.foodLog : undefined);
+                const log = mergeFoodLog(uname, cloudLog, src && src.foodLogSince);
+                writeLocalFoodLog(uname, log);
+                setFoodLog(log);
+                foodRangesRef.current = new Set();
+                setFoodDate(dayKey(Date.now()));
+            };
+
+            // --- Food diary saving: local immediately, cloud one day per write, serialized so a
+            // slow earlier write can't land after a newer one (same idea as syncToCloud). ---
+            const foodSyncRef = useRef({ pending: {}, running: false });
+            const queueFoodWrite = (uname, day, entries) => {
+                unsyncedMark(uname, 'foodLog/' + day, false); // cleared once the cloud has it
+                if (!cloudEnabled()) return;
+                const q = foodSyncRef.current;
+                q.pending[uname + '|' + day] = { uname, day, entries };
+                if (q.running) return;
+                q.running = true;
+                (async () => {
+                    let k;
+                    while ((k = Object.keys(q.pending)[0])) {
+                        const job = q.pending[k];
+                        delete q.pending[k];
+                        const ok = await cloudSet('users/' + job.uname + '/foodLog/' + job.day, job.entries && job.entries.length ? job.entries : null);
+                        if (ok && !q.pending[k]) unsyncedMark(job.uname, 'foodLog/' + job.day, true);
+                    }
+                    q.running = false;
+                })();
+            };
+            const saveFoodDay = (day, entries) => {
+                if (!currentUser) return;
+                const uname = currentUser.username;
+                setFoodLog(prev => {
+                    const next = { ...prev };
+                    if (entries && entries.length) next[day] = entries; else delete next[day];
+                    writeLocalFoodLog(uname, next);
+                    return next;
+                });
+                queueFoodWrite(uname, day, entries);
+            };
+            // Fetch diary days older than the startup window (calendar months, date browsing).
+            const loadFoodRange = async (startKey, endKey) => {
+                if (!currentUser || !cloudEnabled()) return;
+                const recentSince = dayKey(Date.now() - FOOD_LOG_RECENT_DAYS * DAY_MS);
+                if (startKey >= recentSince) return;
+                const id = startKey + '_' + endKey;
+                if (foodRangesRef.current.has(id)) return;
+                foodRangesRef.current.add(id);
+                const uname = currentUser.username;
+                const r = await cloudReadFoodRange(uname, startKey, endKey);
+                if (!r.ok) { foodRangesRef.current.delete(id); return; }
+                const unsynced = new Set(unsyncedGet(uname));
+                setFoodLog(prev => {
+                    const next = { ...prev };
+                    let changed = false;
+                    Object.keys(next).forEach(d => { if (d >= startKey && d <= endKey && !r.data[d] && !unsynced.has('foodLog/' + d)) { delete next[d]; changed = true; } });
+                    Object.keys(r.data).forEach(d => { if (Array.isArray(r.data[d]) && r.data[d].length && !unsynced.has('foodLog/' + d)) { next[d] = r.data[d]; changed = true; } });
+                    if (!changed) return prev;
+                    writeLocalFoodLog(uname, next);
+                    return next;
+                });
             };
 
             // --- Tab switching logic ---
@@ -1525,6 +1708,9 @@
                     } else {
                         setView('workout-idle');
                     }
+                } else if (tabId === 'food') {
+                    setActiveTab('food');
+                    setView('food');
                 } else if (tabId === 'month') {
                     setActiveTab('month');
                     setView('calendarMonth');
@@ -1618,6 +1804,25 @@
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('recaps', recaps); }, [recaps]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('chat', chat); }, [chat]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('aiUsage', aiUsage); }, [aiUsage]);
+            useEffect(() => { if (!isLoading && currentUser) cloudSaveField('foods', foods); }, [foods]);
+            // Upload diary days that were changed without a connection last time.
+            useEffect(() => {
+                if (isLoading || !currentUser) return;
+                const uname = currentUser.username;
+                const local = readLocalFoodLog(uname);
+                unsyncedGet(uname).filter(f => f.startsWith('foodLog/')).forEach(f => { const d = f.slice(8); queueFoodWrite(uname, d, local[d] || null); });
+            }, [isLoading, currentUser]);
+            // Older diary days for the calendar month / Food date being viewed.
+            useEffect(() => {
+                if (isLoading || !currentUser) return;
+                if (view === 'calendarMonth') {
+                    const c = new Date(calCursor);
+                    loadFoodRange(dayKey(new Date(c.getFullYear(), c.getMonth(), 1).getTime()), dayKey(new Date(c.getFullYear(), c.getMonth() + 1, 0).getTime()));
+                } else if (view === 'food') {
+                    const [y, m] = foodDate.split('-').map(Number);
+                    loadFoodRange(dayKey(new Date(y, m - 1, 1).getTime()), dayKey(new Date(y, m, 0).getTime()));
+                }
+            }, [view, calCursor, foodDate, isLoading, currentUser]);
             // Keep the chat scrolled to the newest message.
             useEffect(() => {
                 if (progressSub === 'chat' && chatScrollRef.current) {
@@ -2198,6 +2403,28 @@
                 if (kc) body.push(`avg intake ~${kc} kcal/day (last 4w)`);
                 if (sl) body.push(`avg sleep ~${sl}h`);
                 if (body.length) lines.push('Body: ' + body.join(', ') + '.');
+                const N = window.CWANutrition;
+                if (N) {
+                    const tg = N.targetsFor(p, metrics);
+                    const fmtT = (t) => `${Math.round(t.kcal)} kcal, P ${Math.round(t.p)}g, C ${Math.round(t.c)}g, F ${Math.round(t.f)}g, fibre ${Math.round(t.fib)}g, sugar ${Math.round(t.sug)}g, salt ${Math.round(t.salt * 10) / 10}g`;
+                    lines.push(`Nutrition targets: ${tg.kcal} kcal, protein ${tg.p}g, carbs ${tg.c}g, fat ${tg.f}g, fibre >=${tg.fib}g, sugar <=${tg.sug}g, salt <=${tg.salt}g.`);
+                    const todayKey = dayKey(now);
+                    const days = Object.keys(foodLog).filter(d => d >= dayKey(now - 14 * DAY_MS) && d <= todayKey && (foodLog[d] || []).length).sort();
+                    if (days.length) {
+                        lines.push('Food diary totals (last 14 days):');
+                        days.forEach(d => lines.push(`  ${d}${d === todayKey ? ' (today, so far)' : ''}: ${fmtT(N.dayTotals(foodLog[d]))}`));
+                        const full = days.filter(d => d !== todayKey);
+                        if (full.length >= 2) {
+                            const sum = full.map(d => N.dayTotals(foodLog[d])).reduce((a, t) => { Object.keys(t).forEach(k => { a[k] = (a[k] || 0) + t[k]; }); return a; }, {});
+                            Object.keys(sum).forEach(k => { sum[k] /= full.length; });
+                            lines.push(`  Average of ${full.length} logged days: ${fmtT(sum)}`);
+                        }
+                        const todays = (foodLog[todayKey] || []).slice().sort((a, b) => a.t - b.t);
+                        if (todays.length) lines.push("Today's foods: " + todays.map(en => en.src === 'quick' ? `${en.name} (${Math.round(N.entryTotals(en).kcal)} kcal)` : `${en.name} ${Math.round(en.g)}${en.unit || 'g'}`).join('; ') + '.');
+                    } else {
+                        lines.push('Food diary: nothing logged in the last 14 days.');
+                    }
+                }
                 return lines.join('\n');
             };
 
@@ -2234,7 +2461,7 @@
             const exportData = async () => {
                 try {
                     const ph = currentUser ? await photoList(currentUser.username) : [];
-                    const blob = { app: 'CWA', version: APP_VERSION, exportedAt: Date.now(), profile, metrics, recaps, workouts, history: workoutHistory, photos: ph };
+                    const blob = { app: 'CWA', version: APP_VERSION, exportedAt: Date.now(), profile, metrics, recaps, workouts, history: workoutHistory, foodLog, foods, photos: ph };
                     const a = document.createElement('a');
                     a.href = URL.createObjectURL(new Blob([JSON.stringify(blob)], { type: 'application/json' }));
                     a.download = `cwa-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -2249,7 +2476,7 @@
                     try { blob = JSON.parse(reader.result); } catch (err) { setAiError('Invalid backup file'); return; }
                     setConfirmState({
                         title: 'Import backup?',
-                        message: 'This replaces your current workouts, history, goals, metrics, recaps and photos with the backup.',
+                        message: 'This replaces your current workouts, history, goals, metrics, food diary, custom foods and photos with the backup.',
                         confirmLabel: 'Import', danger: false,
                         onConfirm: async () => {
                             if (blob.workouts) setWorkouts(sanitizeWorkouts(blob.workouts));
@@ -2257,6 +2484,15 @@
                             if (blob.profile) setProfile({ ...DEFAULT_PROFILE, ...blob.profile });
                             if (Array.isArray(blob.metrics)) setMetrics(blob.metrics);
                             if (Array.isArray(blob.recaps)) setRecaps(blob.recaps);
+                            if (blob.foods && typeof blob.foods === 'object') setFoods(blob.foods);
+                            if (blob.foodLog && typeof blob.foodLog === 'object' && currentUser) {
+                                const uname = currentUser.username;
+                                writeLocalFoodLog(uname, blob.foodLog);
+                                setFoodLog(blob.foodLog);
+                                const days = Object.keys(blob.foodLog);
+                                days.forEach(d => unsyncedMark(uname, 'foodLog/' + d, false));
+                                if (cloudEnabled() && await cloudSet('users/' + uname + '/foodLog', blob.foodLog)) days.forEach(d => unsyncedMark(uname, 'foodLog/' + d, true));
+                            }
                             if (Array.isArray(blob.photos) && currentUser) {
                                 for (const p of blob.photos) {
                                     try { await photoAdd({ ...p, user: currentUser.username, id: p.id || `${currentUser.username}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` }); } catch (err) {}
@@ -2269,6 +2505,32 @@
                     });
                 };
                 reader.readAsText(file);
+            };
+
+            // This week's plan status, from the history (an entry's `day` is the plan slot it was
+            // for, so Monday's workout done on Tuesday counts for Monday).
+            // status: progress | done | missed (earlier this week, not done) | today | upcoming | rest
+            // next: the workout Start should open — an unfinished session first, then the
+            // earliest missed day, then today, then the next planned day.
+            const weekStatus = () => {
+                const now = new Date();
+                const todayIdx = (now.getDay() + 6) % 7;
+                const monday = new Date(now); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - todayIdx);
+                const done = new Set(workoutHistory.filter(h => h.date >= monday.getTime() && h.day).map(h => h.day));
+                const status = {};
+                DAYS.forEach((d, i) => {
+                    const w = workouts[d];
+                    status[d] = !w ? 'rest' : w.progress ? 'progress' : done.has(d) ? 'done' : i < todayIdx ? 'missed' : i === todayIdx ? 'today' : 'upcoming';
+                });
+                const planned = DAYS.filter(d => workouts[d]);
+                const pick = (st) => planned.find(d => status[d] === st);
+                return {
+                    status,
+                    planned: planned.length,
+                    done: planned.filter(d => status[d] === 'done').length,
+                    missed: planned.filter(d => status[d] === 'missed'),
+                    next: pick('progress') || pick('missed') || pick('today') || pick('upcoming') || null,
+                };
             };
 
             // Display name shown in the app (falls back to email/username).
@@ -2303,7 +2565,7 @@
                 },
                     // Logo
                     e('div', { className: 'mb-6 text-center' },
-                        e('span', { className: 'font-black italic text-4xl tracking-tighter', style: { color: 'var(--primary-container)' } }, 'CWA'),
+                        e('span', { className: 'font-black italic text-5xl tracking-tight', style: { color: 'var(--primary-container)' } }, 'CWA'),
                         e('div', { className: 'text-xs uppercase tracking-widest mt-1', style: { color: 'var(--on-surface-variant)' } }, 'Workout Tracker')
                     ),
                     // Login card
@@ -2585,7 +2847,7 @@
                                     e('div', { className: 'space-y-2' },
                                         exercise.sets.map((set, setIdx) =>
                                             e('div', { key: setIdx, className: 'flex items-center gap-3' },
-                                                e('span', { className: 'w-12 text-sm', style: { color: 'var(--on-surface-variant)' } }, `Set ${setIdx + 1}`),
+                                                e('span', { className: 'w-12 text-sm whitespace-nowrap flex-shrink-0', style: { color: 'var(--on-surface-variant)' } }, `Set ${setIdx + 1}`),
                                                 e('input', {
                                                     type: 'number', value: set.reps || '',
                                                     onChange: (ev) => updateSet(exIdx, setIdx, 'reps', ev.target.value),
@@ -2645,34 +2907,56 @@
             // WORKOUT IDLE VIEW (no active workout)
             // ======================
             if (view === 'workout-idle') {
-                const todayName = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
-                const todayWorkout = workouts[todayName];
-
+                // Same rule as the Plan tab: unfinished session, then missed days, then today.
+                const wk = weekStatus();
+                const nd = wk.next;
+                const nw = nd ? workouts[nd] : null;
+                const nst = nd ? wk.status[nd] : null;
+                const others = DAYS.filter(d => workouts[d] && d !== nd);
+                const tag = { progress: 'In progress', missed: 'Missed', today: 'Today', done: 'Done', upcoming: '' };
                 return e('div', {
                     className: 'min-h-screen flex flex-col',
                     style: { background: 'var(--void)', color: 'var(--on-surface)' }
                 },
                     e(TopAppBar, { title: 'WORKOUT', rightAction: profileBtn }),
-                    e('div', { className: 'flex-1 pt-20 pb-28 px-6 flex flex-col items-center justify-center' },
-                        e(MIcon, { icon: 'fitness_center', style: { fontSize: '64px', color: 'var(--surface-container-highest)' } }),
-                        e('h2', { className: 'text-2xl font-black mt-6 text-center' }, 'No Active Workout'),
-                        e('p', { className: 'text-base mt-2 text-center', style: { color: 'var(--on-surface-variant)' } },
-                            todayWorkout
-                                ? `Today\u2019s workout is ready to go`
-                                : `No workout scheduled for ${todayName}`
-                        ),
-                        todayWorkout ? e('div', { className: 'mt-8 flex flex-col items-center gap-3' },
-                            e('button', {
-                                onClick: () => startWorkout(todayName),
-                                className: 'px-8 py-4 rounded-xl text-lg font-black transition-all active:scale-95',
-                                style: { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)', boxShadow: '0 0 30px rgba(209, 252, 0, 0.2)' }
-                            }, `Start ${todayName}\u2019s Workout`),
-                            e('p', { className: 'text-base font-bold', style: { color: 'var(--primary-fixed-dim)' } }, todayWorkout.name)
-                        ) : e('button', {
-                            onClick: () => { setActiveTab('calendar'); setView('landing'); },
-                            className: 'mt-8 px-6 py-3 rounded-xl text-sm font-bold transition-all active:scale-95',
-                            style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' }
-                        }, 'Go to Calendar')
+                    e('div', { className: 'flex-1 pt-20 pb-28 px-4' },
+                        e('div', { className: 'max-w-lg mx-auto' },
+                            nw ? e('section', { className: 'rounded-3xl p-4 text-center', style: { background: 'var(--surface-container-high)' } },
+                                e('div', { className: 'text-xs font-bold uppercase tracking-widest', style: { color: nst === 'missed' ? 'var(--warn)' : 'var(--primary-container)' } },
+                                    nst === 'progress' ? `In progress · ${nd}` : nst === 'missed' ? `Missed · ${nd}` : nst === 'today' ? `Today · ${nd}` : `Up next · ${nd}`),
+                                e('h2', { className: 'font-black mt-1 leading-tight', style: { fontSize: isCoverScreen ? 26 : 34 } }, nw.name),
+                                e('p', { className: 'text-sm mt-1', style: { color: 'var(--on-surface-variant)' } }, `${nw.exercises.length} exercises · ${nw.exercises.reduce((n, ex) => n + ex.sets.length, 0)} sets`),
+                                e('button', {
+                                    onClick: () => startWorkout(nd),
+                                    className: 'w-full mt-4 rounded-2xl font-black uppercase tracking-wide transition-all active:scale-95 ' + (isCoverScreen ? 'py-3 text-lg' : 'py-4 text-xl'),
+                                    style: { background: 'var(--primary-container)', color: 'var(--on-primary-container)', boxShadow: '0 0 30px rgba(209, 252, 0, 0.2)' }
+                                }, nst === 'progress' ? 'Continue workout' : 'Start workout')
+                            ) : e('section', { className: 'rounded-3xl p-5 text-center', style: { background: 'var(--surface-container-high)' } },
+                                e(MIcon, { icon: 'fitness_center', style: { fontSize: '44px', color: 'var(--surface-container-highest)' } }),
+                                e('h2', { className: 'font-black text-2xl mt-2' }, wk.planned ? 'Week complete' : 'No workouts planned'),
+                                e('p', { className: 'text-sm mt-1', style: { color: 'var(--on-surface-variant)' } }, wk.planned ? 'Start any workout below to train again.' : 'Plan a workout first.'),
+                                wk.planned ? null : e('button', {
+                                    onClick: () => { setActiveTab('calendar'); setView('landing'); },
+                                    className: 'mt-4 px-6 py-3 rounded-xl text-sm font-bold transition-all active:scale-95',
+                                    style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' }
+                                }, 'Go to Plan')
+                            ),
+                            others.length ? e('div', { className: 'mt-5' },
+                                e('div', { className: 'text-xs font-bold uppercase tracking-widest mb-2 px-1', style: { color: 'var(--on-surface-variant)' } }, nw ? 'Or start another' : 'Start a workout'),
+                                e('div', { className: 'rounded-2xl overflow-hidden', style: { background: 'var(--surface-container-low)' } },
+                                    others.map((d, i) => e('button', {
+                                        key: d, onClick: () => startWorkout(d),
+                                        className: 'w-full flex items-center gap-3 px-4 py-3 text-left active:opacity-70',
+                                        style: { borderTop: i ? '1px solid var(--surface-container-high)' : 'none' }
+                                    },
+                                        e('span', { className: 'w-10 text-sm font-bold flex-shrink-0', style: { color: 'var(--on-surface-variant)' } }, d.slice(0, 3)),
+                                        e('span', { className: 'flex-1 min-w-0 text-base font-bold truncate' }, workouts[d].name),
+                                        tag[wk.status[d]] ? e('span', { className: 'text-xs font-bold flex-shrink-0', style: { color: wk.status[d] === 'missed' ? 'var(--warn)' : 'var(--on-surface-variant)' } }, tag[wk.status[d]]) : null,
+                                        e(MIcon, { icon: 'play_arrow', fill: true, style: { fontSize: '22px', color: 'var(--primary-fixed-dim)' } })
+                                    ))
+                                )
+                            ) : null
+                        )
                     ),
                     e(BottomNavBar, { activeTab: 'workout', onTabChange: handleTabChange })
                 );
@@ -2681,6 +2965,26 @@
             // ======================
             // STATS VIEW
             // ======================
+            if (view === 'food') {
+                const N = window.CWANutrition;
+                if (!N) {
+                    return e('div', { className: 'min-h-screen flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' } },
+                        e(TopAppBar, { title: 'FOOD', rightAction: profileBtn }),
+                        e('div', { className: 'flex-1 pt-24 px-6 text-center' }, 'The Food module failed to load. Check your connection and reopen the app.'),
+                        e(BottomNavBar, { activeTab: 'food', onTabChange: handleTabChange }));
+                }
+                return e(N.FoodScreen, { app: {
+                    date: foodDate, setDate: setFoodDate, log: foodLog, saveDay: saveFoodDay,
+                    foods, setFoods, profile, metrics,
+                    setProfileFields: (vals) => setProfile(prev => ({ ...prev, ...vals })),
+                    onTabChange: handleTabChange, profileBtn,
+                    toast: setToast, toastText: toast,
+                    confirm: setConfirmState,
+                    confirmEl: confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null,
+                    user: currentUser ? currentUser.username : '', aiEnabled: proxyEnabled(),
+                } });
+            }
+
             if (view === 'stats') {
                 // Compute stats from history
                 const totalWorkouts = workoutHistory.length;
@@ -2869,8 +3173,11 @@
                 // Cover row is [arrow][reps][weight][arrow]; reserve ~110px for the two compact
                 // arrows + gaps + side padding, the rest is split between the two boxes (also
                 // capped by the short height). Bigger than before to fill the empty space.
+                // Cover height budget: ~216px of name/timers/labels/partials above and below
+                // the boxes plus the ~64px nav pill, so on the Flip 7's ~400px-tall cover the
+                // partials row stays clear of the nav.
                 const boxSize = isCoverScreen
-                    ? Math.max(104, Math.min(180, Math.floor((viewport.w - 112) / 2), Math.floor(viewport.h * 0.62)))
+                    ? Math.max(96, Math.min(180, Math.floor((viewport.w - 112) / 2), Math.floor(viewport.h - 280)))
                     : Math.max(110, Math.min(168, Math.floor((viewport.w - 52) / 2)));
                 const contentPadTop = 72;
                 const contentPadBottom = isCoverScreen ? 56 : 112;
@@ -2923,8 +3230,9 @@
                         // Exercise name row with progress dots
                         e('div', { className: 'flex items-center justify-between px-2 mb-1' },
                             e('div', { className: 'flex-1' },
-                                e('div', { className: 'text-2xl font-black leading-tight' }, currentExercise.name),
-                                e('div', { className: 'text-sm mt-0.5', style: { color: 'var(--on-surface-variant)' } }, `Set ${currentSetIndex + 1} of ${currentExercise.sets.length}`)
+                                e('div', { className: (isCoverScreen ? 'text-xl' : 'text-2xl') + ' font-black leading-tight' }, currentExercise.name,
+                                    isCoverScreen ? e('span', { className: 'text-sm font-bold ml-2', style: { color: 'var(--on-surface-variant)', fontFamily: 'Barlow, sans-serif' } }, `Set ${currentSetIndex + 1}/${currentExercise.sets.length}`) : null),
+                                isCoverScreen ? null : e('div', { className: 'text-sm mt-0.5', style: { color: 'var(--on-surface-variant)' } }, `Set ${currentSetIndex + 1} of ${currentExercise.sets.length}`)
                             ),
                             // Progress dots
                             e('div', { className: 'flex gap-1.5 flex-wrap justify-end ml-3', style: { maxWidth: '45%' } },
@@ -2942,7 +3250,7 @@
                             )
                         ),
                         // Timers row: day + total time | set time
-                        e('div', { className: 'flex items-center justify-between px-2 mb-4 mt-2' },
+                        e('div', { className: 'flex items-center justify-between px-2 ' + (isCoverScreen ? 'mb-1 mt-1' : 'mb-4 mt-2') },
                             e('div', { className: 'flex items-center gap-3' },
                                 e('span', { className: 'text-xs uppercase tracking-widest font-bold', style: { color: 'var(--on-surface-variant)' } }, liveWorkout.day),
                                 e('span', { className: 'text-sm font-bold', style: { color: 'var(--primary-fixed-dim)' } }, formatTime(totalElapsedTime))
@@ -3214,6 +3522,7 @@
                 const metricDays = new Set(metrics.map(m => dayKey(m.date)));
                 const photoDays = new Set(photos.map(p => dayKey(p.date)));
                 const workoutDays = new Set(workoutHistory.map(w => dayKey(w.date)));
+                const foodDays = new Set(Object.keys(foodLog).filter(d => (foodLog[d] || []).length));
 
                 // Build a Monday-first 6-week grid.
                 const firstOfMonth = new Date(year, month, 1);
@@ -3246,7 +3555,7 @@
                         e(TopAppBar, {
                             title: d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase(),
                             leftAction: e('button', {
-                                onClick: () => setSelectedDay(null),
+                                onClick: () => setSelectedDay(null), 'aria-label': 'Close',
                                 className: 'flex items-center gap-1 active:opacity-60', style: { color: 'var(--on-surface-variant)' }
                             }, e(MIcon, { icon: 'close', style: { fontSize: '22px' } }))
                         }),
@@ -3260,6 +3569,25 @@
                                         e('span', { className: 'text-xs ml-auto', style: { color: 'var(--on-surface-variant)' } }, formatTime(w.totalTime))
                                     )))
                                 ) : null,
+                                (() => {
+                                    const N = window.CWANutrition;
+                                    if (!N) return null;
+                                    const list = foodLog[dk] || [];
+                                    const t = N.dayTotals(list);
+                                    const openFood = () => { setFoodDate(dk); setSelectedDay(null); setActiveTab('food'); setView('food'); };
+                                    return e('div', null,
+                                        e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Food'),
+                                        e('button', { onClick: openFood, className: 'w-full rounded-xl px-3 py-2.5 flex items-center gap-2 text-left active:scale-[0.99]', style: { background: 'var(--surface-container-high)' } },
+                                            e(MIcon, { icon: 'restaurant', style: { fontSize: '18px', color: 'var(--macro-c)' } }),
+                                            list.length
+                                                ? e('div', { className: 'flex-1 min-w-0' },
+                                                    e('div', { className: 'text-sm font-bold' }, `${Math.round(t.kcal).toLocaleString('en-US')} kcal`),
+                                                    e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, `P ${Math.round(t.p)} g · C ${Math.round(t.c)} g · F ${Math.round(t.f)} g · ${list.length} item${list.length === 1 ? '' : 's'}`))
+                                                : e('div', { className: 'flex-1 text-sm', style: { color: 'var(--on-surface-variant)' } }, 'Nothing logged — tap to add'),
+                                            e(MIcon, { icon: 'chevron_right', style: { fontSize: '20px', color: 'var(--on-surface-variant)' } })
+                                        )
+                                    );
+                                })(),
                                 e('div', null,
                                     e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, existing ? 'Edit Metrics' : 'Add Metrics'),
                                     e(MetricForm, { key: dk, fixedDate: fixed, initial: existing, onSave: (entry) => { saveMetric(entry); setToast('Saved'); } })
@@ -3335,6 +3663,7 @@
                                     if (metricDays.has(ck)) has.push(dot('var(--primary-container)'));
                                     if (photoDays.has(ck)) has.push(dot('#00e5ff'));
                                     if (workoutDays.has(ck)) has.push(dot('var(--secondary)'));
+                                    if (foodDays.has(ck)) has.push(dot('var(--macro-c)'));
                                     return e('button', {
                                         key: idx,
                                         onClick: () => { setSelectedDay(new Date(cell.getFullYear(), cell.getMonth(), cell.getDate(), 12, 0, 0, 0).getTime()); },
@@ -3355,9 +3684,10 @@
                             e('div', { className: 'flex items-center justify-center gap-4 mt-4 text-xs', style: { color: 'var(--on-surface-variant)' } },
                                 e('div', { className: 'flex items-center gap-1.5' }, dot('var(--primary-container)'), 'Metrics'),
                                 e('div', { className: 'flex items-center gap-1.5' }, dot('#00e5ff'), 'Photo'),
-                                e('div', { className: 'flex items-center gap-1.5' }, dot('var(--secondary)'), 'Workout')
+                                e('div', { className: 'flex items-center gap-1.5' }, dot('var(--secondary)'), 'Workout'),
+                                e('div', { className: 'flex items-center gap-1.5' }, dot('var(--macro-c)'), 'Food')
                             ),
-                            e('div', { className: 'text-xs text-center mt-3 px-2', style: { color: 'var(--outline)' } }, 'Tap any day to log weight, calories, sleep and photos. Anything logged here is shared with your AI Coach as context.')
+                            e('div', { className: 'text-xs text-center mt-3 px-2', style: { color: 'var(--outline)' } }, 'Tap any day to see its food and log weight, sleep and photos. All of it is shared with your AI Coach as context.')
                         )
                     ),
                     pickerOverlay,
@@ -3581,7 +3911,7 @@
                         // Header
                         e('div', { className: 'flex items-center justify-between px-3 flex-shrink-0', style: { minHeight: '56px', paddingTop: 'env(safe-area-inset-top)', background: 'var(--surface-container-low)' } },
                             e('button', { onClick: backToHub, className: 'flex items-center gap-1 active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(ArrowLeft, { size: 20 }), e('span', { className: 'text-sm' }, 'Back')),
-                            e('div', { className: 'font-black uppercase tracking-tighter text-base', style: { color: 'var(--primary-container)' } }, 'AI COACH'),
+                            e('div', { className: 'font-black uppercase tracking-wide text-lg', style: { color: 'var(--primary-container)' } }, 'AI COACH'),
                             chat.length ? e('button', { onClick: clearChat, 'aria-label': 'Clear chat', className: 'p-1.5 active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(MIcon, { icon: 'delete_sweep', style: { fontSize: '20px' } })) : e('div', { style: { width: '28px' } })
                         ),
                         // Messages
@@ -3591,7 +3921,7 @@
                                     e('div', { className: 'flex flex-col items-center text-center mb-6' },
                                         e('div', { className: 'w-14 h-14 rounded-2xl flex items-center justify-center mb-3', style: { background: 'rgba(209, 252, 0, 0.1)' } }, e(MIcon, { icon: 'sports_gymnastics', fill: true, style: { fontSize: '32px', color: 'var(--primary-container)' } })),
                                         e('div', { className: 'font-black text-lg' }, 'Your AI Coach'),
-                                        e('div', { className: 'text-sm mt-1 px-4', style: { color: 'var(--on-surface-variant)' } }, 'Ask about training, technique, programming, nutrition or recovery. It can see your logged workouts and goals.')
+                                        e('div', { className: 'text-sm mt-1 px-4', style: { color: 'var(--on-surface-variant)' } }, 'Ask about training, technique, programming, nutrition or recovery. It can see your logged workouts, food diary and goals.')
                                     ),
                                     e('div', { className: 'space-y-2' }, suggestions.map((s, i) => e('button', {
                                         key: i, onClick: () => { if (!aiBusy && remaining > 0 && proxyEnabled()) sendChat(s); },
@@ -3650,7 +3980,7 @@
                                             e('input', { type: 'file', accept: 'application/json,.json', className: 'hidden', onChange: (ev) => { const f = ev.target.files && ev.target.files[0]; if (f) importData(f); ev.target.value = ''; } })
                                         )
                                     ),
-                                    e('div', { className: 'text-xs mt-3 leading-snug', style: { color: 'var(--outline)' } }, 'Download a full JSON backup (workouts, history, goals, metrics, recaps and photos), or restore one. Also the way to move data to a new account.')
+                                    e('div', { className: 'text-xs mt-3 leading-snug', style: { color: 'var(--outline)' } }, 'Download a full JSON backup (workouts, history, goals, metrics, food diary, custom foods and photos), or restore one. Also the way to move data to a new account.')
                                 )
                             ),
                             e('div', null,
@@ -3766,154 +4096,110 @@
 
             const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+            // Plan: what to do next (top card) + the week as a simple list (design option C).
+            const week = weekStatus();
+            const fmtDayDate = (day) => { const [dd, mm] = getDateForDay(day).split('/'); return `${parseInt(dd, 10)}.${parseInt(mm, 10)}.`; };
+            const exCount = (w) => `${w.exercises.length} exercise${w.exercises.length === 1 ? '' : 's'} · ${w.exercises.reduce((n, ex) => n + ex.sets.length, 0)} sets`;
+            const openEditor = (day) => { setEditingDay(day); if (workouts[day]) { setEditingWorkout(workouts[day]); setView('edit'); } else startNewWorkout(); };
+            const STATUS = {
+                progress: { label: 'In progress', color: 'var(--primary-container)' },
+                missed: { label: 'Missed', color: 'var(--warn)' },
+                today: { label: 'Today', color: 'var(--primary-container)' },
+                done: { label: 'Done', color: 'var(--primary-fixed-dim)' },
+                upcoming: { label: '', color: 'var(--on-surface-variant)' },
+                rest: { label: '', color: 'var(--outline)' },
+            };
+            const statusDot = (st) => {
+                const base = { width: 24, height: 24, borderRadius: 12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' };
+                if (st === 'done') return e('span', { style: { ...base, background: 'var(--primary-container)', color: 'var(--on-primary-container)' } }, e(MIcon, { icon: 'check', style: { fontSize: '16px', fontWeight: 700 } }));
+                if (st === 'progress') return e('span', { style: { ...base, border: '2px solid var(--primary-container)' } }, e('span', { style: { width: 8, height: 8, borderRadius: 4, background: 'var(--primary-container)' } }));
+                if (st === 'missed') return e('span', { style: { ...base, border: '2px solid var(--warn)', color: 'var(--warn)', fontWeight: 900, fontSize: 13 } }, '!');
+                if (st === 'today') return e('span', { style: { ...base, border: '2px solid var(--primary-container)', boxShadow: '0 0 10px rgba(209,252,0,0.45)' } });
+                if (st === 'upcoming') return e('span', { style: { ...base, border: '2px solid var(--outline-variant)' } });
+                return e('span', { style: { ...base } }, e('span', { style: { width: 10, height: 2, background: 'var(--outline-variant)' } }));
+            };
+            const nextDay = week.next;
+            const nextW = nextDay ? workouts[nextDay] : null;
+            const nextSt = nextDay ? week.status[nextDay] : null;
+            const heroLabel = nextSt === 'progress' ? 'Continue' : nextSt === 'missed' ? 'Missed' : nextSt === 'today' ? 'Today' : 'Up next';
+            const coverPlan = isCoverScreen;
+            const ringSize = coverPlan ? 64 : 84;
+            const ringR = (ringSize - 10) / 2, ringC = 2 * Math.PI * ringR;
+            const heroCard = e('section', { className: 'rounded-3xl ' + (coverPlan ? 'p-3' : 'p-4'), style: { background: 'var(--surface-container-high)' } },
+                e('div', { className: 'flex items-center gap-3' },
+                    e('div', { style: { position: 'relative', width: ringSize, height: ringSize, flexShrink: 0 } },
+                        e('svg', { width: ringSize, height: ringSize, viewBox: `0 0 ${ringSize} ${ringSize}`, style: { transform: 'rotate(-90deg)', display: 'block' }, 'aria-hidden': true },
+                            e('circle', { cx: ringSize / 2, cy: ringSize / 2, r: ringR, fill: 'none', stroke: 'var(--surface-container-highest)', strokeWidth: 8 }),
+                            week.planned ? e('circle', { cx: ringSize / 2, cy: ringSize / 2, r: ringR, fill: 'none', stroke: 'var(--primary-container)', strokeWidth: 8, strokeLinecap: 'round', strokeDasharray: ringC, strokeDashoffset: ringC * (1 - week.done / week.planned) }) : null
+                        ),
+                        e('div', { style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' } },
+                            e('span', { className: 'font-black leading-none', style: { fontSize: coverPlan ? 18 : 22 } }, `${week.done}/${week.planned}`),
+                            coverPlan ? null : e('span', { style: { fontSize: 10, color: 'var(--on-surface-variant)' } }, 'this week')
+                        )
+                    ),
+                    e('div', { className: 'flex-1 min-w-0' },
+                        nextW ? e('div', { className: 'text-xs font-bold uppercase tracking-widest', style: { color: nextSt === 'missed' ? 'var(--warn)' : 'var(--primary-container)' } }, `${heroLabel} · ${nextDay}`)
+                            : e('div', { className: 'text-xs font-bold uppercase tracking-widest', style: { color: 'var(--primary-container)' } }, week.planned ? 'Week complete' : 'No plan yet'),
+                        e('div', { className: 'font-black leading-tight truncate', style: { fontSize: coverPlan ? 22 : 28 } }, nextW ? nextW.name : week.planned ? 'All done' : 'Add your first workout'),
+                        nextW ? e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, exCount(nextW))
+                            : e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, week.planned ? 'Start any day below to train again.' : 'Tap a day below to plan it.')
+                    )
+                ),
+                nextW && !coverPlan ? e('div', { className: 'flex flex-wrap gap-1.5 mt-3' },
+                    nextW.exercises.slice(0, 3).map((ex, i) => e('span', { key: i, className: 'px-2.5 py-1 rounded-full text-xs', style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' } }, `${ex.name || 'Exercise'} ${ex.sets.length}×`)),
+                    nextW.exercises.length > 3 ? e('span', { className: 'px-2.5 py-1 rounded-full text-xs', style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface-variant)' } }, `+${nextW.exercises.length - 3}`) : null
+                ) : null,
+                nextW ? e('button', {
+                    onClick: () => startWorkout(nextDay),
+                    className: 'w-full rounded-2xl font-black uppercase tracking-wide transition-all active:scale-95 ' + (coverPlan ? 'mt-2.5 py-2.5 text-lg' : 'mt-3 py-3.5 text-xl'),
+                    style: { background: 'var(--primary-container)', color: 'var(--on-primary-container)', boxShadow: '0 0 24px rgba(209,252,0,0.2)' }
+                }, nextSt === 'progress' ? 'Continue workout' : nextSt === 'missed' ? `Start ${nextDay}'s workout` : 'Start workout') : null,
+                nextW && nextSt === 'missed' && week.missed.length > 1 ? e('div', { className: 'text-xs mt-2 text-center', style: { color: 'var(--on-surface-variant)' } }, `${week.missed.length} missed this week — they start in order.`) : null
+            );
+            const dayRow = (day) => {
+                const w = workouts[day];
+                const st = week.status[day];
+                const meta = STATUS[st];
+                return e('div', { key: day, className: 'flex items-center gap-3', style: { minHeight: coverPlan ? 48 : 56, borderBottom: '1px solid var(--surface-container-high)' } },
+                    statusDot(st),
+                    e('button', {
+                        onClick: () => openEditor(day), 'aria-label': w ? `Edit ${day}: ${w.name}` : `Plan a workout for ${day}`,
+                        className: 'flex-1 min-w-0 flex items-center gap-3 text-left py-2 active:opacity-70'
+                    },
+                        e('div', { className: 'w-12 flex-shrink-0 leading-tight' },
+                            e('div', { className: 'text-sm font-bold', style: { color: st === 'today' || st === 'progress' ? 'var(--primary-container)' : 'var(--on-surface)' } }, day.slice(0, 3)),
+                            e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, fmtDayDate(day))
+                        ),
+                        e('div', { className: 'flex-1 min-w-0' },
+                            e('div', { className: 'text-base font-bold truncate', style: { color: w ? 'var(--on-surface)' : 'var(--outline)', fontWeight: w ? 700 : 400 } }, w ? w.name : 'Rest'),
+                            w && !coverPlan ? e('div', { className: 'text-xs truncate', style: { color: 'var(--on-surface-variant)' } }, exCount(w)) : null
+                        ),
+                        meta.label ? e('span', { className: 'text-xs font-bold flex-shrink-0', style: { color: meta.color } }, meta.label) : null
+                    ),
+                    w ? e('button', {
+                        onClick: () => startWorkout(day), 'aria-label': `Start ${day}: ${w.name}`,
+                        className: 'w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 active:scale-90',
+                        style: day === nextDay ? { background: 'var(--primary-container)', color: 'var(--on-primary-container)' } : { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' }
+                    }, e(MIcon, { icon: 'play_arrow', fill: true, style: { fontSize: '22px' } }))
+                    : e('button', {
+                        onClick: () => openEditor(day), 'aria-label': `Add workout on ${day}`,
+                        className: 'w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 active:scale-90',
+                        style: { background: 'transparent', color: 'var(--on-surface-variant)', border: '1px solid var(--outline-variant)' }
+                    }, e(MIcon, { icon: 'add', style: { fontSize: '20px' } }))
+                );
+            };
+
             return e('div', {
                 className: 'min-h-screen flex flex-col',
                 style: { background: 'var(--void)', color: 'var(--on-surface)' }
             },
-                e(TopAppBar, {
-                    title: 'PLAN',
-                    rightAction: profileBtn
-                }),
+                e(TopAppBar, { title: 'PLAN', rightAction: profileBtn }),
                 e('main', { className: 'flex-1 pt-20 px-4 pb-28' },
-                    // Date header
-                    e('div', { className: 'mb-6' },
-                        e('p', {
-                            className: 'text-xs uppercase tracking-widest',
-                            style: { color: 'var(--on-surface-variant)' }
-                        }, `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`),
-                        e('h2', { className: 'text-4xl font-black leading-none mt-1' }, `WEEK ${getWeekNumber(currentDate)}`)
-                    ),
-                    // Weekly grid
-                    e('div', { className: 'grid grid-cols-2 gap-4 max-w-6xl mx-auto' },
-                        DAYS.map((day) => {
-                            const workout = workouts[day];
-                            const isToday = day === today;
-                            const hasProgress = workout?.progress;
-
-                            // TODAY card - highlighted with primary-container
-                            if (isToday && workout) {
-                                return e('div', {
-                                    key: day,
-                                    className: 'rounded-xl p-5 flex flex-col justify-between h-[160px] relative overflow-hidden',
-                                    style: {
-                                        background: 'var(--primary-container)',
-                                        boxShadow: '0 0 30px rgba(209, 252, 0, 0.15)'
-                                    }
-                                },
-                                    e('div', {
-                                        className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-black',
-                                        style: { background: 'rgba(76, 93, 0, 0.25)', color: 'var(--on-primary-container)' }
-                                    }, 'TODAY'),
-                                    e('div', { style: { paddingRight: '3.25rem' } },
-                                        e('span', {
-                                            className: 'text-xs uppercase tracking-wide font-bold',
-                                            style: { color: 'var(--on-primary-container)', whiteSpace: 'nowrap' }
-                                        }, day),
-                                        e('h3', {
-                                            className: 'font-black text-xl mt-1 leading-tight',
-                                            style: { color: 'var(--on-primary-container)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }
-                                        }, workout.name)
-                                    ),
-                                    e('div', { className: 'flex items-center gap-2 justify-end mt-4' },
-                                        e('button', {
-                                            key: 'start',
-                                            onClick: () => startWorkout(day),
-                                            className: 'px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95',
-                                            style: { background: 'var(--on-primary-container)', color: 'var(--primary-container)' }
-                                        }, hasProgress ? 'Continue' : 'Start'),
-                                        e('button', {
-                                            key: 'settings',
-                                            onClick: () => { setEditingDay(day); setEditingWorkout(workout); setView('edit'); },
-                                            className: 'p-2 rounded-xl transition-all active:scale-95',
-                                            style: { background: 'rgba(76, 93, 0, 0.15)', color: 'var(--on-primary-container)' }
-                                        }, e(Settings, { size: 18 }))
-                                    )
-                                );
-                            }
-
-                            // Today but no workout (rest day)
-                            if (isToday && !workout) {
-                                return e('div', {
-                                    key: day,
-                                    className: 'rounded-xl p-5 flex flex-col justify-between h-[160px] relative',
-                                    style: {
-                                        background: 'var(--primary-container)',
-                                        boxShadow: '0 0 30px rgba(209, 252, 0, 0.15)'
-                                    }
-                                },
-                                    e('div', {
-                                        className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-black',
-                                        style: { background: 'rgba(76, 93, 0, 0.25)', color: 'var(--on-primary-container)' }
-                                    }, 'TODAY'),
-                                    e('div', { style: { paddingRight: '3.25rem' } },
-                                        e('span', { className: 'text-xs uppercase tracking-wide font-bold', style: { color: 'var(--on-primary-container)', whiteSpace: 'nowrap' } }, day),
-                                        e('h3', { className: 'font-medium text-lg mt-1 italic', style: { color: 'var(--on-primary-container)', opacity: 0.7 } }, 'Rest Day')
-                                    ),
-                                    e('div', { className: 'flex justify-end mt-4' },
-                                        e('button', {
-                                            onClick: () => { setEditingDay(day); startNewWorkout(); },
-                                            className: 'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95',
-                                            style: { background: 'var(--on-primary-container)', color: 'var(--primary-container)' }
-                                        }, e(Plus, { size: 18 }), 'Add')
-                                    )
-                                );
-                            }
-
-                            // Regular day with workout
-                            if (workout) {
-                                return e('div', {
-                                    key: day,
-                                    className: 'rounded-xl p-5 flex flex-col justify-between h-[160px] relative',
-                                    style: { background: 'var(--surface-container-highest)' }
-                                },
-                                    e('div', {
-                                        className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
-                                        style: { background: 'rgba(248, 249, 254, 0.06)', color: 'var(--on-surface-variant)' }
-                                    }, getDateForDay(day)),
-                                    e('div', { style: { paddingRight: '3.25rem' } },
-                                        e('span', { className: 'text-xs uppercase tracking-wide', style: { color: 'var(--on-surface-variant)', whiteSpace: 'nowrap' } }, day),
-                                        e('h3', { className: 'font-bold text-xl mt-1', style: { color: 'var(--on-surface)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, workout.name)
-                                    ),
-                                    e('div', { className: 'flex items-center gap-2 justify-end mt-4' },
-                                        e('button', {
-                                            key: 'start',
-                                            onClick: () => startWorkout(day),
-                                            className: 'px-4 py-2 rounded-xl text-sm font-bold transition-all active:scale-95',
-                                            style: { background: 'var(--surface-container-low)', color: 'var(--primary-fixed-dim)' }
-                                        }, hasProgress ? 'Continue' : 'Start'),
-                                        e('button', {
-                                            key: 'settings',
-                                            onClick: () => { setEditingDay(day); setEditingWorkout(workout); setView('edit'); },
-                                            className: 'p-2 rounded-xl transition-all active:scale-95',
-                                            style: { background: 'rgba(69, 72, 76, 0.15)', color: 'var(--on-surface)' }
-                                        }, e(Settings, { size: 18 }))
-                                    )
-                                );
-                            }
-
-                            // Rest day (no workout)
-                            return e('div', {
-                                key: day,
-                                className: 'rounded-xl p-5 flex flex-col justify-between h-[160px] relative',
-                                style: { background: 'var(--surface-container-low)', border: '1px dashed rgba(69, 72, 76, 0.2)' }
-                            },
-                                e('div', {
-                                    className: 'absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-bold',
-                                    style: { background: 'rgba(248, 249, 254, 0.03)', color: 'var(--on-surface-variant)' }
-                                }, getDateForDay(day)),
-                                e('div', { style: { paddingRight: '3.25rem' } },
-                                    e('span', { className: 'text-xs uppercase tracking-wide', style: { color: 'var(--on-surface-variant)', whiteSpace: 'nowrap' } }, day),
-                                    e('h3', { className: 'font-medium text-lg mt-1 italic', style: { color: 'var(--on-surface-variant)', opacity: 0.6 } }, 'Rest Day')
-                                ),
-                                e('div', { className: 'flex justify-end mt-4' },
-                                    e('button', {
-                                        onClick: () => { setEditingDay(day); startNewWorkout(); },
-                                        className: 'flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all active:scale-95',
-                                        style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' }
-                                    }, e(Plus, { size: 18 }), 'Add')
-                                )
-                            );
-                        })
+                    e('div', { className: 'max-w-lg mx-auto' },
+                        e('div', { className: 'text-xs font-bold uppercase tracking-widest mb-2 px-1', style: { color: 'var(--on-surface-variant)' } },
+                            `Week ${getWeekNumber(currentDate)} · ${fmtDayDate('Monday')}–${fmtDayDate('Sunday')}` + (week.planned ? ` · ${week.done} of ${week.planned} done` : '')),
+                        heroCard,
+                        e('div', { className: 'mt-3' }, DAYS.map(dayRow))
                     )
                 ),
                 e(BottomNavBar, { activeTab, onTabChange: handleTabChange })
