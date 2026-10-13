@@ -360,12 +360,15 @@
         );
     }
 
-    function DaySummary({ totals, targets, onEditTargets }) {
+    // compact: Flip cover screen — smaller ring, fibre/sugar/salt as one line, so the
+    // whole card fits the short screen.
+    function DaySummary({ totals, targets, onEditTargets, compact }) {
         const left = targets.kcal - totals.kcal;
-        const narrow = useViewport().w < 370;
-        return e('button', { onClick: onEditTargets, 'aria-label': 'Edit daily targets', className: 'w-full text-left rounded-3xl p-4 active:scale-[0.99] transition-transform', style: card },
+        const vpw = useViewport().w;
+        const narrow = compact || vpw < 370;
+        return e('button', { onClick: onEditTargets, 'aria-label': 'Edit daily targets', className: 'w-full text-left rounded-3xl active:scale-[0.99] transition-transform ' + (compact ? 'p-3' : 'p-4'), style: card },
             e('div', { className: 'flex items-center ' + (narrow ? 'gap-3' : 'gap-4') },
-                e(Ring, { size: narrow ? 104 : 128, stroke: narrow ? 9 : 11, value: totals.kcal, max: targets.kcal },
+                e(Ring, { size: compact ? 92 : narrow ? 104 : 128, stroke: narrow ? 9 : 11, value: totals.kcal, max: targets.kcal },
                     e('div', { className: (narrow ? 'text-xl' : 'text-2xl') + ' font-black leading-none', style: { fontVariantNumeric: 'tabular-nums' } }, fmtK(totals.kcal)),
                     e('div', { className: 'text-[11px] mt-1', style: { color: 'var(--on-surface-variant)' } }, `of ${fmtK(targets.kcal)} kcal`)
                 ),
@@ -377,11 +380,15 @@
                     ['p', 'c', 'f'].map(k => e(Bar, { key: k, k, value: totals[k], max: targets[k] }))
                 )
             ),
-            e('div', { className: 'grid grid-cols-3 gap-3 mt-3 pt-3', style: { borderTop: '1px solid var(--surface-container-highest)' } },
-                e(Bar, { k: 'fib', value: totals.fib, max: targets.fib, small: true }),
-                e(Bar, { k: 'sug', value: totals.sug, max: targets.sug, small: true, limit: true }),
-                e(Bar, { k: 'salt', value: totals.salt, max: targets.salt, small: true, limit: true })
-            )
+            compact
+                ? e('div', { className: 'flex justify-between gap-2 mt-2 pt-2 text-[11px] whitespace-nowrap', style: { borderTop: '1px solid var(--surface-container-highest)', color: 'var(--on-surface-variant)', fontVariantNumeric: 'tabular-nums' } },
+                    ['fib', 'sug', 'salt'].map(k => e('span', { key: k, style: { color: k !== 'fib' && totals[k] > targets[k] ? 'var(--error)' : undefined } },
+                        `${LABEL[k]} `, e('b', { style: { color: k !== 'fib' && totals[k] > targets[k] ? 'var(--error)' : 'var(--on-surface)' } }, fmtVal(k, totals[k])), `/${fmtVal(k, targets[k])}`)))
+                : e('div', { className: 'grid grid-cols-3 gap-3 mt-3 pt-3', style: { borderTop: '1px solid var(--surface-container-highest)' } },
+                    e(Bar, { k: 'fib', value: totals.fib, max: targets.fib, small: true }),
+                    e(Bar, { k: 'sug', value: totals.sug, max: targets.sug, small: true, limit: true }),
+                    e(Bar, { k: 'salt', value: totals.salt, max: targets.salt, small: true, limit: true })
+                )
         );
     }
 
@@ -838,6 +845,7 @@
         const [busy, setBusy] = useState('');
         const [error, setError] = useState('');
         const photoInput = useRef(null);
+        const cover = useViewport().isCover;
 
         const shiftDay = (delta) => { const d = keyToDate(date); d.setDate(d.getDate() + delta); app.setDate(dayKey(d.getTime())); };
         const dateLabel = date === today ? 'Today' : date === dayKey(Date.now() - 86400000) ? 'Yesterday'
@@ -976,13 +984,23 @@
             e(TopAppBar, { title: 'FOOD', rightAction: app.profileBtn }),
             e('div', { className: 'flex-1 pt-20 px-4 pb-28 overflow-y-auto' },
                 e('div', { className: 'max-w-lg mx-auto' },
-                    e('div', { className: 'flex items-center justify-between mb-3' },
-                        iconBtn('chevron_left', () => shiftDay(-1), 'Previous day'),
-                        e('button', { onClick: () => app.setDate(today), className: 'text-lg font-black active:opacity-70 px-3' }, dateLabel),
-                        iconBtn('chevron_right', () => shiftDay(1), 'Next day')
-                    ),
-                    e(DaySummary, { totals, targets, onEditTargets: () => setSheet({ type: 'targets' }) }),
-                    e('div', { className: 'grid grid-cols-3 gap-2 mt-3' },
+                    cover
+                        // Cover screen (short): day + actions in one row so Add/Scan/Photo are always on screen.
+                        ? e('div', { className: 'flex items-center gap-1.5 mb-2' },
+                            iconBtn('chevron_left', () => shiftDay(-1), 'Previous day', { width: 36, height: 36 }),
+                            e('button', { onClick: () => app.setDate(today), className: 'flex-1 min-w-0 truncate text-base font-black active:opacity-70' }, dateLabel),
+                            iconBtn('chevron_right', () => shiftDay(1), 'Next day', { width: 36, height: 36 }),
+                            iconBtn('barcode_scanner', () => setSheet({ type: 'scan' }), 'Scan barcode', { width: 40, height: 40 }),
+                            iconBtn('photo_camera', takePhoto, 'Photo', { width: 40, height: 40 }),
+                            iconBtn('add', () => setSheet({ type: 'add' }), 'Add food', { width: 40, height: 40, background: 'var(--primary-container)', color: 'var(--on-primary-container)' })
+                        )
+                        : e('div', { className: 'flex items-center justify-between mb-3' },
+                            iconBtn('chevron_left', () => shiftDay(-1), 'Previous day'),
+                            e('button', { onClick: () => app.setDate(today), className: 'text-lg font-black active:opacity-70 px-3' }, dateLabel),
+                            iconBtn('chevron_right', () => shiftDay(1), 'Next day')
+                        ),
+                    e(DaySummary, { totals, targets, compact: cover, onEditTargets: () => setSheet({ type: 'targets' }) }),
+                    cover ? null : e('div', { className: 'grid grid-cols-3 gap-2 mt-3' },
                         e('button', { onClick: () => setSheet({ type: 'add' }), className: 'py-3.5 rounded-2xl text-base font-black flex items-center justify-center gap-1.5 active:scale-95', style: primaryBtn }, e(MIcon, { icon: 'add', style: { fontSize: '20px' } }), 'Add'),
                         e('button', { onClick: () => setSheet({ type: 'scan' }), className: 'py-3.5 rounded-2xl text-base font-bold flex items-center justify-center gap-1.5 active:scale-95', style: ghostBtn }, e(MIcon, { icon: 'barcode_scanner', style: { fontSize: '20px' } }), 'Scan'),
                         e('button', { onClick: takePhoto, className: 'py-3.5 rounded-2xl text-base font-bold flex items-center justify-center gap-1.5 active:scale-95', style: ghostBtn }, e(MIcon, { icon: 'photo_camera', style: { fontSize: '20px' } }), 'Photo')

@@ -1,18 +1,28 @@
 // Service Worker with Cache Versioning
-const CACHE_VERSION = 'v3.15.0'; // UPDATE THIS WITH EACH NEW VERSION!
+const CACHE_VERSION = 'v3.16.0'; // UPDATE THIS WITH EACH NEW VERSION!
 const CACHE_NAME = `workout-tracker-${CACHE_VERSION}`;
 
 // Same-origin app shell: must all cache, or the install fails (and the old SW keeps serving).
 const APP_SHELL = [
   './',
   './index.html',
-  './js/nutrition.js?v=3.15.0', // same URL as the <script> in index.html
+  './js/nutrition.js?v=3.16.0', // same URL as the <script> in index.html
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
   './fonts/material-symbols.woff2',
-  './fonts/inter-latin-wght-normal.woff2',
-  './fonts/inter-latin-ext-wght-normal.woff2'
+  './fonts/barlow-condensed-latin-700.woff2',
+  './fonts/barlow-condensed-latin-800.woff2',
+  './fonts/barlow-condensed-latin-ext-700.woff2',
+  './fonts/barlow-condensed-latin-ext-800.woff2',
+  './fonts/barlow-latin-400.woff2',
+  './fonts/barlow-latin-500.woff2',
+  './fonts/barlow-latin-600.woff2',
+  './fonts/barlow-latin-700.woff2',
+  './fonts/barlow-latin-ext-400.woff2',
+  './fonts/barlow-latin-ext-500.woff2',
+  './fonts/barlow-latin-ext-600.woff2',
+  './fonts/barlow-latin-ext-700.woff2'
 ];
 // Third-party libraries: cached best-effort, so one slow/failed CDN can't break the install.
 const CDN_LIBS = [
