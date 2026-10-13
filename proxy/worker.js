@@ -31,20 +31,22 @@ const VISION_MODELS = [
 // Last resort: older vision model with a separate `image` field.
 const LEGACY_VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
 
-const FOOD_PHOTO_PROMPT = `You read food photos for a nutrition tracker. The photo shows one of:
-(a) a nutrition facts table (often Czech: "Energetická hodnota", "Tuky", "z toho nasycené mastné kyseliny", "Sacharidy", "z toho cukry", "Vláknina", "Bílkoviny", "Sůl"),
-(b) a packaged product, or (c) a plate/meal.
+const FOOD_PHOTO_PROMPT = `You read food photos for a nutrition tracker. First decide what the photo shows:
+"label" = a nutrition facts table is visible (often Czech: "Výživové údaje", "Energetická hodnota", "Tuky", "z toho nasycené mastné kyseliny", "Sacharidy", "z toho cukry", "Vláknina", "Bílkoviny", "Sůl"),
+"package" = a packaged product without a readable nutrition table,
+"meal" = a plate or prepared dish, "food" = an unpackaged food (fruit, bread, meat...).
 Return ONLY one JSON object, no other text:
-{"name": string, "brand": string|null, "barcode": string|null, "unit": "g"|"ml", "source": "label"|"estimate",
+{"kind": "label"|"package"|"meal"|"food", "name": string, "brand": string|null, "searchText": string,
+ "barcode": string|null, "unit": "g"|"ml", "source": "label"|"estimate",
  "per100": {"kcal": number, "protein": number, "carbs": number, "sugar": number, "fat": number, "fibre": number, "salt": number},
  "servingGrams": number|null, "confidence": "high"|"medium"|"low"}
 Rules:
-- per100 is per 100 g (or 100 ml for drinks). If the table is only per portion, convert to per 100 g using the portion size.
-- If only kJ is shown, kcal = kJ / 4.184. If only sodium is shown, salt = sodium * 2.5.
-- source = "label" only when you read the numbers from a visible nutrition table; otherwise give typical values for that food and use "estimate".
-- For a plate/meal, name the dish, estimate per100 for the whole dish and the total portion weight in servingGrams.
+- searchText: the brand and product name exactly as printed on the package (e.g. "Olma Florian jogurt bílý"), used to look the product up in a database. Copy the printed words; never invent a brand you cannot read. For meals/food: the food's common name.
+- per100 is per 100 g (or 100 ml for drinks). If the table shows only per portion, convert using the portion size. If only kJ is shown, kcal = kJ / 4.184. If only sodium is shown, salt = sodium * 2.5.
+- source = "label" only when the numbers come from a visible nutrition table. Otherwise give typical values for that kind of food, source = "estimate", confidence "low" for packages.
+- For a meal, estimate per100 for the whole dish and the total portion weight in servingGrams.
 - barcode = the digits printed under a visible barcode, else null. Use null for anything unknown.
-- Name in the language printed on the package (Czech is fine).`;
+- Keep names in the language printed on the package (Czech is fine).`;
 
 export default {
   async fetch(request, env) {

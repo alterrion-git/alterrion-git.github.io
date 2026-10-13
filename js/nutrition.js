@@ -78,16 +78,16 @@
         return d.getTime();
     }
 
-    // Daily targets. Anything not set in the profile is derived: kcal from goal + body weight,
-    // protein 1.8 g/kg, fat ~27 % of kcal, carbs the rest; fibre 30 g, sugar ≤ 50 g, salt ≤ 5 g.
+    // Daily targets: what you set in Goals (or Food › targets). Anything left empty is derived:
+    // kcal ~ maintenance from body weight, protein 1.8 g/kg, fat ~27 % of kcal, carbs the rest;
+    // fibre 30 g, sugar ≤ 50 g, salt ≤ 5 g.
     function targetsFor(profile, metrics) {
         const p = profile || {};
         const latestW = (metrics || []).filter(m => m.weight != null).sort((a, b) => b.date - a.date)[0];
         const weight = (latestW && latestW.weight) || p.targetWeight || 75;
-        const goalAdj = { bulk: 300, cut: -450, maintain: 0, recomp: -150 }[p.goal] || 0;
         const auto = {};
-        const kcal = num(p.dailyKcal) || (auto.kcal = true, Math.round((weight * 31 + goalAdj) / 50) * 50);
-        const prot = num(p.proteinG) || (auto.p = true, Math.round(weight * (p.goal === 'cut' ? 2.0 : 1.8)));
+        const kcal = num(p.dailyKcal) || (auto.kcal = true, Math.round(weight * 31 / 50) * 50);
+        const prot = num(p.proteinG) || (auto.p = true, Math.round(weight * 1.8));
         const fat = num(p.fatG) || (auto.f = true, Math.round(kcal * 0.27 / 9));
         const carbs = num(p.carbsG) || (auto.c = true, Math.max(0, Math.round((kcal - prot * 4 - fat * 9) / 4)));
         return {
@@ -98,6 +98,64 @@
             auto,
         };
     }
+
+    // ---------- week rating ----------
+    // A deterministic 0–10 score for a Monday–Sunday week, from two parts (each 0–1):
+    //  Training  = workouts done ÷ workouts planned per week (current plan), capped at 1.
+    //  Nutrition = average day score over the week; a day with nothing logged scores 0.
+    //    Day score = 50 % calories (within ±10 % of target = full, ±35 % or more = 0)
+    //              + 30 % protein (≥ 90 % of target = full, ≤ 50 % = 0)
+    //              + 20 % carbs & fat (each within ±20 % = full, ±50 % or more = 0).
+    // Score = 10 × the average of the parts that have data: no plan → nutrition only; no food
+    // logged that week → training only; neither → no rating. Past weeks use today's targets.
+    // A week that isn't over yet ("so far") only counts the days and planned workouts before today.
+    // Weeks that ended before your first logged workout or food day aren't rated (the plan
+    // didn't exist yet, so "0 of 3 workouts" would be meaningless).
+    const lin = (x, full, zero) => (x <= full ? 1 : x >= zero ? 0 : 1 - (x - full) / (zero - full));
+    function dayScore(t, tg) {
+        const dev = (v, target) => (target > 0 ? Math.abs(v - target) / target : 0);
+        const kcal = lin(dev(t.kcal, tg.kcal), 0.10, 0.35);
+        const ratioP = tg.p > 0 ? t.p / tg.p : 1;
+        const prot = ratioP >= 0.9 ? 1 : ratioP <= 0.5 ? 0 : (ratioP - 0.5) / 0.4;
+        const cf = (lin(dev(t.c, tg.c), 0.2, 0.5) + lin(dev(t.f, tg.f), 0.2, 0.5)) / 2;
+        return 0.5 * kcal + 0.3 * prot + 0.2 * cf;
+    }
+    // mondayMs: local midnight of the week's Monday. history: workout history entries
+    // ({ date, day }). planDays: names of planned days ('Monday', ...). log: food diary.
+    function weekRating({ mondayMs, history, planDays, log, targets, now }) {
+        const t0 = new Date(weekStartOf(mondayMs)); // any time in the week → its Monday 00:00
+        const days = [...Array(7)].map((_, i) => { const d = new Date(t0); d.setDate(d.getDate() + i); return d; });
+        const end = new Date(t0); end.setDate(end.getDate() + 7);
+        const nowMs = now || Date.now();
+        const complete = nowMs >= end.getTime();
+        const firstLog = Object.keys(log || {}).filter(k => (log[k] || []).length).sort()[0];
+        const firstHist = (history || []).reduce((m, h) => Math.min(m, h.date || Infinity), Infinity);
+        const since = Math.min(firstHist, firstLog ? new Date(firstLog + 'T00:00:00').getTime() : Infinity);
+        if (end.getTime() <= since) return { score: null, training: null, nutrition: null, complete, mondayMs: t0.getTime() };
+        const todayKey = dayKey(nowMs);
+        // Days that count: the whole week once it's over, otherwise the days before today.
+        const counted = complete ? days : days.filter(d => dayKey(d.getTime()) < todayKey);
+        const ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const planned = complete ? planDays.length : planDays.filter(d => ORDER.indexOf(d) < counted.length).length;
+        const sessions = (history || []).filter(h => h.date >= t0.getTime() && h.date < Math.min(end.getTime(), complete ? Infinity : new Date(nowMs).setHours(0, 0, 0, 0))).length;
+        const training = planned > 0 ? { done: Math.min(sessions, planned), planned, sessions, score: Math.min(sessions, planned) / planned } : null;
+        let nutrition = null;
+        if (counted.length) {
+            const keys = counted.map(d => dayKey(d.getTime()));
+            const logged = keys.filter(k => (log[k] || []).length);
+            if (logged.length) {
+                const scores = keys.map(k => ((log[k] || []).length ? dayScore(dayTotals(log[k]), targets) : 0));
+                const avgKcal = logged.reduce((sum, k) => sum + dayTotals(log[k]).kcal, 0) / logged.length;
+                nutrition = { score: scores.reduce((a, b) => a + b, 0) / keys.length, logged: logged.length, days: keys.length, avgKcal };
+            }
+        }
+        const parts = [training, nutrition].filter(Boolean);
+        const score = parts.length ? Math.round(parts.reduce((a, p) => a + p.score, 0) / parts.length * 100) / 10 : null;
+        return { score, training, nutrition, complete, mondayMs: t0.getTime() };
+    }
+    // Monday 00:00 (local) of the week containing ts.
+    function weekStartOf(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); }
+    const ratingColor = (score) => (score == null ? 'var(--outline)' : score >= 8 ? 'var(--primary-container)' : score >= 5 ? 'var(--warn)' : 'var(--error)');
 
     // ---------- basic foods (typical values per 100 g / 100 ml, EU-label style: carbs exclude fibre) ----------
     // [Czech name, English name, kcal, protein, carbs, fat, fibre, sugar, salt, unit, serving g, serving label]
@@ -248,29 +306,38 @@
         if (food.hasNutrition) cachePut(food);
         return { found: true, food };
     }
-    // Products sold in Czechia first (cz. host), topped up from the whole database.
+    // Open Food Facts search. OFF allows ~10 searches/min per IP and asks apps not to search
+    // as you type, so this runs only on an explicit search: one request for products sold in
+    // Czechia (cz. host), or worldwide when asked. A dropped/slow request is retried once.
     const searchCache = {};
-    async function offSearch(query) {
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    async function offSearch(query, worldwide) {
         const q = query.trim();
-        if (searchCache[q]) return searchCache[q];
-        const params = `search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&fields=${OFF_FIELDS}`;
-        const run = async (host) => {
-            const res = await fetchWithTimeout(`https://${host}/cgi/search.pl?${params}`, {}, 15000);
-            if (!res.ok) throw new Error(`Open Food Facts search error (${res.status})`);
-            const data = await res.json();
-            return (data.products || []).map(offToFood).filter(f => f && f.hasNutrition);
-        };
-        let out = await run('cz.openfoodfacts.org');
-        if (out.length < 6) {
+        const key = (worldwide ? 'w:' : 'cz:') + q.toLowerCase();
+        if (searchCache[key]) return searchCache[key];
+        const host = worldwide ? 'world.openfoodfacts.org' : 'cz.openfoodfacts.org';
+        const url = `https://${host}/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=30&fields=${OFF_FIELDS}`;
+        let lastErr = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            if (attempt) await sleep(1500);
             try {
-                const seen = new Set(out.map(f => f.code));
-                out = out.concat((await run('world.openfoodfacts.org')).filter(f => !seen.has(f.code)));
-            } catch (err) { if (!out.length) throw err; }
+                const res = await fetchWithTimeout(url, {}, 20000);
+                if (res.status === 429) { const err = new Error('rate'); err.rate = true; throw err; }
+                if (!res.ok) throw new Error(`Open Food Facts search error (${res.status})`);
+                const data = await res.json();
+                const out = (data.products || []).map(offToFood).filter(f => f && f.hasNutrition);
+                searchCache[key] = out;
+                return out;
+            } catch (err) {
+                lastErr = err;
+                if (err.rate || navigator.onLine === false) break; // retrying won't help
+            }
         }
-        out = out.slice(0, 30);
-        searchCache[q] = out;
-        return out;
+        throw lastErr;
     }
+    const searchErrorText = (err) => navigator.onLine === false ? 'You are offline.'
+        : err && err.rate ? 'Open Food Facts allows about 10 searches a minute. Wait a moment and search again.'
+            : 'Open Food Facts did not answer (it is sometimes slow). Try again in a moment.';
 
     // ---------- barcode detection (native on Android Chrome, ZXing polyfill elsewhere) ----------
     let detectorPromise = null;
@@ -614,7 +681,7 @@
     }
 
     function TargetsSheet({ profile, metrics, onSave, onClose }) {
-        const auto = targetsFor({ goal: profile.goal, targetWeight: profile.targetWeight }, metrics);
+        const auto = targetsFor({ targetWeight: profile.targetWeight }, metrics);
         const fields = [['dailyKcal', 'kcal', 'Calories', 'kcal'], ['proteinG', 'p', 'Protein', 'g'], ['carbsG', 'c', 'Carbs', 'g'], ['fatG', 'f', 'Fat', 'g'], ['fibreG', 'fib', 'Fibre (at least)', 'g'], ['sugarMaxG', 'sug', 'Sugar (at most)', 'g'], ['saltMaxG', 'salt', 'Salt (at most)', 'g']];
         const [vals, setVals] = useState(() => Object.fromEntries(fields.map(([pk]) => [pk, profile[pk] != null ? String(profile[pk]) : ''])));
         const save = () => onSave(Object.fromEntries(fields.map(([pk]) => [pk, num(vals[pk])])));
@@ -625,7 +692,7 @@
                 e('button', { onClick: save, className: 'flex-1 py-4 rounded-2xl text-base font-black active:scale-95', style: primaryBtn }, 'Save')
             )
         },
-            e('div', { className: 'text-sm mb-4', style: { color: 'var(--on-surface-variant)' } }, 'Leave a field empty to use the automatic value (shown in grey), based on your goal and latest weight. Calories are shared with Goals.'),
+            e('div', { className: 'text-sm mb-4', style: { color: 'var(--on-surface-variant)' } }, 'Leave a field empty to use the automatic value (shown in grey), based on your latest weight. These are the same targets as in Profile › Goals.'),
             e('div', { className: 'grid grid-cols-2 gap-3' }, fields.map(([pk, k, lbl, unit]) => e(NumField, {
                 key: pk, label: lbl, unit, value: vals[pk], placeholder: String(auto[k]),
                 onChange: (v) => setVals(prev => ({ ...prev, [pk]: v }))
@@ -748,24 +815,20 @@
 
     function AddSheet({ app, date, onPick, onScan, onPhoto, onQuick, onNewFood, onEditFood, onClose }) {
         const [q, setQ] = useState('');
-        const [online, setOnline] = useState({ q: '', state: 'idle', items: [], error: '' });
+        const [online, setOnline] = useState({ q: '', world: false, state: 'idle', items: [], error: '' });
         const custom = Object.values(app.foods || {});
         const recent = recentFoods(app.log, app.foods || {});
         const fq = fold(q.trim());
         const tokens = fq.split(/\s+/).filter(Boolean);
         const matches = (f) => { const h = fold([f.name, f.brand, f.alt, f.code].join(' ')); return tokens.every(t => h.includes(t)); };
         const local = fq ? [...custom, ...recent.filter(r => r.src !== 'custom'), ...BASIC_FOODS].filter(matches).filter((f, i, a) => a.findIndex(x => (x.code && x.code === f.code) || (x.name === f.name && x.brand === f.brand)) === i).slice(0, 25) : [];
-        // Online search: after a pause in typing (Open Food Facts allows ~10 searches/min).
-        useEffect(() => {
+        const runSearch = async (world) => {
             const query = q.trim();
-            if (query.length < 3 || /^\d{8,14}$/.test(query)) return;
-            const t = setTimeout(async () => {
-                setOnline({ q: query, state: 'loading', items: [], error: '' });
-                try { const items = await offSearch(query); setOnline(o => o.q === query ? { q: query, state: 'done', items, error: '' } : o); }
-                catch (err) { setOnline(o => o.q === query ? { q: query, state: 'error', items: [], error: navigator.onLine === false ? 'You are offline.' : "Couldn't reach Open Food Facts." } : o); }
-            }, 900);
-            return () => clearTimeout(t);
-        }, [q]);
+            if (query.length < 2 || /^\d{8,14}$/.test(query)) return;
+            setOnline({ q: query, world, state: 'loading', items: [], error: '' });
+            try { const items = await offSearch(query, world); setOnline(o => o.q === query && o.world === world ? { ...o, state: 'done', items } : o); }
+            catch (err) { setOnline(o => o.q === query && o.world === world ? { ...o, state: 'error', error: searchErrorText(err) } : o); }
+        };
         const isCode = /^\d{8,14}$/.test(q.trim());
         const section = (title, items, opts) => items.length ? e('div', { className: 'mt-4' },
             label(title),
@@ -777,7 +840,8 @@
         return e(Sheet, { title: 'ADD FOOD', onClose },
             e('div', { className: 'flex items-center gap-2 rounded-2xl px-3', style: inputStyle },
                 e(MIcon, { icon: 'search', style: { fontSize: '20px', color: 'var(--on-surface-variant)' } }),
-                e('input', { type: 'text', enterKeyHint: 'search', value: q, autoFocus: true, placeholder: 'Search foods or type a barcode', onChange: (ev) => setQ(ev.target.value), className: 'flex-1 min-w-0 py-3 bg-transparent outline-none text-base cwa-input', style: { color: 'var(--on-surface)' } }),
+                e('input', { type: 'text', enterKeyHint: 'search', value: q, autoFocus: true, placeholder: 'Search foods or type a barcode', onChange: (ev) => setQ(ev.target.value),
+                    onKeyDown: (ev) => { if (ev.key === 'Enter') { ev.target.blur(); if (/^\d{8,14}$/.test(q.trim())) app.lookupCode(q.trim()); else runSearch(false); } }, className: 'flex-1 min-w-0 py-3 bg-transparent outline-none text-base cwa-input', style: { color: 'var(--on-surface)' } }),
                 q ? e('button', { onClick: () => setQ(''), 'aria-label': 'Clear search', className: 'active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(MIcon, { icon: 'close', style: { fontSize: '20px' } })) : null
             ),
             e('div', { className: 'grid grid-cols-4 gap-2 mt-3' },
@@ -792,34 +856,67 @@
             fq ? section('Matches', local, { editable: true }) : null,
             fq && !isCode ? e('div', { className: 'mt-4' },
                 label('Open Food Facts'),
-                q.trim().length < 3 ? e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, 'Type at least 3 letters.')
-                    : online.q !== q.trim() || online.state === 'loading' ? e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'Searching…')
-                        : online.state === 'error' ? e('div', { className: 'text-sm', style: { color: 'var(--error)' } }, online.error)
-                            : online.items.length ? e('div', { className: 'rounded-2xl px-3', style: card }, online.items.map((f, i) => e('div', { key: f.code + i, style: { borderBottom: i < online.items.length - 1 ? '1px solid var(--surface-container-highest)' : 'none' } }, e(FoodRow, { food: f, onClick: () => onPick(f) }))))
-                                : e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, 'No products found. Try fewer words, or add it as a new food.')
+                online.q !== q.trim() || online.state === 'idle'
+                    ? e('button', { onClick: () => runSearch(false), disabled: q.trim().length < 2, className: 'w-full py-3 rounded-2xl text-base font-bold flex items-center justify-center gap-2 active:scale-95', style: Object.assign({}, ghostBtn, { opacity: q.trim().length < 2 ? 0.5 : 1 }) },
+                        e(MIcon, { icon: 'search', style: { fontSize: '20px' } }), `Search products for “${q.trim()}”`)
+                    : online.state === 'loading' ? e('div', { className: 'text-sm py-3 text-center', style: { color: 'var(--on-surface-variant)' } }, online.world ? 'Searching worldwide…' : 'Searching products sold in Czechia…')
+                        : online.state === 'error' ? e('div', null,
+                            e('div', { className: 'text-sm', style: { color: 'var(--error)' } }, online.error),
+                            e('button', { onClick: () => runSearch(online.world), className: 'mt-2 px-4 py-2 rounded-xl text-sm font-bold active:scale-95', style: ghostBtn }, 'Try again'))
+                            : e('div', null,
+                                online.items.length ? e('div', { className: 'rounded-2xl px-3', style: card }, online.items.map((f, i) => e('div', { key: f.code + i, style: { borderBottom: i < online.items.length - 1 ? '1px solid var(--surface-container-highest)' : 'none' } }, e(FoodRow, { food: f, onClick: () => onPick(f) }))))
+                                    : e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, online.world ? 'No products found. Try fewer words, or add it as a new food.' : 'Nothing found among products sold in Czechia.'),
+                                online.world ? null : e('button', { onClick: () => runSearch(true), className: 'mt-2 w-full py-2.5 rounded-xl text-sm font-bold active:scale-95', style: ghostBtn }, 'Search worldwide too')
+                            )
             ) : null,
             !fq && !recent.length && !custom.length ? e('div', { className: 'text-sm mt-6 text-center', style: { color: 'var(--outline)' } }, 'Search above — your recent foods will show up here.') : null,
             e('div', { className: 'text-[10px] mt-6 text-center', style: { color: 'var(--outline)' } }, 'Product data: Open Food Facts (ODbL). Basic foods: typical values.')
         );
     }
 
-    // After a food photo: what the AI saw + matching products + "use the estimate".
-    function PhotoResultSheet({ result, matches, searching, onPick, onUseEstimate, onClose }) {
+    // After a photo without a readable nutrition table. Real data first: Open Food Facts
+    // products (packages) or your/basic foods (unpackaged food), then the AI's own estimate as
+    // a fallback — for packaged products that estimate is only a rough guess.
+    function PhotoResultSheet({ result, kind, query, matches, searching, onPick, onUseEstimate, onLabelPhoto, onClose }) {
         const n = result.per100 || {};
+        const model = String(result._model || '').split('/').pop();
+        const isPkg = kind === 'package';
+        const kindLabel = { package: 'Package', meal: 'Meal', food: 'Food', label: 'Label' }[kind] || 'Photo';
+        const estimate = n.kcal != null ? e('div', { className: 'mt-4' },
+            label(isPkg ? 'AI guess (no label visible)' : 'AI estimate'),
+            e('div', { className: 'rounded-2xl p-4', style: card },
+                e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, `Per 100 ${result.unit === 'ml' ? 'ml' : 'g'}: ${fmtK(n.kcal)} kcal · P ${fmtG(n.protein)} · C ${fmtG(n.carbs)} · F ${fmtG(n.fat)}` + (result.servingGrams ? ` · portion ~${Math.round(result.servingGrams)} g` : '')),
+                isPkg ? e('div', { className: 'text-xs mt-1', style: { color: 'var(--warn)' } }, 'Typical values for this kind of product, not read from the pack. Can be far off.') : null,
+                e('button', { onClick: onUseEstimate, className: 'w-full mt-3 py-3 rounded-xl text-base font-black active:scale-95', style: isPkg ? ghostBtn : primaryBtn }, isPkg ? 'Use the guess anyway' : 'Use AI estimate')
+            )) : null;
         return e(Sheet, { title: 'PHOTO', onClose },
             e('div', { className: 'rounded-2xl p-4', style: card },
-                e('div', { className: 'flex items-center gap-2 text-xs font-bold uppercase tracking-widest', style: { color: 'var(--primary-fixed-dim)' } }, e(MIcon, { icon: 'auto_awesome', style: { fontSize: '16px' } }), 'AI sees'),
+                e('div', { className: 'flex items-center gap-2 text-xs font-bold uppercase tracking-widest', style: { color: 'var(--primary-fixed-dim)' } }, e(MIcon, { icon: 'auto_awesome', style: { fontSize: '16px' } }), `AI sees · ${kindLabel}`),
                 e('div', { className: 'text-lg font-black mt-1' }, [result.brand, result.name].filter(Boolean).join(' ') || 'Unknown food'),
-                n.kcal != null ? e('div', { className: 'text-sm mt-1', style: { color: 'var(--on-surface-variant)' } }, `Estimate per 100 ${result.unit === 'ml' ? 'ml' : 'g'}: ${fmtK(n.kcal)} kcal · P ${fmtG(n.protein)} · C ${fmtG(n.carbs)} · F ${fmtG(n.fat)}` + (result.servingGrams ? ` · portion ~${Math.round(result.servingGrams)} g` : '')) : null,
-                n.kcal != null ? e('button', { onClick: onUseEstimate, className: 'w-full mt-3 py-3 rounded-xl text-base font-black active:scale-95', style: primaryBtn }, 'Use AI estimate') : null
+                model ? e('div', { className: 'text-[11px] mt-1', style: { color: 'var(--outline)' } }, `Read by ${model}`) : null,
+                isPkg ? e('button', { onClick: onLabelPhoto, className: 'w-full mt-3 py-3 rounded-xl text-base font-bold flex items-center justify-center gap-2 active:scale-95', style: primaryBtn },
+                    e(MIcon, { icon: 'photo_camera', style: { fontSize: '20px' } }), 'Photo the nutrition table instead') : null,
+                isPkg ? e('div', { className: 'text-xs mt-2', style: { color: 'var(--on-surface-variant)' } }, 'The table on the back gives exact values. The front only shows what the product is.') : null
             ),
             e('div', { className: 'mt-4' },
-                label('Matching products'),
-                searching ? e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'Searching Open Food Facts…')
-                    : matches.length ? e('div', { className: 'rounded-2xl px-3', style: card }, matches.map((f, i) => e('div', { key: f.code + i, style: { borderBottom: i < matches.length - 1 ? '1px solid var(--surface-container-highest)' : 'none' } }, e(FoodRow, { food: f, onClick: () => onPick(f) }))))
-                        : e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, 'No matching products found.')
-            )
+                label(isPkg ? `Products matching “${query}”` : `Foods matching “${query}”`),
+                searching ? e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'Searching…')
+                    : matches.length ? e('div', { className: 'rounded-2xl px-3', style: card }, matches.map((f, i) => e('div', { key: (f.code || f.id || f.name) + i, style: { borderBottom: i < matches.length - 1 ? '1px solid var(--surface-container-highest)' : 'none' } }, e(FoodRow, { food: f, onClick: () => onPick(f) }))))
+                        : e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, 'Nothing matching found.')
+            ),
+            estimate
         );
+    }
+
+    // Your foods + basic foods whose name contains every word of `query` (accents ignored).
+    function localMatches(query, customFoods) {
+        const tokens = fold(query).split(/\s+/).filter(t => t.length > 1);
+        if (!tokens.length) return [];
+        const hit = (f) => { const h = fold([f.name, f.brand, f.alt].join(' ')); return tokens.every(t => h.includes(t)); };
+        let out = [...Object.values(customFoods || {}), ...BASIC_FOODS].filter(hit);
+        // Fall back to "any word" for multi-word dish names ("chicken with rice").
+        if (!out.length) out = [...Object.values(customFoods || {}), ...BASIC_FOODS].filter(f => { const h = fold([f.name, f.alt].join(' ')); return tokens.some(t => t.length > 3 && h.includes(t)); });
+        return out.slice(0, 8);
     }
 
     // AI photo result → food object (per100 uses long names; ours are short keys).
@@ -910,12 +1007,21 @@
                     setSheet({ type: 'editor', food, note: 'Read by AI from the label — check the numbers, then save. It becomes one of your foods.', thenAdd: true });
                     return;
                 }
-                // 3) A product or a plate → matching products + the AI's estimate.
-                setSheet({ type: 'photo', result: r, food, matches: [], searching: true });
-                const q = [food.brand, food.name].filter(Boolean).join(' ');
+                // 3) No table: a package → look the product up by the name printed on it;
+                //    unpackaged food / a meal → your and basic foods. The AI's estimate is the fallback.
+                const kind = r.kind === 'meal' || r.kind === 'food' || r.kind === 'package' ? r.kind : 'package';
+                const q = String(r.searchText || [food.brand, food.name].filter(Boolean).join(' ')).trim();
+                if (kind !== 'package') {
+                    setSheet({ type: 'photo', result: r, food, kind, query: q, matches: localMatches(q, app.foods).concat(localMatches(food.name, app.foods)).filter((f, i, a) => a.indexOf(f) === i).slice(0, 8), searching: false });
+                    return;
+                }
+                setSheet({ type: 'photo', result: r, food, kind, query: q, matches: [], searching: true });
                 let matches = [];
-                try { if (q.length >= 3) matches = (await offSearch(q)).slice(0, 8); } catch (err) {}
-                setSheet(s => (s && s.type === 'photo' && s.result === r ? { ...s, matches, searching: false } : s));
+                if (q.length >= 3) {
+                    try { matches = await offSearch(q, false); } catch (err) {}
+                    if (matches.length < 3) { try { const w = await offSearch(q, true); const seen = new Set(matches.map(f => f.code)); matches = matches.concat(w.filter(f => !seen.has(f.code))); } catch (err) {} }
+                }
+                setSheet(s => (s && s.type === 'photo' && s.result === r ? { ...s, matches: matches.slice(0, 8), searching: false } : s));
             } catch (err) {
                 setError(err.message || 'Could not read the photo.');
             } finally { setBusy(''); }
@@ -960,7 +1066,7 @@
                 sheetEl = e(ScanSheet, { onClose: close, onCode: lookupCode, onPhoto: takePhoto });
             } else if (sheet.type === 'photo') {
                 sheetEl = e(PhotoResultSheet, {
-                    result: sheet.result, matches: sheet.matches, searching: sheet.searching, onClose: close,
+                    result: sheet.result, kind: sheet.kind, query: sheet.query, matches: sheet.matches, searching: sheet.searching, onClose: close, onLabelPhoto: takePhoto,
                     onPick: (food) => setSheet({ type: 'amount', food }),
                     onUseEstimate: () => setSheet({ type: 'amount', food: sheet.food }),
                 });
@@ -1020,5 +1126,31 @@
         );
     }
 
-    window.CWANutrition = { FoodScreen, dayTotals, entryTotals, targetsFor, KEYS, LABEL, BASIC_FOODS, offToFood };
+    // Breakdown of one week's rating (tap a score in Calendar or Stats).
+    function WeekRatingDialog({ rating, onClose }) {
+        const r = rating;
+        const mon = new Date(r.mondayMs), sun = new Date(r.mondayMs); sun.setDate(sun.getDate() + 6);
+        const fmt = (d) => `${d.getDate()}.${d.getMonth() + 1}.`;
+        const row = (title, value, sub) => e('div', { className: 'flex items-start justify-between gap-3 py-2', style: { borderTop: '1px solid var(--surface-container-high)' } },
+            e('div', null, e('div', { className: 'text-sm font-bold' }, title), sub ? e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, sub) : null),
+            e('div', { className: 'text-sm font-bold flex-shrink-0' }, value));
+        return e('div', { className: 'fixed inset-0 z-[200] flex items-center justify-center px-6', onClick: onClose },
+            e('div', { className: 'absolute inset-0', style: { background: 'rgba(0,0,0,0.7)' } }),
+            e('div', { className: 'relative z-10 w-full max-w-xs rounded-2xl p-5', style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' }, onClick: (ev) => ev.stopPropagation() },
+                e('div', { className: 'text-xs font-bold uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, `Week ${fmt(mon)}–${fmt(sun)}${r.complete ? '' : ' · so far'}`),
+                e('div', { className: 'flex items-baseline gap-1 mt-1 mb-2' },
+                    e('span', { className: 'font-black', style: { fontSize: 44, lineHeight: 1, color: ratingColor(r.score) } }, r.score == null ? '—' : r.score.toFixed(1)),
+                    e('span', { className: 'text-base', style: { color: 'var(--on-surface-variant)' } }, '/ 10')),
+                row('Training', r.training ? `${Math.round(r.training.score * 100)} %` : '—',
+                    r.training ? `${r.training.done} of ${r.training.planned} planned workouts` + (r.training.sessions > r.training.planned ? ` (${r.training.sessions} done)` : '') : 'No workouts planned'),
+                row('Nutrition', r.nutrition ? `${Math.round(r.nutrition.score * 100)} %` : '—',
+                    r.nutrition ? `${r.nutrition.logged} of ${r.nutrition.days} days logged · avg ${fmtK(r.nutrition.avgKcal)} kcal` : 'No food logged'),
+                e('div', { className: 'text-[11px] leading-snug mt-2', style: { color: 'var(--outline)' } },
+                    'Score = average of the parts with data. Training: workouts done vs planned. Nutrition: each day scores on calories (±10 %), protein (≥90 %) and carbs/fat (±20 %) vs your targets; unlogged days count 0.'),
+                e('button', { onClick: onClose, className: 'w-full mt-4 py-3 rounded-xl text-base font-bold active:scale-95', style: ghostBtn }, 'Close')
+            )
+        );
+    }
+
+    window.CWANutrition = { FoodScreen, dayTotals, entryTotals, targetsFor, weekRating, weekStartOf, ratingColor, WeekRatingDialog, KEYS, LABEL, BASIC_FOODS, offToFood };
 })();
