@@ -1,0 +1,1006 @@
+// ============================================================================
+// CWA nutrition — the Food tab
+// ============================================================================
+// Diary of what you eat (per day), calorie + macro targets, Open Food Facts
+// barcode lookup and search, barcode scanning, food photos read by the AI
+// worker, and your own custom foods.
+//
+// Loaded before the main script in index.html. It only touches the main
+// script's globals (MIcon, TopAppBar, BottomNavBar, ConfirmDialog, dayKey,
+// fetchWithTimeout, compressImage, callFoodVision) inside functions, i.e. at
+// render time, and exposes window.CWANutrition.
+//
+// Data shapes (stored in Firebase under users/<id>/foodLog/<YYYY-MM-DD> and users/<id>/foods):
+//   nutrients n = { kcal, p, c, f, fib, sug, salt }  — per 100 g (or 100 ml)
+//   food  = { id?, name, brand, code, src: 'off'|'custom'|'basic'|'ai', unit: 'g'|'ml', n, serving: { g, label } | null }
+//   entry = { id, t (ms), meal, name, brand, code, src, foodId, g (amount), unit, n }
+//           totals = n * g / 100. A quick add stores its absolute values in n with g = 100.
+(function () {
+    'use strict';
+    const { useState, useEffect, useRef } = React;
+    const e = React.createElement;
+
+    const KEYS = ['kcal', 'p', 'c', 'f', 'fib', 'sug', 'salt'];
+    const LABEL = { kcal: 'Calories', p: 'Protein', c: 'Carbs', f: 'Fat', fib: 'Fibre', sug: 'Sugar', salt: 'Salt' };
+    const COLOR = { kcal: 'var(--primary-container)', p: 'var(--macro-p)', c: 'var(--macro-c)', f: 'var(--macro-f)', fib: 'var(--macro-fib)', sug: 'var(--macro-sug)', salt: 'var(--macro-salt)' };
+    const MEALS = [
+        { id: 'breakfast', label: 'Breakfast' },
+        { id: 'lunch', label: 'Lunch' },
+        { id: 'snack', label: 'Snack' },
+        { id: 'dinner', label: 'Dinner' },
+    ];
+    const MEAL_LABEL = Object.fromEntries(MEALS.map(m => [m.id, m.label]));
+    const PHOTO_DAILY_LIMIT = 30;
+    const BARCODE_POLYFILL = 'https://cdn.jsdelivr.net/npm/barcode-detector@3.2.2/dist/iife/ponyfill.js';
+
+    // ---------- small helpers ----------
+    const num = (v) => {
+        if (v == null || v === '') return null;
+        const x = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : Number(v);
+        return Number.isFinite(x) ? x : null;
+    };
+    const r1 = (x) => Math.round(x * 10) / 10;
+    // Display: kcal whole; grams 1 decimal under 10, whole above; salt 1–2 decimals.
+    const fmtK = (x) => Math.round(x || 0).toLocaleString('en-US');
+    const fmtG = (x) => { const v = x || 0; return v < 10 ? String(r1(v)) : String(Math.round(v)); };
+    const fmtSalt = (x) => { const v = x || 0; return v < 1 ? String(Math.round(v * 100) / 100) : String(r1(v)); };
+    const fmtVal = (k, x) => (k === 'kcal' ? fmtK(x) : k === 'salt' ? fmtSalt(x) : fmtG(x));
+    const newId = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const roundN = (n) => { const o = {}; KEYS.forEach(k => { const v = num(n && n[k]); if (v != null) o[k] = k === 'kcal' ? Math.round(v) : Math.round(v * 100) / 100; }); return o; };
+
+    function entryTotals(en) {
+        const f = (num(en.g) || 0) / 100, out = {};
+        KEYS.forEach(k => { out[k] = (num(en.n && en.n[k]) || 0) * f; });
+        return out;
+    }
+    function dayTotals(entries) {
+        const out = {}; KEYS.forEach(k => { out[k] = 0; });
+        (entries || []).forEach(en => { const t = entryTotals(en); KEYS.forEach(k => { out[k] += t[k]; }); });
+        return out;
+    }
+    // Missing protein/carbs/fat → kcal from the Atwater factors (fibre 2 kcal/g).
+    const kcalFrom = (n) => Math.round(4 * (num(n.p) || 0) + 4 * (num(n.c) || 0) + 9 * (num(n.f) || 0) + 2 * (num(n.fib) || 0));
+    function mealForTime(ts) {
+        const d = new Date(ts), h = d.getHours() + d.getMinutes() / 60;
+        if (h >= 4 && h < 10.5) return 'breakfast';
+        if (h >= 10.5 && h < 15) return 'lunch';
+        if (h >= 17.5 && h < 22) return 'dinner';
+        return 'snack';
+    }
+    const keyToDate = (k) => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d, 12, 0, 0, 0); };
+    const hhmm = (ts) => { const d = new Date(ts); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+    // A timestamp on day `key` at the given 'HH:MM' (default: the current time of day).
+    function timeOnDay(key, time) {
+        const d = keyToDate(key), now = new Date();
+        const [h, m] = (time || hhmm(now)).split(':').map(Number);
+        d.setHours(h || 0, m || 0, 0, 0);
+        return d.getTime();
+    }
+
+    // Daily targets. Anything not set in the profile is derived: kcal from goal + body weight,
+    // protein 1.8 g/kg, fat ~27 % of kcal, carbs the rest; fibre 30 g, sugar ≤ 50 g, salt ≤ 5 g.
+    function targetsFor(profile, metrics) {
+        const p = profile || {};
+        const latestW = (metrics || []).filter(m => m.weight != null).sort((a, b) => b.date - a.date)[0];
+        const weight = (latestW && latestW.weight) || p.targetWeight || 75;
+        const goalAdj = { bulk: 300, cut: -450, maintain: 0, recomp: -150 }[p.goal] || 0;
+        const auto = {};
+        const kcal = num(p.dailyKcal) || (auto.kcal = true, Math.round((weight * 31 + goalAdj) / 50) * 50);
+        const prot = num(p.proteinG) || (auto.p = true, Math.round(weight * (p.goal === 'cut' ? 2.0 : 1.8)));
+        const fat = num(p.fatG) || (auto.f = true, Math.round(kcal * 0.27 / 9));
+        const carbs = num(p.carbsG) || (auto.c = true, Math.max(0, Math.round((kcal - prot * 4 - fat * 9) / 4)));
+        return {
+            kcal, p: prot, c: carbs, f: fat,
+            fib: num(p.fibreG) || (auto.fib = true, 30),
+            sug: num(p.sugarMaxG) || (auto.sug = true, 50),
+            salt: num(p.saltMaxG) || (auto.salt = true, 5),
+            auto,
+        };
+    }
+
+    // ---------- basic foods (typical values per 100 g / 100 ml, EU-label style: carbs exclude fibre) ----------
+    // [Czech name, English name, kcal, protein, carbs, fat, fibre, sugar, salt, unit, serving g, serving label]
+    const BASIC = [
+        ['Kuřecí prsa (syrová)', 'Chicken breast, raw', 120, 22.5, 0, 2.6, 0, 0, 0.15],
+        ['Kuřecí prsa (pečená)', 'Chicken breast, cooked', 165, 31, 0, 3.6, 0, 0, 0.18],
+        ['Kuřecí stehno bez kůže (syrové)', 'Chicken thigh, skinless, raw', 121, 19.7, 0, 4.1, 0, 0, 0.2],
+        ['Krůtí prsa (syrová)', 'Turkey breast, raw', 114, 23.7, 0, 1.5, 0, 0, 0.15],
+        ['Hovězí mleté 10 % tuku (syrové)', 'Ground beef 10% fat, raw', 176, 20, 0, 10, 0, 0, 0.17],
+        ['Hovězí mleté 20 % tuku (syrové)', 'Ground beef 20% fat, raw', 254, 17.2, 0, 20, 0, 0, 0.17],
+        ['Vepřová panenka (syrová)', 'Pork tenderloin, raw', 120, 21, 0, 3.5, 0, 0, 0.13],
+        ['Losos (syrový)', 'Salmon, raw', 208, 20.4, 0, 13.4, 0, 0, 0.15],
+        ['Tuňák ve vlastní šťávě (scezený)', 'Tuna in water, drained', 116, 25.5, 0, 0.8, 0, 0, 0.85],
+        ['Treska (syrová)', 'Cod, raw', 82, 17.8, 0, 0.7, 0, 0, 0.15],
+        ['Šunka nejvyšší jakosti', 'Ham, premium', 110, 19, 1, 3.5, 0, 1, 2.2],
+        ['Párky', 'Frankfurters', 280, 12, 2, 25, 0, 1, 2.0, 'g', 50, '1 párek'],
+        ['Slanina (syrová)', 'Bacon, raw', 417, 13, 1.4, 42, 0, 0, 1.7],
+        ['Vejce', 'Egg, whole', 143, 12.6, 0.7, 9.5, 0, 0.4, 0.36, 'g', 55, '1 vejce'],
+        ['Vaječný bílek', 'Egg white', 52, 10.9, 0.7, 0.2, 0, 0.7, 0.42, 'g', 33, '1 bílek'],
+        ['Tvaroh polotučný', 'Quark, half-fat', 118, 15.5, 3.6, 4.5, 0, 3.6, 0.1],
+        ['Tvaroh odtučněný', 'Quark, low-fat', 70, 12.5, 4, 0.5, 0, 4, 0.1],
+        ['Skyr bílý', 'Skyr, plain', 63, 11, 4, 0.2, 0, 4, 0.1],
+        ['Řecký jogurt 0 %', 'Greek yogurt 0%', 59, 10.2, 3.6, 0.4, 0, 3.2, 0.09],
+        ['Bílý jogurt 3 %', 'Plain yogurt 3%', 61, 3.5, 4.7, 3.3, 0, 4.7, 0.11],
+        ['Cottage', 'Cottage cheese', 98, 11.1, 3.4, 4.3, 0, 2.7, 0.9],
+        ['Mléko polotučné 1,5 %', 'Milk 1.5%', 47, 3.4, 4.8, 1.5, 0, 4.8, 0.1, 'ml', 250, '1 sklenice'],
+        ['Mléko plnotučné 3,5 %', 'Milk 3.5%', 64, 3.3, 4.7, 3.5, 0, 4.7, 0.1, 'ml', 250, '1 sklenice'],
+        ['Kefír 1,5 %', 'Kefir 1.5%', 48, 3.4, 4.5, 1.5, 0, 4.5, 0.1, 'ml'],
+        ['Eidam 30 %', 'Edam 30%', 260, 29, 0.1, 16, 0, 0.1, 1.8, 'g', 20, '1 plátek'],
+        ['Eidam 45 %', 'Edam 45%', 340, 25.5, 0.1, 26.5, 0, 0.1, 1.7, 'g', 20, '1 plátek'],
+        ['Mozzarella', 'Mozzarella, fresh', 250, 18, 1, 19, 0, 1, 0.6, 'g', 125, '1 kulička'],
+        ['Parmazán', 'Parmesan', 390, 33, 0, 28, 0, 0, 1.6],
+        ['Syrovátkový protein', 'Whey protein powder', 390, 78, 7, 6, 0, 5, 0.5, 'g', 30, '1 odměrka'],
+        ['Máslo', 'Butter', 717, 0.9, 0.1, 81, 0, 0.1, 0.02, 'g', 10, '1 lžička'],
+        ['Olivový olej', 'Olive oil', 884, 0, 0, 100, 0, 0, 0, 'g', 10, '1 lžíce'],
+        ['Řepkový olej', 'Rapeseed oil', 884, 0, 0, 100, 0, 0, 0, 'g', 10, '1 lžíce'],
+        ['Ovesné vločky', 'Rolled oats', 370, 13, 59, 7, 10, 1, 0.01, 'g', 50, '1 porce'],
+        ['Rýže bílá (suchá)', 'White rice, dry', 350, 7, 78, 0.6, 1.3, 0.1, 0.01],
+        ['Rýže bílá (vařená)', 'White rice, cooked', 130, 2.7, 28, 0.3, 0.4, 0, 0],
+        ['Těstoviny (suché)', 'Pasta, dry', 359, 12.5, 71, 2, 3, 3.5, 0.01],
+        ['Těstoviny (vařené)', 'Pasta, cooked', 150, 5.5, 29.5, 0.9, 1.8, 0.6, 0],
+        ['Kuskus (suchý)', 'Couscous, dry', 376, 12.8, 72, 0.6, 5, 0.5, 0.02],
+        ['Quinoa (suchá)', 'Quinoa, dry', 368, 14.1, 57.2, 6.1, 7, 0, 0.01],
+        ['Pohanka (suchá)', 'Buckwheat, dry', 343, 13.3, 61.5, 3.4, 10, 0, 0],
+        ['Brambory (syrové)', 'Potatoes, raw', 75, 2, 15.5, 0.1, 2.1, 0.8, 0.01],
+        ['Brambory vařené', 'Potatoes, boiled', 85, 1.7, 18, 0.1, 1.8, 0.9, 0.01],
+        ['Batáty (syrové)', 'Sweet potato, raw', 86, 1.6, 17, 0.1, 3, 4.2, 0.14],
+        ['Chléb konzumní', 'Rye-wheat bread', 240, 8, 47, 1.5, 5, 1.5, 1.4, 'g', 50, '1 krajíc'],
+        ['Chléb celozrnný', 'Wholegrain bread', 240, 11, 39, 3.5, 7, 4, 1.1, 'g', 40, '1 krajíc'],
+        ['Rohlík', 'Bread roll (rohlík)', 285, 9.5, 55, 3, 2.5, 2, 1.4, 'g', 43, '1 rohlík'],
+        ['Knedlík houskový', 'Bread dumpling', 235, 7, 47, 2, 2, 2, 1.0, 'g', 40, '1 plátek'],
+        ['Tortilla pšeničná', 'Wheat tortilla', 310, 8.5, 50, 7.5, 3, 2.5, 1.3, 'g', 60, '1 tortilla'],
+        ['Rýžové chlebíčky', 'Rice cakes', 380, 8, 78, 3, 4, 0.4, 0.02, 'g', 8, '1 chlebíček'],
+        ['Kukuřičné lupínky', 'Corn flakes', 378, 7, 84, 0.9, 3, 8, 1.1],
+        ['Čočka (suchá)', 'Lentils, dry', 340, 25, 52, 1.1, 11, 2, 0.01],
+        ['Čočka (vařená)', 'Lentils, cooked', 110, 9, 13, 0.4, 7.9, 1.8, 0],
+        ['Cizrna (konzerva, scezená)', 'Chickpeas, canned, drained', 125, 7, 15, 2.6, 7.6, 0.3, 0.5],
+        ['Fazole červené (konzerva)', 'Red kidney beans, canned', 100, 7.5, 12.5, 0.5, 6.5, 1, 0.5],
+        ['Brokolice', 'Broccoli', 34, 2.8, 4, 0.4, 2.6, 1.7, 0.08],
+        ['Rajče', 'Tomato', 18, 0.9, 2.7, 0.2, 1.2, 2.6, 0.01],
+        ['Okurka', 'Cucumber', 15, 0.7, 2.9, 0.1, 0.5, 1.7, 0.01],
+        ['Paprika červená', 'Red bell pepper', 27, 1, 3.9, 0.3, 2.1, 4.2, 0.01],
+        ['Mrkev', 'Carrot', 38, 0.9, 6.8, 0.2, 2.8, 4.7, 0.17],
+        ['Špenát', 'Spinach', 23, 2.9, 1.4, 0.4, 2.2, 0.4, 0.2],
+        ['Ledový salát', 'Iceberg lettuce', 14, 0.9, 1.8, 0.1, 1.2, 2, 0.02],
+        ['Cibule', 'Onion', 39, 1.1, 7.6, 0.1, 1.7, 4.2, 0.01],
+        ['Žampiony', 'Mushrooms', 22, 3.1, 2.3, 0.3, 1, 2, 0.01],
+        ['Cuketa', 'Zucchini', 17, 1.2, 2.1, 0.3, 1, 2.5, 0.02],
+        ['Zelené fazolky', 'Green beans', 31, 1.8, 4.3, 0.2, 2.7, 3.3, 0.01],
+        ['Avokádo', 'Avocado', 160, 2, 1.9, 14.7, 6.7, 0.7, 0.02],
+        ['Banán', 'Banana', 89, 1.1, 20.2, 0.3, 2.6, 12.2, 0, 'g', 120, '1 banán'],
+        ['Jablko', 'Apple', 52, 0.3, 11.4, 0.2, 2.4, 10.4, 0, 'g', 180, '1 jablko'],
+        ['Pomeranč', 'Orange', 47, 0.9, 9.4, 0.1, 2.4, 9.4, 0, 'g', 150, '1 pomeranč'],
+        ['Hruška', 'Pear', 57, 0.4, 12.1, 0.1, 3.1, 9.8, 0, 'g', 170, '1 hruška'],
+        ['Jahody', 'Strawberries', 32, 0.7, 5.7, 0.3, 2, 4.9, 0],
+        ['Borůvky', 'Blueberries', 57, 0.7, 12.1, 0.3, 2.4, 10, 0],
+        ['Hroznové víno', 'Grapes', 70, 0.7, 17.2, 0.2, 0.9, 15.5, 0],
+        ['Kiwi', 'Kiwi', 61, 1.1, 11.7, 0.5, 3, 9, 0, 'g', 75, '1 kiwi'],
+        ['Rozinky', 'Raisins', 310, 3.1, 75.5, 0.5, 3.7, 59, 0.03],
+        ['Mandle', 'Almonds', 600, 21, 9, 50, 12.5, 4.4, 0],
+        ['Vlašské ořechy', 'Walnuts', 680, 15.2, 7, 65.2, 6.7, 2.6, 0],
+        ['Kešu', 'Cashews', 580, 18.2, 26.9, 43.9, 3.3, 5.9, 0.03],
+        ['Arašídy', 'Peanuts', 590, 25.8, 7.6, 49.2, 8.5, 4, 0.05],
+        ['Arašídové máslo', 'Peanut butter', 610, 26, 12, 50, 6, 4, 0, 'g', 15, '1 lžíce'],
+        ['Chia semínka', 'Chia seeds', 450, 17, 8, 31, 34, 0, 0],
+        ['Slunečnicová semínka', 'Sunflower seeds', 600, 20.8, 11.4, 51.5, 8.6, 2.6, 0],
+        ['Hořká čokoláda 70 %', 'Dark chocolate 70%', 570, 8, 33, 42, 11, 28, 0.02],
+        ['Mléčná čokoláda', 'Milk chocolate', 535, 7.6, 57, 30, 2.4, 52, 0.25],
+        ['Med', 'Honey', 304, 0.3, 82, 0, 0.2, 82, 0.01, 'g', 20, '1 lžíce'],
+        ['Cukr', 'Sugar', 400, 0, 100, 0, 0, 100, 0, 'g', 5, '1 lžička'],
+        ['Kečup', 'Ketchup', 102, 1.2, 23.2, 0.1, 0.5, 22.8, 1.8],
+        ['Bramborové lupínky', 'Potato chips', 536, 7, 50, 34, 4.5, 0.5, 1.4],
+        ['Coca-Cola', 'Coca-Cola', 42, 0, 10.6, 0, 0, 10.6, 0, 'ml', 330, '1 plechovka'],
+        ['Pomerančový džus', 'Orange juice', 45, 0.7, 10.4, 0.2, 0.2, 8.4, 0, 'ml', 250, '1 sklenice'],
+        ['Pivo 12°', 'Lager 12°', 43, 0.5, 3.6, 0, 0, 0, 0.01, 'ml', 500, '1 velké'],
+        ['Pivo 10°', 'Lager 10°', 35, 0.4, 3, 0, 0, 0, 0.01, 'ml', 500, '1 velké'],
+        ['Víno červené', 'Red wine', 85, 0.1, 2.6, 0, 0, 0.6, 0.01, 'ml', 200, '1 sklenka'],
+        ['Káva černá', 'Black coffee', 2, 0.1, 0, 0, 0, 0, 0, 'ml', 200, '1 šálek'],
+    ];
+    const BASIC_FOODS = BASIC.map((r, i) => ({
+        id: 'b' + i, name: r[0], alt: r[1], brand: '', code: '', src: 'basic', unit: r[9] || 'g',
+        n: { kcal: r[2], p: r[3], c: r[4], f: r[5], fib: r[6], sug: r[7], salt: r[8] },
+        serving: r[10] ? { g: r[10], label: r[11] } : null,
+    }));
+
+    // ---------- Open Food Facts ----------
+    const OFF_FIELDS = 'code,product_name,product_name_cs,product_name_en,generic_name,brands,quantity,serving_size,serving_quantity,nutriments';
+    function offToFood(p) {
+        if (!p) return null;
+        const nm = p.nutriments || {};
+        const g = (k) => num(nm[k + '_100g']);
+        let kcal = g('energy-kcal');
+        if (kcal == null) { const kj = g('energy-kj') != null ? g('energy-kj') : g('energy'); if (kj != null) kcal = kj / 4.184; }
+        let salt = g('salt');
+        if (salt == null && g('sodium') != null) salt = g('sodium') * 2.5;
+        const n = roundN({ kcal, p: g('proteins'), c: g('carbohydrates'), f: g('fat'), fib: g('fiber'), sug: g('sugars'), salt });
+        const name = String(p.product_name_cs || p.product_name || p.product_name_en || p.generic_name || '').trim();
+        const unit = /\d\s*(ml|cl|l)\b/i.test(String(p.quantity || '')) ? 'ml' : 'g';
+        const sq = num(p.serving_quantity);
+        return {
+            name: name || 'Unnamed product', brand: String(p.brands || '').split(',')[0].trim(), code: String(p.code || ''),
+            src: 'off', unit, n, serving: sq > 0 ? { g: sq, label: String(p.serving_size || `${sq} ${unit}`) } : null,
+            hasNutrition: n.kcal != null,
+        };
+    }
+    // Products looked up before stay on the phone (scanning the same yogurt again is instant/offline).
+    const OFF_CACHE = 'cwa-offcache';
+    const cacheGet = (code) => { try { return (JSON.parse(localStorage.getItem(OFF_CACHE) || '{}')[code] || {}).food || null; } catch (e) { return null; } };
+    function cachePut(food) {
+        try {
+            const c = JSON.parse(localStorage.getItem(OFF_CACHE) || '{}');
+            c[food.code] = { food, t: Date.now() };
+            const keys = Object.keys(c);
+            if (keys.length > 300) keys.sort((a, b) => c[a].t - c[b].t).slice(0, keys.length - 300).forEach(k => delete c[k]);
+            localStorage.setItem(OFF_CACHE, JSON.stringify(c));
+        } catch (e) {}
+    }
+    // → { found: true, food } | { found: false } ; throws when OFF can't be reached.
+    async function offLookup(code) {
+        const cached = cacheGet(code);
+        if (cached) return { found: true, food: cached };
+        const res = await fetchWithTimeout(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`, {}, 12000);
+        if (res.status === 404) return { found: false };
+        if (!res.ok) throw new Error(`Open Food Facts error (${res.status})`);
+        const data = await res.json();
+        if (!data || !data.product || (data.status !== 1 && data.status !== 'success')) return { found: false };
+        const food = offToFood({ code, ...data.product });
+        if (food.hasNutrition) cachePut(food);
+        return { found: true, food };
+    }
+    // Products sold in Czechia first (cz. host), topped up from the whole database.
+    const searchCache = {};
+    async function offSearch(query) {
+        const q = query.trim();
+        if (searchCache[q]) return searchCache[q];
+        const params = `search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&fields=${OFF_FIELDS}`;
+        const run = async (host) => {
+            const res = await fetchWithTimeout(`https://${host}/cgi/search.pl?${params}`, {}, 15000);
+            if (!res.ok) throw new Error(`Open Food Facts search error (${res.status})`);
+            const data = await res.json();
+            return (data.products || []).map(offToFood).filter(f => f && f.hasNutrition);
+        };
+        let out = await run('cz.openfoodfacts.org');
+        if (out.length < 6) {
+            try {
+                const seen = new Set(out.map(f => f.code));
+                out = out.concat((await run('world.openfoodfacts.org')).filter(f => !seen.has(f.code)));
+            } catch (err) { if (!out.length) throw err; }
+        }
+        out = out.slice(0, 30);
+        searchCache[q] = out;
+        return out;
+    }
+
+    // ---------- barcode detection (native on Android Chrome, ZXing polyfill elsewhere) ----------
+    let detectorPromise = null;
+    function loadScript(src) {
+        return new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = src; s.async = true; s.onload = resolve; s.onerror = () => reject(new Error('Scanner failed to load (offline?)'));
+            document.head.appendChild(s);
+        });
+    }
+    function getBarcodeDetector() {
+        if (!detectorPromise) {
+            detectorPromise = (async () => {
+                const formats = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
+                if ('BarcodeDetector' in window) {
+                    try {
+                        const sup = await window.BarcodeDetector.getSupportedFormats();
+                        const f = formats.filter(x => sup.includes(x));
+                        if (f.length) return new window.BarcodeDetector({ formats: f });
+                    } catch (err) {}
+                }
+                if (!window.BarcodeDetectionAPI) await loadScript(BARCODE_POLYFILL);
+                const api = window.BarcodeDetectionAPI;
+                if (!api || !api.BarcodeDetector) throw new Error('Scanner failed to load');
+                return new api.BarcodeDetector({ formats });
+            })().catch(err => { detectorPromise = null; throw err; });
+        }
+        return detectorPromise;
+    }
+
+    // ---------- shared UI bits ----------
+    const card = { background: 'var(--surface-container-high)' };
+    const label = (t) => e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, t);
+    const inputStyle = { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' };
+    const primaryBtn = { background: 'var(--primary-container)', color: 'var(--on-primary-container)' };
+    const ghostBtn = { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' };
+    const iconBtn = (icon, onClick, aria, extra) => e('button', {
+        onClick, 'aria-label': aria,
+        className: 'w-10 h-10 rounded-full flex items-center justify-center active:scale-90 flex-shrink-0',
+        style: Object.assign({}, ghostBtn, extra || {})
+    }, e(MIcon, { icon, style: { fontSize: '20px' } }));
+
+    function Sheet({ title, onClose, right, children, footer }) {
+        return e('div', { className: 'fixed inset-0 z-[160] flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' } },
+            e(TopAppBar, {
+                title,
+                leftAction: e('button', { onClick: onClose, 'aria-label': 'Close', className: 'flex items-center active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(MIcon, { icon: 'close', style: { fontSize: '24px' } })),
+                rightAction: right || null
+            }),
+            e('div', { className: 'flex-1 overflow-y-auto pt-20 px-4 pb-6' }, e('div', { className: 'max-w-lg mx-auto' }, children)),
+            footer ? e('div', { className: 'px-4 pt-2', style: { paddingBottom: 'max(env(safe-area-inset-bottom), 14px)', background: 'var(--void)' } }, e('div', { className: 'max-w-lg mx-auto' }, footer)) : null
+        );
+    }
+
+    function Ring({ size, stroke, value, max, children }) {
+        const r = (size - stroke) / 2, c = 2 * Math.PI * r;
+        const frac = max > 0 ? Math.min(value / max, 1) : 0;
+        const over = max > 0 ? Math.min(Math.max(value - max, 0) / max, 1) : 0;
+        const circle = (color, f) => e('circle', {
+            cx: size / 2, cy: size / 2, r, fill: 'none', stroke: color, strokeWidth: stroke, strokeLinecap: 'round',
+            strokeDasharray: c, strokeDashoffset: c * (1 - f), style: { transition: 'stroke-dashoffset .5s ease' }
+        });
+        return e('div', { style: { position: 'relative', width: size, height: size, flexShrink: 0 } },
+            e('svg', { width: size, height: size, viewBox: `0 0 ${size} ${size}`, style: { transform: 'rotate(-90deg)', display: 'block' } },
+                e('circle', { cx: size / 2, cy: size / 2, r, fill: 'none', stroke: 'var(--surface-container-highest)', strokeWidth: stroke }),
+                frac > 0 ? circle('var(--primary-container)', frac) : null,
+                over > 0 ? circle('var(--error)', over) : null
+            ),
+            e('div', { style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' } }, children)
+        );
+    }
+
+    // small: fibre / sugar / salt — label on its own line so three fit side by side at 320 px.
+    function Bar({ k, value, max, limit, small }) {
+        const frac = max > 0 ? Math.min(value / max, 1) : 0;
+        const bad = limit && value > max;
+        const val = e('span', { className: (small ? 'text-[11px]' : 'text-xs') + ' whitespace-nowrap', style: { color: bad ? 'var(--error)' : 'var(--on-surface-variant)', fontVariantNumeric: 'tabular-nums' } },
+            e('b', { style: { color: bad ? 'var(--error)' : 'var(--on-surface)' } }, fmtVal(k, value)), ` / ${fmtVal(k, max)} g`);
+        return e('div', { className: small ? 'min-w-0' : 'mb-2.5' },
+            small
+                ? e('div', { className: 'mb-1 leading-tight' },
+                    e('div', { className: 'text-[10px] uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, LABEL[k]), val)
+                : e('div', { className: 'flex items-baseline justify-between gap-2 mb-1' },
+                    e('span', { className: 'text-sm font-bold whitespace-nowrap', style: { color: 'var(--on-surface)' } }, LABEL[k]), val),
+            e('div', { className: 'rounded-full overflow-hidden', style: { height: small ? 4 : 7, background: 'var(--surface-container-highest)' } },
+                e('div', { className: 'h-full rounded-full', style: { width: (frac * 100) + '%', background: bad ? 'var(--error)' : COLOR[k], transition: 'width .5s ease' } }))
+        );
+    }
+
+    function DaySummary({ totals, targets, onEditTargets }) {
+        const left = targets.kcal - totals.kcal;
+        const narrow = useViewport().w < 370;
+        return e('button', { onClick: onEditTargets, 'aria-label': 'Edit daily targets', className: 'w-full text-left rounded-3xl p-4 active:scale-[0.99] transition-transform', style: card },
+            e('div', { className: 'flex items-center ' + (narrow ? 'gap-3' : 'gap-4') },
+                e(Ring, { size: narrow ? 104 : 128, stroke: narrow ? 9 : 11, value: totals.kcal, max: targets.kcal },
+                    e('div', { className: (narrow ? 'text-xl' : 'text-2xl') + ' font-black leading-none', style: { fontVariantNumeric: 'tabular-nums' } }, fmtK(totals.kcal)),
+                    e('div', { className: 'text-[11px] mt-1', style: { color: 'var(--on-surface-variant)' } }, `of ${fmtK(targets.kcal)} kcal`)
+                ),
+                e('div', { className: 'flex-1 min-w-0' },
+                    e('div', { className: 'flex items-baseline gap-1.5 mb-2' },
+                        e('span', { className: 'text-lg font-black', style: { color: left < 0 ? 'var(--error)' : 'var(--primary-container)', fontVariantNumeric: 'tabular-nums' } }, fmtK(Math.abs(left))),
+                        e('span', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, left < 0 ? 'kcal over' : 'kcal left')
+                    ),
+                    ['p', 'c', 'f'].map(k => e(Bar, { key: k, k, value: totals[k], max: targets[k] }))
+                )
+            ),
+            e('div', { className: 'grid grid-cols-3 gap-3 mt-3 pt-3', style: { borderTop: '1px solid var(--surface-container-highest)' } },
+                e(Bar, { k: 'fib', value: totals.fib, max: targets.fib, small: true }),
+                e(Bar, { k: 'sug', value: totals.sug, max: targets.sug, small: true, limit: true }),
+                e(Bar, { k: 'salt', value: totals.salt, max: targets.salt, small: true, limit: true })
+            )
+        );
+    }
+
+    const amountText = (en) => (en.src === 'quick' ? 'Quick add' : `${fmtG(en.g)} ${en.unit || 'g'}`);
+    function Timeline({ entries, onOpen }) {
+        if (!entries.length) {
+            return e('div', { className: 'text-center py-10' },
+                e(MIcon, { icon: 'restaurant', style: { fontSize: '44px', color: 'var(--surface-container-highest)' } }),
+                e('div', { className: 'text-base font-bold mt-3' }, 'Nothing logged yet'),
+                e('div', { className: 'text-sm mt-1', style: { color: 'var(--on-surface-variant)' } }, 'Scan a barcode, snap a label, or search for a food.')
+            );
+        }
+        const rows = [];
+        let lastMeal = null;
+        entries.forEach((en, i) => {
+            if (en.meal !== lastMeal) {
+                lastMeal = en.meal;
+                const mealKcal = entries.filter(x => x.meal === en.meal).reduce((s, x) => s + entryTotals(x).kcal, 0);
+                rows.push(e('div', { key: 'h' + i, className: 'flex items-center gap-2 pl-[54px] pt-3 pb-1' },
+                    e('span', { className: 'text-[11px] font-black uppercase tracking-widest', style: { color: 'var(--primary-fixed-dim)' } }, MEAL_LABEL[en.meal] || 'Meal'),
+                    e('span', { className: 'text-[11px]', style: { color: 'var(--outline)' } }, `${fmtK(mealKcal)} kcal`)
+                ));
+            }
+            const t = entryTotals(en);
+            const last = i === entries.length - 1;
+            rows.push(e('button', { key: en.id, onClick: () => onOpen(en), className: 'w-full flex items-stretch text-left active:opacity-70' },
+                e('div', { className: 'w-[42px] pt-3 text-[11px] flex-shrink-0', style: { color: 'var(--outline)', fontVariantNumeric: 'tabular-nums' } }, hhmm(en.t)),
+                e('div', { className: 'w-3 flex flex-col items-center flex-shrink-0 mr-2.5' },
+                    e('div', { style: { width: 9, height: 9, borderRadius: '50%', marginTop: 16, background: 'var(--primary-container)', flexShrink: 0 } }),
+                    last ? null : e('div', { style: { width: 2, flex: 1, background: 'var(--surface-container-highest)', marginTop: 3 } })
+                ),
+                e('div', { className: 'flex-1 min-w-0 py-2.5', style: { borderBottom: last ? 'none' : '1px solid var(--surface-container-high)' } },
+                    e('div', { className: 'flex items-start gap-2' },
+                        e('div', { className: 'flex-1 min-w-0' },
+                            e('div', { className: 'text-sm font-bold truncate' }, en.name),
+                            e('div', { className: 'text-xs truncate', style: { color: 'var(--on-surface-variant)' } }, [amountText(en), en.brand].filter(Boolean).join(' · '))
+                        ),
+                        e('div', { className: 'text-sm font-black flex-shrink-0', style: { fontVariantNumeric: 'tabular-nums' } }, fmtK(t.kcal), e('span', { className: 'text-[10px] font-bold ml-0.5', style: { color: 'var(--on-surface-variant)' } }, 'kcal'))
+                    ),
+                    e('div', { className: 'flex gap-3 mt-1 text-[11px]', style: { fontVariantNumeric: 'tabular-nums' } },
+                        ['p', 'c', 'f'].map(k => e('span', { key: k, className: 'flex items-center gap-1', style: { color: 'var(--on-surface-variant)' } },
+                            e('span', { style: { width: 6, height: 6, borderRadius: '50%', background: COLOR[k], display: 'inline-block' } }),
+                            `${k.toUpperCase()} ${fmtG(t[k])}`))
+                    )
+                )
+            ));
+        });
+        return e('div', null, rows);
+    }
+
+    // ---------- forms ----------
+    function NumField({ label: lbl, value, onChange, unit, placeholder, big }) {
+        return e('label', { className: 'block' },
+            e('div', { className: 'text-[11px] uppercase tracking-widest mb-1', style: { color: 'var(--on-surface-variant)' } }, lbl),
+            e('div', { className: 'flex items-center gap-2' },
+                e('input', {
+                    type: 'text', inputMode: 'decimal', value: value == null ? '' : String(value), placeholder: placeholder || '',
+                    onChange: (ev) => onChange(ev.target.value.replace(/[^0-9.,]/g, '')),
+                    className: (big ? 'text-2xl font-black p-3' : 'text-base p-2.5') + ' w-full min-w-0 rounded-xl outline-none cwa-input',
+                    style: inputStyle
+                }),
+                unit ? e('span', { className: 'text-sm flex-shrink-0', style: { color: 'var(--on-surface-variant)' } }, unit) : null
+            )
+        );
+    }
+    function TextField({ label: lbl, value, onChange, placeholder, inputMode }) {
+        return e('label', { className: 'block' },
+            e('div', { className: 'text-[11px] uppercase tracking-widest mb-1', style: { color: 'var(--on-surface-variant)' } }, lbl),
+            e('input', { type: 'text', value: value || '', placeholder: placeholder || '', inputMode, onChange: (ev) => onChange(ev.target.value), className: 'w-full min-w-0 p-2.5 rounded-xl outline-none text-base cwa-input', style: inputStyle })
+        );
+    }
+    function Segmented({ options, value, onChange }) {
+        return e('div', { className: 'grid gap-1.5', style: { gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` } },
+            options.map(o => e('button', {
+                key: o.id, onClick: () => onChange(o.id),
+                className: 'py-2 rounded-xl text-xs font-bold active:scale-95 truncate px-1',
+                style: value === o.id ? primaryBtn : { background: 'var(--surface-container-highest)', color: 'var(--on-surface-variant)' }
+            }, o.label)));
+    }
+    // Per-100 g editor used by custom foods and quick add.
+    function NutrientFields({ n, setN, unit, absolute }) {
+        const set = (k) => (v) => setN({ ...n, [k]: v });
+        const per = absolute ? '' : ` / 100 ${unit || 'g'}`;
+        return e('div', { className: 'space-y-3' },
+            e(NumField, { label: 'Calories' + per, value: n.kcal, onChange: set('kcal'), unit: 'kcal', placeholder: n.p || n.c || n.f ? String(kcalFrom({ p: num(n.p), c: num(n.c), f: num(n.f), fib: num(n.fib) })) : '' }),
+            e('div', { className: 'grid grid-cols-3 gap-2' },
+                e(NumField, { label: 'Protein', value: n.p, onChange: set('p'), unit: 'g' }),
+                e(NumField, { label: 'Carbs', value: n.c, onChange: set('c'), unit: 'g' }),
+                e(NumField, { label: 'Fat', value: n.f, onChange: set('f'), unit: 'g' })
+            ),
+            e('div', { className: 'grid grid-cols-3 gap-2' },
+                e(NumField, { label: 'of it sugar', value: n.sug, onChange: set('sug'), unit: 'g' }),
+                e(NumField, { label: 'Fibre', value: n.fib, onChange: set('fib'), unit: 'g' }),
+                e(NumField, { label: 'Salt', value: n.salt, onChange: set('salt'), unit: 'g' })
+            )
+        );
+    }
+    const parseN = (n) => { const o = {}; KEYS.forEach(k => { const v = num(n[k]); if (v != null) o[k] = v; }); if (o.kcal == null && (o.p != null || o.c != null || o.f != null)) o.kcal = kcalFrom(o); return roundN(o); };
+    const nToStrings = (n) => { const o = {}; KEYS.forEach(k => { if (n && n[k] != null) o[k] = String(n[k]); }); return o; };
+
+    // Amount + meal + time for a food (new entry), or edit an existing entry.
+    function AmountSheet({ food, entry, date, onSave, onDelete, onClose, onEditFood }) {
+        const initialG = entry ? entry.g : (food.lastG || (food.serving && food.serving.g) || 100);
+        const [g, setG] = useState(String(initialG));
+        const [time, setTime] = useState(entry ? hhmm(entry.t) : hhmm(Date.now()));
+        const [meal, setMeal] = useState(entry ? entry.meal : mealForTime(timeOnDay(date)));
+        const unit = (entry ? entry.unit : food.unit) || 'g';
+        const n = (entry ? entry.n : food.n) || {};
+        const grams = num(g) || 0;
+        const t = entryTotals({ g: grams, n });
+        const chips = [];
+        if (food.serving && food.serving.g) chips.push({ g: food.serving.g, label: food.serving.label || `${food.serving.g} ${unit}` });
+        [50, 100, 150, 200, 250].forEach(v => { if (!chips.some(c => c.g === v)) chips.push({ g: v, label: `${v} ${unit}` }); });
+        const save = () => { if (grams > 0) onSave({ g: Math.round(grams * 10) / 10, meal, t: timeOnDay(date, time) }); };
+        return e(Sheet, {
+            title: entry ? 'EDIT' : 'ADD', onClose,
+            footer: e('div', { className: 'flex gap-2' },
+                entry ? e('button', { onClick: onDelete, 'aria-label': 'Delete entry', className: 'w-14 rounded-2xl flex items-center justify-center active:scale-95', style: { background: 'var(--error-container)', color: 'var(--on-error-container)' } }, e(MIcon, { icon: 'delete', style: { fontSize: '22px' } })) : null,
+                e('button', { onClick: save, disabled: !(grams > 0), className: 'flex-1 py-4 rounded-2xl text-base font-black active:scale-95', style: Object.assign({}, primaryBtn, { opacity: grams > 0 ? 1 : 0.5 }) }, entry ? 'Save' : `Add ${fmtK(t.kcal)} kcal`)
+            )
+        },
+            e('div', { className: 'mb-4' },
+                e('div', { className: 'text-xl font-black leading-tight' }, (entry || food).name),
+                e('div', { className: 'text-sm mt-0.5', style: { color: 'var(--on-surface-variant)' } }, [(entry || food).brand, food.alt].filter(Boolean).join(' · ') || ({ off: 'Open Food Facts', custom: 'My food', basic: 'Typical values', ai: 'AI estimate' }[(entry || food).src] || '')),
+                e('div', { className: 'text-xs mt-2', style: { color: 'var(--outline)' } }, `Per 100 ${unit}: ${fmtK(n.kcal)} kcal · P ${fmtG(n.p)} · C ${fmtG(n.c)} · F ${fmtG(n.f)}`),
+                onEditFood ? e('button', { onClick: onEditFood, className: 'text-xs font-bold mt-2 active:opacity-60', style: { color: 'var(--primary-fixed-dim)' } }, 'Edit food values') : null
+            ),
+            e(NumField, { label: 'Amount', value: g, onChange: setG, unit, big: true }),
+            e('div', { className: 'flex gap-1.5 flex-wrap mt-2 mb-5' }, chips.map(c => e('button', {
+                key: c.label, onClick: () => setG(String(c.g)),
+                className: 'px-3 py-1.5 rounded-full text-xs font-bold active:scale-95',
+                style: Number(g) === c.g ? primaryBtn : ghostBtn
+            }, c.label))),
+            label('Meal'),
+            e(Segmented, { options: MEALS, value: meal, onChange: setMeal }),
+            e('div', { className: 'flex items-center gap-3 mt-4' },
+                e('div', { className: 'text-[11px] uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Time'),
+                e('input', { type: 'time', value: time, onChange: (ev) => setTime(ev.target.value || time), className: 'p-2 rounded-xl outline-none text-base', style: Object.assign({ colorScheme: 'dark' }, inputStyle) })
+            ),
+            e('div', { className: 'rounded-2xl p-4 mt-5', style: card },
+                e('div', { className: 'flex items-baseline gap-1.5' },
+                    e('span', { className: 'text-3xl font-black', style: { fontVariantNumeric: 'tabular-nums' } }, fmtK(t.kcal)),
+                    e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'kcal')
+                ),
+                e('div', { className: 'grid grid-cols-3 gap-2 mt-3' }, ['p', 'c', 'f'].map(k => e('div', { key: k },
+                    e('div', { className: 'text-[11px] uppercase tracking-widest', style: { color: COLOR[k] } }, LABEL[k]),
+                    e('div', { className: 'text-lg font-black', style: { fontVariantNumeric: 'tabular-nums' } }, fmtG(t[k]), e('span', { className: 'text-xs ml-0.5' }, 'g'))
+                ))),
+                e('div', { className: 'flex gap-4 mt-2 text-xs', style: { color: 'var(--on-surface-variant)', fontVariantNumeric: 'tabular-nums' } },
+                    e('span', null, `Fibre ${fmtG(t.fib)} g`), e('span', null, `Sugar ${fmtG(t.sug)} g`), e('span', null, `Salt ${fmtSalt(t.salt)} g`))
+            )
+        );
+    }
+
+    // Create / edit a custom food (also used to check AI-read labels and unknown barcodes).
+    function FoodEditor({ initial, note, onSave, onDelete, onClose }) {
+        const init = initial || {};
+        const [name, setName] = useState(init.name || '');
+        const [brand, setBrand] = useState(init.brand || '');
+        const [code, setCode] = useState(init.code || '');
+        const [unit, setUnit] = useState(init.unit || 'g');
+        const [n, setN] = useState(nToStrings(init.n));
+        const [servingG, setServingG] = useState(init.serving && init.serving.g ? String(init.serving.g) : '');
+        const [servingLabel, setServingLabel] = useState(init.serving && init.serving.label ? init.serving.label : '');
+        const parsed = parseN(n);
+        const ok = name.trim() && parsed.kcal != null;
+        const save = () => {
+            if (!ok) return;
+            const sg = num(servingG);
+            onSave({
+                id: init.src === 'custom' && init.id ? init.id : newId('f'), name: name.trim(), brand: brand.trim(), code: code.replace(/\D/g, ''),
+                src: 'custom', unit, n: parsed, serving: sg > 0 ? { g: sg, label: servingLabel.trim() || `${sg} ${unit}` } : null,
+                updated: Date.now(),
+            });
+        };
+        return e(Sheet, {
+            title: init.src === 'custom' && init.id ? 'EDIT FOOD' : 'NEW FOOD', onClose,
+            footer: e('div', { className: 'flex gap-2' },
+                onDelete ? e('button', { onClick: onDelete, 'aria-label': 'Delete food', className: 'w-14 rounded-2xl flex items-center justify-center active:scale-95', style: { background: 'var(--error-container)', color: 'var(--on-error-container)' } }, e(MIcon, { icon: 'delete', style: { fontSize: '22px' } })) : null,
+                e('button', { onClick: save, disabled: !ok, className: 'flex-1 py-4 rounded-2xl text-base font-black active:scale-95', style: Object.assign({}, primaryBtn, { opacity: ok ? 1 : 0.5 }) }, 'Save food')
+            )
+        },
+            note ? e('div', { className: 'flex gap-2 items-start rounded-2xl p-3 mb-4 text-sm', style: { background: 'rgba(209,252,0,0.08)', color: 'var(--on-surface)' } },
+                e(MIcon, { icon: 'auto_awesome', style: { fontSize: '18px', color: 'var(--primary-fixed-dim)', marginTop: 1 } }), e('span', null, note)) : null,
+            e('div', { className: 'space-y-3' },
+                e(TextField, { label: 'Name', value: name, onChange: setName, placeholder: 'e.g. Protein pudding' }),
+                e('div', { className: 'grid grid-cols-2 gap-2' },
+                    e(TextField, { label: 'Brand', value: brand, onChange: setBrand }),
+                    e(TextField, { label: 'Barcode', value: code, onChange: setCode, inputMode: 'numeric' })
+                ),
+                e('div', null, label('Values per'), e(Segmented, { options: [{ id: 'g', label: '100 g' }, { id: 'ml', label: '100 ml' }], value: unit, onChange: setUnit })),
+                e(NutrientFields, { n, setN, unit }),
+                e('div', { className: 'grid grid-cols-2 gap-2' },
+                    e(NumField, { label: 'Serving size', value: servingG, onChange: setServingG, unit }),
+                    e(TextField, { label: 'Serving name', value: servingLabel, onChange: setServingLabel, placeholder: 'e.g. 1 cup' })
+                )
+            )
+        );
+    }
+
+    function QuickAdd({ date, onSave, onClose }) {
+        const [name, setName] = useState('');
+        const [n, setN] = useState({});
+        const [meal, setMeal] = useState(mealForTime(timeOnDay(date)));
+        const [time, setTime] = useState(hhmm(Date.now()));
+        const parsed = parseN(n);
+        const ok = parsed.kcal != null && parsed.kcal > 0;
+        return e(Sheet, {
+            title: 'QUICK ADD', onClose,
+            footer: e('button', { onClick: () => ok && onSave({ name: name.trim() || 'Quick add', n: parsed, meal, t: timeOnDay(date, time) }), disabled: !ok, className: 'w-full py-4 rounded-2xl text-base font-black active:scale-95', style: Object.assign({}, primaryBtn, { opacity: ok ? 1 : 0.5 }) }, ok ? `Add ${fmtK(parsed.kcal)} kcal` : 'Add')
+        },
+            e('div', { className: 'space-y-3' },
+                e(TextField, { label: 'What was it (optional)', value: name, onChange: setName, placeholder: 'e.g. Lunch at work' }),
+                e(NutrientFields, { n, setN, absolute: true }),
+                label('Meal'),
+                e(Segmented, { options: MEALS, value: meal, onChange: setMeal }),
+                e('div', { className: 'flex items-center gap-3' },
+                    e('div', { className: 'text-[11px] uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Time'),
+                    e('input', { type: 'time', value: time, onChange: (ev) => setTime(ev.target.value || time), className: 'p-2 rounded-xl outline-none text-base', style: Object.assign({ colorScheme: 'dark' }, inputStyle) })
+                )
+            )
+        );
+    }
+
+    function TargetsSheet({ profile, metrics, onSave, onClose }) {
+        const auto = targetsFor({ goal: profile.goal, targetWeight: profile.targetWeight }, metrics);
+        const fields = [['dailyKcal', 'kcal', 'Calories', 'kcal'], ['proteinG', 'p', 'Protein', 'g'], ['carbsG', 'c', 'Carbs', 'g'], ['fatG', 'f', 'Fat', 'g'], ['fibreG', 'fib', 'Fibre (at least)', 'g'], ['sugarMaxG', 'sug', 'Sugar (at most)', 'g'], ['saltMaxG', 'salt', 'Salt (at most)', 'g']];
+        const [vals, setVals] = useState(() => Object.fromEntries(fields.map(([pk]) => [pk, profile[pk] != null ? String(profile[pk]) : ''])));
+        const save = () => onSave(Object.fromEntries(fields.map(([pk]) => [pk, num(vals[pk])])));
+        return e(Sheet, {
+            title: 'DAILY TARGETS', onClose,
+            footer: e('div', { className: 'flex gap-2' },
+                e('button', { onClick: () => setVals(Object.fromEntries(fields.map(([pk]) => [pk, '']))), className: 'px-4 rounded-2xl text-sm font-bold active:scale-95', style: ghostBtn }, 'All automatic'),
+                e('button', { onClick: save, className: 'flex-1 py-4 rounded-2xl text-base font-black active:scale-95', style: primaryBtn }, 'Save')
+            )
+        },
+            e('div', { className: 'text-sm mb-4', style: { color: 'var(--on-surface-variant)' } }, 'Leave a field empty to use the automatic value (shown in grey), based on your goal and latest weight. Calories are shared with Goals.'),
+            e('div', { className: 'grid grid-cols-2 gap-3' }, fields.map(([pk, k, lbl, unit]) => e(NumField, {
+                key: pk, label: lbl, unit, value: vals[pk], placeholder: String(auto[k]),
+                onChange: (v) => setVals(prev => ({ ...prev, [pk]: v }))
+            })))
+        );
+    }
+
+    // Camera barcode scanner with manual entry and a photo fallback.
+    function ScanSheet({ onCode, onPhoto, onClose }) {
+        const videoRef = useRef(null);
+        const trackRef = useRef(null);
+        const [status, setStatus] = useState('Starting camera…');
+        const [torch, setTorch] = useState(null); // null = not supported
+        const [manual, setManual] = useState('');
+        useEffect(() => {
+            let stream = null, stopped = false, timer = null;
+            (async () => {
+                try {
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('No camera access in this browser — type the barcode below.');
+                    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+                    if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
+                    const v = videoRef.current;
+                    v.srcObject = stream;
+                    try { await v.play(); } catch (err) {}
+                    const track = stream.getVideoTracks()[0];
+                    trackRef.current = track;
+                    try { if (track.getCapabilities && track.getCapabilities().torch) setTorch(false); } catch (err) {}
+                    setStatus('Loading scanner…');
+                    const detector = await getBarcodeDetector();
+                    if (stopped) return;
+                    setStatus('Point the camera at a barcode');
+                    const tick = async () => {
+                        if (stopped) return;
+                        try {
+                            if (v.readyState >= 2) {
+                                const found = await detector.detect(v);
+                                const hit = (found || []).find(c => /^\d{8,14}$/.test(c.rawValue || ''));
+                                if (hit && !stopped) {
+                                    stopped = true;
+                                    try { navigator.vibrate && navigator.vibrate(50); } catch (err) {}
+                                    onCode(hit.rawValue);
+                                    return;
+                                }
+                            }
+                        } catch (err) {}
+                        timer = setTimeout(tick, 150);
+                    };
+                    tick();
+                } catch (err) {
+                    setStatus(err && err.name === 'NotAllowedError' ? 'Camera permission denied — type the barcode below or take a photo.' : ((err && err.message) || 'Camera unavailable'));
+                }
+            })();
+            return () => { stopped = true; clearTimeout(timer); if (stream) stream.getTracks().forEach(t => t.stop()); };
+        }, []);
+        const toggleTorch = async () => {
+            const tr = trackRef.current;
+            if (!tr) return;
+            try { await tr.applyConstraints({ advanced: [{ torch: !torch }] }); setTorch(!torch); } catch (err) {}
+        };
+        const submitManual = () => { const c = manual.replace(/\D/g, ''); if (c.length >= 8) onCode(c); };
+        return e('div', { className: 'fixed inset-0 z-[170] flex flex-col', style: { background: '#000', color: '#fff' } },
+            e('div', { className: 'relative flex-1 overflow-hidden' },
+                e('video', { ref: videoRef, playsInline: true, muted: true, autoPlay: true, className: 'absolute inset-0 w-full h-full', style: { objectFit: 'cover' } }),
+                e('div', { className: 'absolute inset-0 flex items-center justify-center pointer-events-none' },
+                    e('div', { style: { width: '78%', maxWidth: 360, aspectRatio: '1.7', border: '3px solid var(--primary-container)', borderRadius: 18, boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)' } })
+                ),
+                e('div', { className: 'absolute top-0 left-0 right-0 flex items-center justify-between px-4', style: { paddingTop: 'max(env(safe-area-inset-top), 14px)' } },
+                    iconBtn('close', onClose, 'Close scanner', { background: 'rgba(0,0,0,0.55)', color: '#fff' }),
+                    torch == null ? e('div') : iconBtn(torch ? 'flash_off' : 'flash_on', toggleTorch, 'Toggle flashlight', { background: 'rgba(0,0,0,0.55)', color: '#fff' })
+                ),
+                e('div', { className: 'absolute left-0 right-0 text-center text-sm font-bold px-6', style: { bottom: 18, textShadow: '0 1px 4px #000' } }, status)
+            ),
+            e('div', { className: 'px-4 pt-3', style: { background: 'var(--void)', paddingBottom: 'max(env(safe-area-inset-bottom), 14px)' } },
+                e('div', { className: 'max-w-lg mx-auto flex gap-2' },
+                    e('input', {
+                        type: 'text', inputMode: 'numeric', value: manual, placeholder: 'Type barcode', 'aria-label': 'Barcode number',
+                        onChange: (ev) => setManual(ev.target.value.replace(/\D/g, '')), onKeyDown: (ev) => { if (ev.key === 'Enter') submitManual(); },
+                        className: 'flex-1 min-w-0 p-3 rounded-xl outline-none text-base cwa-input', style: inputStyle
+                    }),
+                    e('button', { onClick: submitManual, 'aria-label': 'Look up barcode', className: 'px-4 rounded-xl font-black active:scale-95', style: primaryBtn }, e(MIcon, { icon: 'search', style: { fontSize: '22px' } })),
+                    e('button', { onClick: onPhoto, 'aria-label': 'Take a photo instead', className: 'px-4 rounded-xl font-black active:scale-95', style: ghostBtn }, e(MIcon, { icon: 'photo_camera', style: { fontSize: '22px' } }))
+                )
+            )
+        );
+    }
+
+    function FoodRow({ food, onClick, right }) {
+        const sub = [food.brand, food.alt, `${fmtK(food.n.kcal)} kcal / 100 ${food.unit || 'g'}`].filter(Boolean).join(' · ');
+        const badge = { off: 'OFF', custom: 'MY', basic: '', ai: 'AI' }[food.src] || '';
+        return e('div', { className: 'flex items-center gap-2' },
+            e('button', { onClick, className: 'flex-1 min-w-0 flex items-center gap-3 py-2.5 text-left active:opacity-70' },
+                e('div', { className: 'flex-1 min-w-0' },
+                    e('div', { className: 'text-sm font-bold truncate' }, food.name),
+                    e('div', { className: 'text-xs truncate', style: { color: 'var(--on-surface-variant)' } }, sub)
+                ),
+                badge ? e('span', { className: 'text-[10px] font-black px-1.5 py-0.5 rounded flex-shrink-0', style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface-variant)' } }, badge) : null
+            ),
+            right || null
+        );
+    }
+
+    // Unique foods from the diary, newest first (the "Recent" list).
+    function recentFoods(log, customFoods) {
+        const days = Object.keys(log || {}).sort().reverse().slice(0, 60);
+        const seen = new Set(), out = [];
+        for (const d of days) {
+            const list = (log[d] || []).slice().sort((a, b) => b.t - a.t);
+            for (const en of list) {
+                if (en.src === 'quick') continue;
+                const key = en.foodId || en.code || fold(en.name + '|' + en.brand);
+                if (seen.has(key)) continue;
+                seen.add(key);
+                const live = en.foodId && customFoods[en.foodId];
+                out.push(live ? { ...live, lastG: en.g } : { id: en.foodId || '', name: en.name, brand: en.brand, code: en.code, src: en.src, unit: en.unit, n: en.n, serving: null, lastG: en.g });
+                if (out.length >= 40) return out;
+            }
+        }
+        return out;
+    }
+
+    function AddSheet({ app, date, onPick, onScan, onPhoto, onQuick, onNewFood, onEditFood, onClose }) {
+        const [q, setQ] = useState('');
+        const [online, setOnline] = useState({ q: '', state: 'idle', items: [], error: '' });
+        const custom = Object.values(app.foods || {});
+        const recent = recentFoods(app.log, app.foods || {});
+        const fq = fold(q.trim());
+        const tokens = fq.split(/\s+/).filter(Boolean);
+        const matches = (f) => { const h = fold([f.name, f.brand, f.alt, f.code].join(' ')); return tokens.every(t => h.includes(t)); };
+        const local = fq ? [...custom, ...recent.filter(r => r.src !== 'custom'), ...BASIC_FOODS].filter(matches).filter((f, i, a) => a.findIndex(x => (x.code && x.code === f.code) || (x.name === f.name && x.brand === f.brand)) === i).slice(0, 25) : [];
+        // Online search: after a pause in typing (Open Food Facts allows ~10 searches/min).
+        useEffect(() => {
+            const query = q.trim();
+            if (query.length < 3 || /^\d{8,14}$/.test(query)) return;
+            const t = setTimeout(async () => {
+                setOnline({ q: query, state: 'loading', items: [], error: '' });
+                try { const items = await offSearch(query); setOnline(o => o.q === query ? { q: query, state: 'done', items, error: '' } : o); }
+                catch (err) { setOnline(o => o.q === query ? { q: query, state: 'error', items: [], error: navigator.onLine === false ? 'You are offline.' : "Couldn't reach Open Food Facts." } : o); }
+            }, 900);
+            return () => clearTimeout(t);
+        }, [q]);
+        const isCode = /^\d{8,14}$/.test(q.trim());
+        const section = (title, items, opts) => items.length ? e('div', { className: 'mt-4' },
+            label(title),
+            e('div', { className: 'rounded-2xl px-3', style: card }, items.map((f, i) => e('div', { key: (f.id || f.code || f.name) + i, style: { borderBottom: i < items.length - 1 ? '1px solid var(--surface-container-highest)' : 'none' } },
+                e(FoodRow, { food: f, onClick: () => onPick(f), right: opts && opts.editable && f.src === 'custom' ? iconBtn('edit', () => onEditFood(f), 'Edit ' + f.name, { width: 34, height: 34, background: 'transparent', color: 'var(--on-surface-variant)' }) : null })
+            )))) : null;
+        const action = (icon, text, onClick) => e('button', { onClick, className: 'flex flex-col items-center justify-center gap-1 py-3 rounded-2xl active:scale-95', style: card },
+            e(MIcon, { icon, style: { fontSize: '22px', color: 'var(--primary-container)' } }), e('span', { className: 'text-[11px] font-bold' }, text));
+        return e(Sheet, { title: 'ADD FOOD', onClose },
+            e('div', { className: 'flex items-center gap-2 rounded-2xl px-3', style: inputStyle },
+                e(MIcon, { icon: 'search', style: { fontSize: '20px', color: 'var(--on-surface-variant)' } }),
+                e('input', { type: 'text', enterKeyHint: 'search', value: q, autoFocus: true, placeholder: 'Search foods or type a barcode', onChange: (ev) => setQ(ev.target.value), className: 'flex-1 min-w-0 py-3 bg-transparent outline-none text-base cwa-input', style: { color: 'var(--on-surface)' } }),
+                q ? e('button', { onClick: () => setQ(''), 'aria-label': 'Clear search', className: 'active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(MIcon, { icon: 'close', style: { fontSize: '20px' } })) : null
+            ),
+            e('div', { className: 'grid grid-cols-4 gap-2 mt-3' },
+                action('barcode_scanner', 'Scan', onScan),
+                action('photo_camera', 'Photo', onPhoto),
+                action('bolt', 'Quick add', onQuick),
+                action('add', 'New food', () => onNewFood({}))
+            ),
+            isCode ? e('button', { onClick: () => app.lookupCode(q.trim()), className: 'w-full mt-4 py-3 rounded-2xl text-base font-bold active:scale-95', style: primaryBtn }, `Look up barcode ${q.trim()}`) : null,
+            fq ? null : section('Recent', recent.slice(0, 15)),
+            fq ? null : section('My foods', custom.sort((a, b) => a.name.localeCompare(b.name)), { editable: true }),
+            fq ? section('Matches', local, { editable: true }) : null,
+            fq && !isCode ? e('div', { className: 'mt-4' },
+                label('Open Food Facts'),
+                q.trim().length < 3 ? e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, 'Type at least 3 letters.')
+                    : online.q !== q.trim() || online.state === 'loading' ? e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'Searching…')
+                        : online.state === 'error' ? e('div', { className: 'text-sm', style: { color: 'var(--error)' } }, online.error)
+                            : online.items.length ? e('div', { className: 'rounded-2xl px-3', style: card }, online.items.map((f, i) => e('div', { key: f.code + i, style: { borderBottom: i < online.items.length - 1 ? '1px solid var(--surface-container-highest)' : 'none' } }, e(FoodRow, { food: f, onClick: () => onPick(f) }))))
+                                : e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, 'No products found. Try fewer words, or add it as a new food.')
+            ) : null,
+            !fq && !recent.length && !custom.length ? e('div', { className: 'text-sm mt-6 text-center', style: { color: 'var(--outline)' } }, 'Search above — your recent foods will show up here.') : null,
+            e('div', { className: 'text-[10px] mt-6 text-center', style: { color: 'var(--outline)' } }, 'Product data: Open Food Facts (ODbL). Basic foods: typical values.')
+        );
+    }
+
+    // After a food photo: what the AI saw + matching products + "use the estimate".
+    function PhotoResultSheet({ result, matches, searching, onPick, onUseEstimate, onClose }) {
+        const n = result.per100 || {};
+        return e(Sheet, { title: 'PHOTO', onClose },
+            e('div', { className: 'rounded-2xl p-4', style: card },
+                e('div', { className: 'flex items-center gap-2 text-xs font-bold uppercase tracking-widest', style: { color: 'var(--primary-fixed-dim)' } }, e(MIcon, { icon: 'auto_awesome', style: { fontSize: '16px' } }), 'AI sees'),
+                e('div', { className: 'text-lg font-black mt-1' }, [result.brand, result.name].filter(Boolean).join(' ') || 'Unknown food'),
+                n.kcal != null ? e('div', { className: 'text-sm mt-1', style: { color: 'var(--on-surface-variant)' } }, `Estimate per 100 ${result.unit === 'ml' ? 'ml' : 'g'}: ${fmtK(n.kcal)} kcal · P ${fmtG(n.protein)} · C ${fmtG(n.carbs)} · F ${fmtG(n.fat)}` + (result.servingGrams ? ` · portion ~${Math.round(result.servingGrams)} g` : '')) : null,
+                n.kcal != null ? e('button', { onClick: onUseEstimate, className: 'w-full mt-3 py-3 rounded-xl text-base font-black active:scale-95', style: primaryBtn }, 'Use AI estimate') : null
+            ),
+            e('div', { className: 'mt-4' },
+                label('Matching products'),
+                searching ? e('div', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'Searching Open Food Facts…')
+                    : matches.length ? e('div', { className: 'rounded-2xl px-3', style: card }, matches.map((f, i) => e('div', { key: f.code + i, style: { borderBottom: i < matches.length - 1 ? '1px solid var(--surface-container-highest)' : 'none' } }, e(FoodRow, { food: f, onClick: () => onPick(f) }))))
+                        : e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, 'No matching products found.')
+            )
+        );
+    }
+
+    // AI photo result → food object (per100 uses long names; ours are short keys).
+    function aiToFood(r) {
+        const p = r.per100 || {};
+        const sg = num(r.servingGrams);
+        return {
+            name: String(r.name || 'Food').trim(), brand: String(r.brand || '').trim(), code: String(r.barcode || '').replace(/\D/g, ''),
+            src: 'ai', unit: r.unit === 'ml' ? 'ml' : 'g',
+            n: roundN({ kcal: p.kcal, p: p.protein, c: p.carbs, f: p.fat, fib: p.fibre != null ? p.fibre : p.fiber, sug: p.sugar, salt: p.salt }),
+            serving: sg > 0 ? { g: Math.round(sg), label: `portion ~${Math.round(sg)} g` } : null,
+        };
+    }
+
+    // ---------- the screen ----------
+    function FoodScreen({ app }) {
+        const date = app.date;
+        const today = dayKey(Date.now());
+        const entries = (app.log[date] || []).slice().sort((a, b) => a.t - b.t);
+        const totals = dayTotals(entries);
+        const targets = targetsFor(app.profile, app.metrics);
+        const [sheet, setSheet] = useState(null); // { type, ... }
+        const [busy, setBusy] = useState('');
+        const [error, setError] = useState('');
+        const photoInput = useRef(null);
+
+        const shiftDay = (delta) => { const d = keyToDate(date); d.setDate(d.getDate() + delta); app.setDate(dayKey(d.getTime())); };
+        const dateLabel = date === today ? 'Today' : date === dayKey(Date.now() - 86400000) ? 'Yesterday'
+            : keyToDate(date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+
+        const addEntry = (food, { g, meal, t }) => {
+            const entry = { id: newId('e'), t, meal, name: food.name, brand: food.brand || '', code: food.code || '', src: food.src || 'custom', foodId: food.src === 'custom' ? (food.id || '') : '', g, unit: food.unit || 'g', n: food.n };
+            app.saveDay(date, entries.concat(entry).sort((a, b) => a.t - b.t));
+            app.toast(`Added ${fmtK(entryTotals(entry).kcal)} kcal`);
+            setSheet(null);
+        };
+        const updateEntry = (entry, changes) => {
+            app.saveDay(date, entries.map(x => (x.id === entry.id ? { ...x, ...changes } : x)).sort((a, b) => a.t - b.t));
+            setSheet(null);
+        };
+        const deleteEntry = (entry) => { app.saveDay(date, entries.filter(x => x.id !== entry.id)); setSheet(null); app.toast('Removed'); };
+        const saveFood = (food) => { app.setFoods(prev => ({ ...prev, [food.id]: food })); return food; };
+        const deleteFood = (food) => { app.setFoods(prev => { const next = { ...prev }; delete next[food.id]; return next; }); };
+
+        // Barcode → your foods, then Open Food Facts; unknown → photo of the label or manual entry.
+        const lookupCode = async (code) => {
+            setSheet(null); setError('');
+            const mine = Object.values(app.foods || {}).find(f => f.code === code);
+            if (mine) { setSheet({ type: 'amount', food: mine }); return; }
+            setBusy('Looking up ' + code + '…');
+            try {
+                const r = await offLookup(code);
+                if (r.found && r.food.hasNutrition) setSheet({ type: 'amount', food: r.food });
+                else setSheet({ type: 'missing', code, name: r.found ? r.food.name : '', brand: r.found ? r.food.brand : '' });
+            } catch (err) {
+                setSheet({ type: 'missing', code, offline: true });
+            } finally { setBusy(''); }
+        };
+
+        const photoCount = () => { try { return parseInt(localStorage.getItem('cwa-photoai-' + today) || '0', 10); } catch (err) { return 0; } };
+        const takePhoto = () => {
+            setError('');
+            if (!app.aiEnabled) { setError('The AI service is not configured.'); return; }
+            if (photoCount() >= PHOTO_DAILY_LIMIT) { setError(`Daily photo limit reached (${PHOTO_DAILY_LIMIT}). Resets tomorrow.`); return; }
+            setSheet(null);
+            if (photoInput.current) photoInput.current.click();
+        };
+        const onPhotoFile = async (file) => {
+            if (!file) return;
+            setBusy('Reading photo…'); setError('');
+            try {
+                const image = await compressImage(file, 1280, 0.85);
+                const r = await callFoodVision(image, app.user);
+                try { localStorage.setItem('cwa-photoai-' + today, String(photoCount() + 1)); } catch (err) {}
+                const food = aiToFood(r);
+                // 1) A readable barcode in the photo → the real product data.
+                if (food.code.length >= 8) {
+                    try {
+                        const mine = Object.values(app.foods || {}).find(f => f.code === food.code);
+                        if (mine) { setSheet({ type: 'amount', food: mine }); return; }
+                        const hit = await offLookup(food.code);
+                        if (hit.found && hit.food.hasNutrition) { setSheet({ type: 'amount', food: hit.food }); return; }
+                    } catch (err) {}
+                }
+                // 2) A nutrition table → check the numbers, save as your food.
+                if (r.source === 'label' && food.n.kcal != null) {
+                    setSheet({ type: 'editor', food, note: 'Read by AI from the label — check the numbers, then save. It becomes one of your foods.', thenAdd: true });
+                    return;
+                }
+                // 3) A product or a plate → matching products + the AI's estimate.
+                setSheet({ type: 'photo', result: r, food, matches: [], searching: true });
+                const q = [food.brand, food.name].filter(Boolean).join(' ');
+                let matches = [];
+                try { if (q.length >= 3) matches = (await offSearch(q)).slice(0, 8); } catch (err) {}
+                setSheet(s => (s && s.type === 'photo' && s.result === r ? { ...s, matches, searching: false } : s));
+            } catch (err) {
+                setError(err.message || 'Could not read the photo.');
+            } finally { setBusy(''); }
+        };
+
+        app = { ...app, lookupCode };
+        let sheetEl = null;
+        if (sheet) {
+            const close = () => setSheet(null);
+            if (sheet.type === 'add') {
+                sheetEl = e(AddSheet, {
+                    app, date, onClose: close,
+                    onPick: (food) => setSheet({ type: 'amount', food }),
+                    onScan: () => setSheet({ type: 'scan' }),
+                    onPhoto: takePhoto,
+                    onQuick: () => setSheet({ type: 'quick' }),
+                    onNewFood: (food) => setSheet({ type: 'editor', food, thenAdd: true }),
+                    onEditFood: (food) => setSheet({ type: 'editor', food, back: 'add' }),
+                });
+            } else if (sheet.type === 'amount') {
+                const en = sheet.entry;
+                const food = sheet.food || {};
+                const editable = (food.src === 'custom' && food.id) ? food : (en && en.foodId && app.foods[en.foodId]) || null;
+                sheetEl = e(AmountSheet, {
+                    key: (en && en.id) || food.code || food.name, food, entry: en, date, onClose: close,
+                    onSave: (v) => (en ? updateEntry(en, v) : addEntry(food, v)),
+                    onDelete: en ? () => deleteEntry(en) : null,
+                    onEditFood: editable ? () => setSheet({ type: 'editor', food: editable, back: en ? null : 'amount' }) : (food.src === 'ai' ? () => setSheet({ type: 'editor', food, thenAdd: true, note: 'AI estimate — adjust the numbers, then save as your food.' }) : null),
+                });
+            } else if (sheet.type === 'editor') {
+                const f = sheet.food || {};
+                sheetEl = e(FoodEditor, {
+                    key: f.id || f.code || 'new', initial: f, note: sheet.note, onClose: close,
+                    onDelete: f.src === 'custom' && f.id && app.foods[f.id] ? () => app.confirm({ title: 'Delete food?', message: `"${f.name}" will be removed from your foods. Logged entries stay.`, confirmLabel: 'Delete', onConfirm: () => { deleteFood(f); setSheet(null); } }) : null,
+                    onSave: (food) => { saveFood(food); app.toast('Food saved'); setSheet(sheet.thenAdd || sheet.back === 'amount' ? { type: 'amount', food } : sheet.back === 'add' ? { type: 'add' } : null); },
+                });
+            } else if (sheet.type === 'quick') {
+                sheetEl = e(QuickAdd, { date, onClose: close, onSave: (v) => addEntry({ name: v.name, src: 'quick', unit: 'g', n: v.n }, { g: 100, meal: v.meal, t: v.t }) });
+            } else if (sheet.type === 'targets') {
+                sheetEl = e(TargetsSheet, { profile: app.profile, metrics: app.metrics, onClose: close, onSave: (vals) => { app.setProfileFields(vals); setSheet(null); app.toast('Targets saved'); } });
+            } else if (sheet.type === 'scan') {
+                sheetEl = e(ScanSheet, { onClose: close, onCode: lookupCode, onPhoto: takePhoto });
+            } else if (sheet.type === 'photo') {
+                sheetEl = e(PhotoResultSheet, {
+                    result: sheet.result, matches: sheet.matches, searching: sheet.searching, onClose: close,
+                    onPick: (food) => setSheet({ type: 'amount', food }),
+                    onUseEstimate: () => setSheet({ type: 'amount', food: sheet.food }),
+                });
+            } else if (sheet.type === 'missing') {
+                sheetEl = e(Sheet, { title: 'NOT FOUND', onClose: close },
+                    e('div', { className: 'text-center py-4' },
+                        e(MIcon, { icon: sheet.offline ? 'cloud_off' : 'barcode_scanner', style: { fontSize: '44px', color: 'var(--on-surface-variant)' } }),
+                        e('div', { className: 'text-lg font-black mt-3' }, sheet.offline ? "Couldn't reach Open Food Facts" : sheet.name ? 'No nutrition data for this product' : 'Product not in Open Food Facts'),
+                        e('div', { className: 'text-sm mt-1', style: { color: 'var(--on-surface-variant)' } }, [sheet.brand, sheet.name].filter(Boolean).join(' ') || `Barcode ${sheet.code}`)
+                    ),
+                    e('div', { className: 'space-y-2 mt-4' },
+                        e('button', { onClick: takePhoto, className: 'w-full py-4 rounded-2xl text-base font-black flex items-center justify-center gap-2 active:scale-95', style: primaryBtn }, e(MIcon, { icon: 'photo_camera', style: { fontSize: '20px' } }), 'Photo of the nutrition label'),
+                        e('button', { onClick: () => setSheet({ type: 'editor', food: { code: sheet.code, name: sheet.name, brand: sheet.brand }, thenAdd: true }), className: 'w-full py-4 rounded-2xl text-base font-bold active:scale-95', style: ghostBtn }, 'Enter values myself'),
+                        sheet.offline ? e('button', { onClick: () => lookupCode(sheet.code), className: 'w-full py-3 rounded-2xl text-base font-bold active:scale-95', style: ghostBtn }, 'Try again') : null
+                    )
+                );
+            }
+        }
+
+        return e('div', { className: 'min-h-screen flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' } },
+            e(TopAppBar, { title: 'FOOD', rightAction: app.profileBtn }),
+            e('div', { className: 'flex-1 pt-20 px-4 pb-28 overflow-y-auto' },
+                e('div', { className: 'max-w-lg mx-auto' },
+                    e('div', { className: 'flex items-center justify-between mb-3' },
+                        iconBtn('chevron_left', () => shiftDay(-1), 'Previous day'),
+                        e('button', { onClick: () => app.setDate(today), className: 'text-lg font-black active:opacity-70 px-3' }, dateLabel),
+                        iconBtn('chevron_right', () => shiftDay(1), 'Next day')
+                    ),
+                    e(DaySummary, { totals, targets, onEditTargets: () => setSheet({ type: 'targets' }) }),
+                    e('div', { className: 'grid grid-cols-3 gap-2 mt-3' },
+                        e('button', { onClick: () => setSheet({ type: 'add' }), className: 'py-3.5 rounded-2xl text-base font-black flex items-center justify-center gap-1.5 active:scale-95', style: primaryBtn }, e(MIcon, { icon: 'add', style: { fontSize: '20px' } }), 'Add'),
+                        e('button', { onClick: () => setSheet({ type: 'scan' }), className: 'py-3.5 rounded-2xl text-base font-bold flex items-center justify-center gap-1.5 active:scale-95', style: ghostBtn }, e(MIcon, { icon: 'barcode_scanner', style: { fontSize: '20px' } }), 'Scan'),
+                        e('button', { onClick: takePhoto, className: 'py-3.5 rounded-2xl text-base font-bold flex items-center justify-center gap-1.5 active:scale-95', style: ghostBtn }, e(MIcon, { icon: 'photo_camera', style: { fontSize: '20px' } }), 'Photo')
+                    ),
+                    error ? e('div', { className: 'mt-3 rounded-xl px-3 py-2 text-sm', style: { background: 'rgba(255,115,81,0.12)', color: 'var(--error)' } }, error) : null,
+                    e('div', { className: 'mt-4' }, e(Timeline, { entries, onOpen: (en) => setSheet({ type: 'amount', entry: en, food: { ...en, serving: en.foodId && app.foods[en.foodId] ? app.foods[en.foodId].serving : null } }) }))
+                )
+            ),
+            e('input', { ref: photoInput, type: 'file', accept: 'image/*', capture: 'environment', className: 'hidden', onChange: (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; onPhotoFile(f); } }),
+            sheetEl,
+            busy ? e('div', { className: 'fixed inset-0 z-[180] flex flex-col items-center justify-center gap-3', style: { background: 'rgba(0,0,0,0.75)', color: '#fff' } },
+                e('div', { className: 'cwa-spin', style: { width: 36, height: 36, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.2)', borderTopColor: 'var(--primary-container)' } }),
+                e('div', { className: 'text-sm font-bold' }, busy)) : null,
+            app.toastText ? e('div', { className: 'fixed left-1/2 -translate-x-1/2 z-[190] px-4 py-2 rounded-xl text-sm font-bold', style: { bottom: 'max(env(safe-area-inset-bottom), 90px)', background: 'var(--primary-container)', color: 'var(--on-primary-container)', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' } }, app.toastText) : null,
+            app.confirmEl || null,
+            e(BottomNavBar, { activeTab: 'food', onTabChange: app.onTabChange })
+        );
+    }
+
+    window.CWANutrition = { FoodScreen, dayTotals, entryTotals, targetsFor, KEYS, LABEL, BASIC_FOODS, offToFood };
+})();

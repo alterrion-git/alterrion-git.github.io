@@ -89,7 +89,17 @@
             --error: #ff7351;
             --error-container: #b92902;
             --on-error-container: #ffd2c8;
+            /* Nutrition: macro colours (rings, bars, timeline) */
+            --macro-p: #ff7a6b;
+            --macro-c: #ffb547;
+            --macro-f: #5cb8ff;
+            --macro-fib: #7ed69a;
+            --macro-sug: #ff8fc8;
+            --macro-salt: #b9c2cc;
         }
+        .cwa-input::placeholder { color: var(--outline); opacity: 1; }
+        @keyframes cwa-spin { to { transform: rotate(360deg); } }
+        .cwa-spin { animation: cwa-spin 0.9s linear infinite; }
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -245,9 +255,12 @@
 </head>
 <body>
     <div id="root"></div>
+    <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
+         script below, which renders it; keep ?v= in sync with APP_VERSION. -->
+    <script src="js/nutrition.js?v=3.15.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.14.0';
+        const APP_VERSION = '3.15.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -453,15 +466,62 @@
         // Reads a DB path. { ok: true, data } on a real answer (data is null when the path is
         // empty); { ok: false } when the cloud couldn't be reached/read — callers must not
         // treat that as "no data" (e.g. by creating a fresh record over the real one).
-        async function cloudRead(path, ms = 10000) {
+        // `params` is an extra query string (e.g. a range filter); `authQ` lets a caller that
+        // fires many reads at once fetch the token a single time (see cloudAuthQuery).
+        async function cloudRead(path, ms = 10000, params = '', authQ) {
             if (!cloudEnabled()) return { ok: false };
             try {
-                let q = '';
-                if (fbAuthEnabled()) { const t = await fbValidToken(); if (!t) return { ok: false }; q = `?auth=${t}`; }
-                const res = await fetchWithTimeout(`${FIREBASE_DB_URL}/${path}.json${q}`, {}, ms);
+                const a = authQ !== undefined ? authQ : await cloudAuthQuery();
+                if (a === null) return { ok: false };
+                const qs = [a, params].filter(Boolean).join('&');
+                const res = await fetchWithTimeout(`${FIREBASE_DB_URL}/${path}.json${qs ? '?' + qs : ''}`, {}, ms);
                 if (!res.ok) return { ok: false };
                 return { ok: true, data: await res.json() };
             } catch (err) { console.error('Cloud get error:', err); return { ok: false }; }
+        }
+        // '' when no auth is needed, 'auth=<token>' when signed in, null when the token
+        // isn't available (signed out / offline) — reads must then fail, not run anonymously.
+        async function cloudAuthQuery() {
+            if (!fbAuthEnabled()) return '';
+            const t = await fbValidToken();
+            return t ? `auth=${t}` : null;
+        }
+
+        // The user record minus old food-diary days. The food log grows every day, so instead
+        // of one GET of users/<id> (which would download all of it on every launch) the known
+        // fields are read in parallel and the log only for the last FOOD_LOG_RECENT_DAYS.
+        // Older days come from this device's copy or loadFoodRange (calendar / date browsing).
+        const USER_FIELDS = ['email', 'createdAt', 'passwordHash', 'workouts', 'history', 'profile', 'metrics', 'recaps', 'chat', 'aiUsage', 'foods'];
+        const FOOD_LOG_RECENT_DAYS = 62;
+        function foodRangeParams(startKey, endKey) {
+            return 'orderBy=' + encodeURIComponent('"$key"')
+                + '&startAt=' + encodeURIComponent(JSON.stringify(startKey))
+                + (endKey ? '&endAt=' + encodeURIComponent(JSON.stringify(endKey)) : '');
+        }
+        async function cloudReadUser(user, ms = 10000) {
+            if (!cloudEnabled()) return { ok: false };
+            const a = await cloudAuthQuery();
+            if (a === null) return { ok: false };
+            const base = 'users/' + user;
+            const since = dayKey(Date.now() - FOOD_LOG_RECENT_DAYS * DAY_MS);
+            const res = await Promise.all([
+                ...USER_FIELDS.map(f => cloudRead(base + '/' + f, ms, '', a)),
+                cloudRead(base + '/foodLog', ms, foodRangeParams(since), a),
+            ]);
+            if (res.some(r => !r.ok)) return { ok: false };
+            const data = {};
+            let any = false;
+            USER_FIELDS.forEach((f, i) => { if (res[i].data != null) { data[f] = res[i].data; any = true; } });
+            const log = res[USER_FIELDS.length].data;
+            if (log && typeof log === 'object' && Object.keys(log).length) { data.foodLog = log; any = true; }
+            if (!any) return { ok: true, data: null };
+            data.foodLogSince = since;
+            return { ok: true, data };
+        }
+        // Food-diary days in [startKey, endKey] from the cloud: { ok, data: { 'YYYY-MM-DD': [...] } }.
+        async function cloudReadFoodRange(user, startKey, endKey) {
+            const r = await cloudRead('users/' + user + '/foodLog', 10000, foodRangeParams(startKey, endKey));
+            return r.ok ? { ok: true, data: (r.data && typeof r.data === 'object') ? r.data : {} } : { ok: false };
         }
         async function cloudGet(path) {
             const r = await cloudRead(path);
@@ -501,6 +561,51 @@
             if (!unsyncedGet(user).includes(field)) return cloudValue;
             try { const raw = localStorage.getItem('cwa-' + field + '-' + user); if (raw != null) return JSON.parse(raw); } catch (e) {}
             return cloudValue;
+        }
+
+        // --- Food diary: local copy + merge with the cloud (see cloudReadUser) ---
+        // Local: 'cwa-foodLog-<user>' = { 'YYYY-MM-DD': [entries] } (every day logged on this device).
+        // Cloud: users/<user>/foodLog/<YYYY-MM-DD> = [entries], written one day at a time.
+        // Unsynced days are tracked as 'foodLog/<day>' in unsyncedMark.
+        function readLocalFoodLog(user) {
+            try { const v = JSON.parse(localStorage.getItem('cwa-foodLog-' + user) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; }
+        }
+        function writeLocalFoodLog(user, log) {
+            try { localStorage.setItem('cwa-foodLog-' + user, JSON.stringify(log)); } catch (e) {}
+        }
+        // cloudLog: days read from the cloud (undefined = no cloud read happened). since: the
+        // first day that read covered (days from `since` on are authoritative in the cloud, so a
+        // day deleted on another device disappears here too); older local days are kept.
+        // Days changed here but never uploaded keep the local version.
+        function mergeFoodLog(user, cloudLog, since) {
+            const local = readLocalFoodLog(user);
+            if (cloudLog === undefined) return local;
+            const out = {};
+            Object.keys(local).forEach(d => { if (!since || d < since) out[d] = local[d]; });
+            Object.keys(cloudLog || {}).forEach(d => { if (Array.isArray(cloudLog[d]) && cloudLog[d].length) out[d] = cloudLog[d]; });
+            unsyncedGet(user).forEach(f => {
+                if (!f.startsWith('foodLog/')) return;
+                const d = f.slice(8);
+                if (local[d] && local[d].length) out[d] = local[d]; else delete out[d];
+            });
+            return out;
+        }
+
+        // Food photo → { name, brand, barcode, unit, source, per100: {...}, servingGrams } via the
+        // AI worker (proxy/worker.js, task 'food-photo').
+        async function callFoodVision(image, user) {
+            const res = await fetchWithTimeout(LLM_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task: 'food-photo', image, user: user || '' })
+            }, 45000);
+            let data = {};
+            try { data = await res.json(); } catch (err) {}
+            // An AI worker deployed before food photos existed answers "Empty prompt".
+            const outdated = 'The AI worker needs updating to read food photos (redeploy proxy/worker.js).';
+            if (!res.ok) throw new Error(data && data.error === 'Empty prompt' ? outdated : ((data && data.error) || `AI service error (${res.status})`));
+            if (!data.food) throw new Error(data.text ? outdated : 'No food found in the photo.');
+            return data.food;
         }
 
         // ============================================
@@ -853,7 +958,7 @@
         // Icons render by codepoint from the self-hosted subset font (fonts/material-symbols.woff2),
         // so a missing font shows nothing instead of the icon's name as text. New icon? Add it to
         // tools/build-icons.py, rebuild, and paste the printed ICON_CP here.
-        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","delete":"e872","delete_sweep":"e16c","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","fitness_center":"eb43","flag":"e153","forum":"e0bf","history":"e28e","info":"e88e","local_fire_department":"ea05","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
+        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","bolt":"ea0b","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","content_copy":"e14d","delete":"e872","delete_sweep":"e16c","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","fitness_center":"eb43","flag":"e153","flash_off":"e3e6","flash_on":"e3e7","forum":"e0bf","history":"e28e","info":"e88e","local_fire_department":"ea05","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","tune":"e429","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
         const MIcon = ({ icon, fill = false, className = '', style = {} }) => e('span', {
             className: `material-symbols-outlined ${className}`,
             'aria-hidden': true,
@@ -930,6 +1035,7 @@
             const tabs = [
                 { id: 'calendar', icon: 'event_repeat', label: 'Plan' },
                 { id: 'workout', icon: 'fitness_center', label: 'Workout' },
+                { id: 'food', icon: 'restaurant', label: 'Food' },
                 { id: 'month', icon: 'calendar_month', label: 'Calendar' },
                 { id: 'stats', icon: 'bar_chart', label: 'Stats' },
             ];
@@ -1243,13 +1349,19 @@
             const [pendingMigration, setPendingMigration] = useState(null);
             const [expandedHistoryIdx, setExpandedHistoryIdx] = useState(null);
             // Progress-tracking state
-            const DEFAULT_PROFILE = { displayName: '', goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null, notes: '' };
+            // proteinG..saltMaxG: daily nutrition targets; null = automatic (see CWANutrition.targetsFor).
+            const DEFAULT_PROFILE = { displayName: '', goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null, notes: '', proteinG: null, carbsG: null, fatG: null, fibreG: null, sugarMaxG: null, saltMaxG: null };
             const PROFILE_NOTES_MAX = 800;
             const [profile, setProfile] = useState(DEFAULT_PROFILE);
             const [metrics, setMetrics] = useState([]); // [{ date, weight, kcal, sleep, steps, note }]
             const [recaps, setRecaps] = useState([]);   // legacy one-shot recaps (kept for old data)
             const [chat, setChat] = useState([]);       // [{ role:'user'|'assistant', content, ts }]
             const [aiUsage, setAiUsage] = useState({ date: '', count: 0 }); // per-day AI message counter (synced)
+            // Nutrition (js/nutrition.js): diary per day, custom foods, the day shown in the Food tab.
+            const [foodLog, setFoodLog] = useState({});   // { 'YYYY-MM-DD': [entry] }
+            const [foods, setFoods] = useState({});       // custom foods { id: food }
+            const [foodDate, setFoodDate] = useState(() => dayKey(Date.now()));
+            const foodRangesRef = useRef(new Set());      // older diary ranges already fetched
             const [progressSub, setProgressSub] = useState('hub'); // hub | goals | metrics | photos | chat | settings
             const [photos, setPhotos] = useState([]);   // loaded from IndexedDB (local only)
             const [aiBusy, setAiBusy] = useState(false);
@@ -1285,7 +1397,7 @@
             // cache instead of wiping the view; only create a fresh record for a truly new uid.
             const loadFbUser = async (u) => {
                 const uid = u.uid;
-                const read = await cloudRead('users/' + uid);
+                const read = await cloudReadUser(uid);
                 let userData = read.ok ? read.data : null;
                 if (!userData) {
                     const localW = localStorage.getItem('cwa-workouts-' + uid);
@@ -1447,6 +1559,8 @@
                 setRecaps([]);
                 setChat([]);
                 setAiUsage({ date: '', count: 0 });
+                setFoodLog({});
+                setFoods({});
                 setPhotos([]);
                 setProgressSub('hub');
                 setView('login');
@@ -1508,6 +1622,70 @@
                 setRecaps(pick('recaps', []) || []);
                 setChat(pick('chat', []) || []);
                 setAiUsage(pick('aiUsage', { date: '', count: 0 }) || { date: '', count: 0 });
+                setFoods(pick('foods', {}) || {});
+                // cloudReadUser marks how far back its diary read went (foodLogSince); a record
+                // without it (offline fallback, legacy full read) leaves the local days alone.
+                const cloudLog = src && src.foodLogSince ? (src.foodLog || {}) : (src ? src.foodLog : undefined);
+                const log = mergeFoodLog(uname, cloudLog, src && src.foodLogSince);
+                writeLocalFoodLog(uname, log);
+                setFoodLog(log);
+                foodRangesRef.current = new Set();
+                setFoodDate(dayKey(Date.now()));
+            };
+
+            // --- Food diary saving: local immediately, cloud one day per write, serialized so a
+            // slow earlier write can't land after a newer one (same idea as syncToCloud). ---
+            const foodSyncRef = useRef({ pending: {}, running: false });
+            const queueFoodWrite = (uname, day, entries) => {
+                unsyncedMark(uname, 'foodLog/' + day, false); // cleared once the cloud has it
+                if (!cloudEnabled()) return;
+                const q = foodSyncRef.current;
+                q.pending[uname + '|' + day] = { uname, day, entries };
+                if (q.running) return;
+                q.running = true;
+                (async () => {
+                    let k;
+                    while ((k = Object.keys(q.pending)[0])) {
+                        const job = q.pending[k];
+                        delete q.pending[k];
+                        const ok = await cloudSet('users/' + job.uname + '/foodLog/' + job.day, job.entries && job.entries.length ? job.entries : null);
+                        if (ok && !q.pending[k]) unsyncedMark(job.uname, 'foodLog/' + job.day, true);
+                    }
+                    q.running = false;
+                })();
+            };
+            const saveFoodDay = (day, entries) => {
+                if (!currentUser) return;
+                const uname = currentUser.username;
+                setFoodLog(prev => {
+                    const next = { ...prev };
+                    if (entries && entries.length) next[day] = entries; else delete next[day];
+                    writeLocalFoodLog(uname, next);
+                    return next;
+                });
+                queueFoodWrite(uname, day, entries);
+            };
+            // Fetch diary days older than the startup window (calendar months, date browsing).
+            const loadFoodRange = async (startKey, endKey) => {
+                if (!currentUser || !cloudEnabled()) return;
+                const recentSince = dayKey(Date.now() - FOOD_LOG_RECENT_DAYS * DAY_MS);
+                if (startKey >= recentSince) return;
+                const id = startKey + '_' + endKey;
+                if (foodRangesRef.current.has(id)) return;
+                foodRangesRef.current.add(id);
+                const uname = currentUser.username;
+                const r = await cloudReadFoodRange(uname, startKey, endKey);
+                if (!r.ok) { foodRangesRef.current.delete(id); return; }
+                const unsynced = new Set(unsyncedGet(uname));
+                setFoodLog(prev => {
+                    const next = { ...prev };
+                    let changed = false;
+                    Object.keys(next).forEach(d => { if (d >= startKey && d <= endKey && !r.data[d] && !unsynced.has('foodLog/' + d)) { delete next[d]; changed = true; } });
+                    Object.keys(r.data).forEach(d => { if (Array.isArray(r.data[d]) && r.data[d].length && !unsynced.has('foodLog/' + d)) { next[d] = r.data[d]; changed = true; } });
+                    if (!changed) return prev;
+                    writeLocalFoodLog(uname, next);
+                    return next;
+                });
             };
 
             // --- Tab switching logic ---
@@ -1525,6 +1703,9 @@
                     } else {
                         setView('workout-idle');
                     }
+                } else if (tabId === 'food') {
+                    setActiveTab('food');
+                    setView('food');
                 } else if (tabId === 'month') {
                     setActiveTab('month');
                     setView('calendarMonth');
@@ -1618,6 +1799,25 @@
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('recaps', recaps); }, [recaps]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('chat', chat); }, [chat]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('aiUsage', aiUsage); }, [aiUsage]);
+            useEffect(() => { if (!isLoading && currentUser) cloudSaveField('foods', foods); }, [foods]);
+            // Upload diary days that were changed without a connection last time.
+            useEffect(() => {
+                if (isLoading || !currentUser) return;
+                const uname = currentUser.username;
+                const local = readLocalFoodLog(uname);
+                unsyncedGet(uname).filter(f => f.startsWith('foodLog/')).forEach(f => { const d = f.slice(8); queueFoodWrite(uname, d, local[d] || null); });
+            }, [isLoading, currentUser]);
+            // Older diary days for the calendar month / Food date being viewed.
+            useEffect(() => {
+                if (isLoading || !currentUser) return;
+                if (view === 'calendarMonth') {
+                    const c = new Date(calCursor);
+                    loadFoodRange(dayKey(new Date(c.getFullYear(), c.getMonth(), 1).getTime()), dayKey(new Date(c.getFullYear(), c.getMonth() + 1, 0).getTime()));
+                } else if (view === 'food') {
+                    const [y, m] = foodDate.split('-').map(Number);
+                    loadFoodRange(dayKey(new Date(y, m - 1, 1).getTime()), dayKey(new Date(y, m, 0).getTime()));
+                }
+            }, [view, calCursor, foodDate, isLoading, currentUser]);
             // Keep the chat scrolled to the newest message.
             useEffect(() => {
                 if (progressSub === 'chat' && chatScrollRef.current) {
@@ -2198,6 +2398,28 @@
                 if (kc) body.push(`avg intake ~${kc} kcal/day (last 4w)`);
                 if (sl) body.push(`avg sleep ~${sl}h`);
                 if (body.length) lines.push('Body: ' + body.join(', ') + '.');
+                const N = window.CWANutrition;
+                if (N) {
+                    const tg = N.targetsFor(p, metrics);
+                    const fmtT = (t) => `${Math.round(t.kcal)} kcal, P ${Math.round(t.p)}g, C ${Math.round(t.c)}g, F ${Math.round(t.f)}g, fibre ${Math.round(t.fib)}g, sugar ${Math.round(t.sug)}g, salt ${Math.round(t.salt * 10) / 10}g`;
+                    lines.push(`Nutrition targets: ${tg.kcal} kcal, protein ${tg.p}g, carbs ${tg.c}g, fat ${tg.f}g, fibre >=${tg.fib}g, sugar <=${tg.sug}g, salt <=${tg.salt}g.`);
+                    const todayKey = dayKey(now);
+                    const days = Object.keys(foodLog).filter(d => d >= dayKey(now - 14 * DAY_MS) && d <= todayKey && (foodLog[d] || []).length).sort();
+                    if (days.length) {
+                        lines.push('Food diary totals (last 14 days):');
+                        days.forEach(d => lines.push(`  ${d}${d === todayKey ? ' (today, so far)' : ''}: ${fmtT(N.dayTotals(foodLog[d]))}`));
+                        const full = days.filter(d => d !== todayKey);
+                        if (full.length >= 2) {
+                            const sum = full.map(d => N.dayTotals(foodLog[d])).reduce((a, t) => { Object.keys(t).forEach(k => { a[k] = (a[k] || 0) + t[k]; }); return a; }, {});
+                            Object.keys(sum).forEach(k => { sum[k] /= full.length; });
+                            lines.push(`  Average of ${full.length} logged days: ${fmtT(sum)}`);
+                        }
+                        const todays = (foodLog[todayKey] || []).slice().sort((a, b) => a.t - b.t);
+                        if (todays.length) lines.push("Today's foods: " + todays.map(en => en.src === 'quick' ? `${en.name} (${Math.round(N.entryTotals(en).kcal)} kcal)` : `${en.name} ${Math.round(en.g)}${en.unit || 'g'}`).join('; ') + '.');
+                    } else {
+                        lines.push('Food diary: nothing logged in the last 14 days.');
+                    }
+                }
                 return lines.join('\n');
             };
 
@@ -2234,7 +2456,7 @@
             const exportData = async () => {
                 try {
                     const ph = currentUser ? await photoList(currentUser.username) : [];
-                    const blob = { app: 'CWA', version: APP_VERSION, exportedAt: Date.now(), profile, metrics, recaps, workouts, history: workoutHistory, photos: ph };
+                    const blob = { app: 'CWA', version: APP_VERSION, exportedAt: Date.now(), profile, metrics, recaps, workouts, history: workoutHistory, foodLog, foods, photos: ph };
                     const a = document.createElement('a');
                     a.href = URL.createObjectURL(new Blob([JSON.stringify(blob)], { type: 'application/json' }));
                     a.download = `cwa-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -2249,7 +2471,7 @@
                     try { blob = JSON.parse(reader.result); } catch (err) { setAiError('Invalid backup file'); return; }
                     setConfirmState({
                         title: 'Import backup?',
-                        message: 'This replaces your current workouts, history, goals, metrics, recaps and photos with the backup.',
+                        message: 'This replaces your current workouts, history, goals, metrics, food diary, custom foods and photos with the backup.',
                         confirmLabel: 'Import', danger: false,
                         onConfirm: async () => {
                             if (blob.workouts) setWorkouts(sanitizeWorkouts(blob.workouts));
@@ -2257,6 +2479,15 @@
                             if (blob.profile) setProfile({ ...DEFAULT_PROFILE, ...blob.profile });
                             if (Array.isArray(blob.metrics)) setMetrics(blob.metrics);
                             if (Array.isArray(blob.recaps)) setRecaps(blob.recaps);
+                            if (blob.foods && typeof blob.foods === 'object') setFoods(blob.foods);
+                            if (blob.foodLog && typeof blob.foodLog === 'object' && currentUser) {
+                                const uname = currentUser.username;
+                                writeLocalFoodLog(uname, blob.foodLog);
+                                setFoodLog(blob.foodLog);
+                                const days = Object.keys(blob.foodLog);
+                                days.forEach(d => unsyncedMark(uname, 'foodLog/' + d, false));
+                                if (cloudEnabled() && await cloudSet('users/' + uname + '/foodLog', blob.foodLog)) days.forEach(d => unsyncedMark(uname, 'foodLog/' + d, true));
+                            }
                             if (Array.isArray(blob.photos) && currentUser) {
                                 for (const p of blob.photos) {
                                     try { await photoAdd({ ...p, user: currentUser.username, id: p.id || `${currentUser.username}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` }); } catch (err) {}
@@ -2681,6 +2912,26 @@
             // ======================
             // STATS VIEW
             // ======================
+            if (view === 'food') {
+                const N = window.CWANutrition;
+                if (!N) {
+                    return e('div', { className: 'min-h-screen flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' } },
+                        e(TopAppBar, { title: 'FOOD', rightAction: profileBtn }),
+                        e('div', { className: 'flex-1 pt-24 px-6 text-center' }, 'The Food module failed to load. Check your connection and reopen the app.'),
+                        e(BottomNavBar, { activeTab: 'food', onTabChange: handleTabChange }));
+                }
+                return e(N.FoodScreen, { app: {
+                    date: foodDate, setDate: setFoodDate, log: foodLog, saveDay: saveFoodDay,
+                    foods, setFoods, profile, metrics,
+                    setProfileFields: (vals) => setProfile(prev => ({ ...prev, ...vals })),
+                    onTabChange: handleTabChange, profileBtn,
+                    toast: setToast, toastText: toast,
+                    confirm: setConfirmState,
+                    confirmEl: confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null,
+                    user: currentUser ? currentUser.username : '', aiEnabled: proxyEnabled(),
+                } });
+            }
+
             if (view === 'stats') {
                 // Compute stats from history
                 const totalWorkouts = workoutHistory.length;
@@ -3214,6 +3465,7 @@
                 const metricDays = new Set(metrics.map(m => dayKey(m.date)));
                 const photoDays = new Set(photos.map(p => dayKey(p.date)));
                 const workoutDays = new Set(workoutHistory.map(w => dayKey(w.date)));
+                const foodDays = new Set(Object.keys(foodLog).filter(d => (foodLog[d] || []).length));
 
                 // Build a Monday-first 6-week grid.
                 const firstOfMonth = new Date(year, month, 1);
@@ -3260,6 +3512,25 @@
                                         e('span', { className: 'text-xs ml-auto', style: { color: 'var(--on-surface-variant)' } }, formatTime(w.totalTime))
                                     )))
                                 ) : null,
+                                (() => {
+                                    const N = window.CWANutrition;
+                                    if (!N) return null;
+                                    const list = foodLog[dk] || [];
+                                    const t = N.dayTotals(list);
+                                    const openFood = () => { setFoodDate(dk); setSelectedDay(null); setActiveTab('food'); setView('food'); };
+                                    return e('div', null,
+                                        e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Food'),
+                                        e('button', { onClick: openFood, className: 'w-full rounded-xl px-3 py-2.5 flex items-center gap-2 text-left active:scale-[0.99]', style: { background: 'var(--surface-container-high)' } },
+                                            e(MIcon, { icon: 'restaurant', style: { fontSize: '18px', color: 'var(--macro-c)' } }),
+                                            list.length
+                                                ? e('div', { className: 'flex-1 min-w-0' },
+                                                    e('div', { className: 'text-sm font-bold' }, `${Math.round(t.kcal).toLocaleString('en-US')} kcal`),
+                                                    e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, `P ${Math.round(t.p)} g · C ${Math.round(t.c)} g · F ${Math.round(t.f)} g · ${list.length} item${list.length === 1 ? '' : 's'}`))
+                                                : e('div', { className: 'flex-1 text-sm', style: { color: 'var(--on-surface-variant)' } }, 'Nothing logged — tap to add'),
+                                            e(MIcon, { icon: 'chevron_right', style: { fontSize: '20px', color: 'var(--on-surface-variant)' } })
+                                        )
+                                    );
+                                })(),
                                 e('div', null,
                                     e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, existing ? 'Edit Metrics' : 'Add Metrics'),
                                     e(MetricForm, { key: dk, fixedDate: fixed, initial: existing, onSave: (entry) => { saveMetric(entry); setToast('Saved'); } })
@@ -3335,6 +3606,7 @@
                                     if (metricDays.has(ck)) has.push(dot('var(--primary-container)'));
                                     if (photoDays.has(ck)) has.push(dot('#00e5ff'));
                                     if (workoutDays.has(ck)) has.push(dot('var(--secondary)'));
+                                    if (foodDays.has(ck)) has.push(dot('var(--macro-c)'));
                                     return e('button', {
                                         key: idx,
                                         onClick: () => { setSelectedDay(new Date(cell.getFullYear(), cell.getMonth(), cell.getDate(), 12, 0, 0, 0).getTime()); },
@@ -3355,9 +3627,10 @@
                             e('div', { className: 'flex items-center justify-center gap-4 mt-4 text-xs', style: { color: 'var(--on-surface-variant)' } },
                                 e('div', { className: 'flex items-center gap-1.5' }, dot('var(--primary-container)'), 'Metrics'),
                                 e('div', { className: 'flex items-center gap-1.5' }, dot('#00e5ff'), 'Photo'),
-                                e('div', { className: 'flex items-center gap-1.5' }, dot('var(--secondary)'), 'Workout')
+                                e('div', { className: 'flex items-center gap-1.5' }, dot('var(--secondary)'), 'Workout'),
+                                e('div', { className: 'flex items-center gap-1.5' }, dot('var(--macro-c)'), 'Food')
                             ),
-                            e('div', { className: 'text-xs text-center mt-3 px-2', style: { color: 'var(--outline)' } }, 'Tap any day to log weight, calories, sleep and photos. Anything logged here is shared with your AI Coach as context.')
+                            e('div', { className: 'text-xs text-center mt-3 px-2', style: { color: 'var(--outline)' } }, 'Tap any day to see its food and log weight, sleep and photos. All of it is shared with your AI Coach as context.')
                         )
                     ),
                     pickerOverlay,
@@ -3650,7 +3923,7 @@
                                             e('input', { type: 'file', accept: 'application/json,.json', className: 'hidden', onChange: (ev) => { const f = ev.target.files && ev.target.files[0]; if (f) importData(f); ev.target.value = ''; } })
                                         )
                                     ),
-                                    e('div', { className: 'text-xs mt-3 leading-snug', style: { color: 'var(--outline)' } }, 'Download a full JSON backup (workouts, history, goals, metrics, recaps and photos), or restore one. Also the way to move data to a new account.')
+                                    e('div', { className: 'text-xs mt-3 leading-snug', style: { color: 'var(--outline)' } }, 'Download a full JSON backup (workouts, history, goals, metrics, food diary, custom foods and photos), or restore one. Also the way to move data to a new account.')
                                 )
                             ),
                             e('div', null,

@@ -1,11 +1,12 @@
 // Service Worker with Cache Versioning
-const CACHE_VERSION = 'v3.14.0'; // UPDATE THIS WITH EACH NEW VERSION!
+const CACHE_VERSION = 'v3.15.0'; // UPDATE THIS WITH EACH NEW VERSION!
 const CACHE_NAME = `workout-tracker-${CACHE_VERSION}`;
 
 // Same-origin app shell: must all cache, or the install fails (and the old SW keeps serving).
 const APP_SHELL = [
   './',
   './index.html',
+  './js/nutrition.js?v=3.15.0', // same URL as the <script> in index.html
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
@@ -29,7 +30,9 @@ const PAGE_NETWORK_TIMEOUT_MS = 3000;
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL).then(() =>
+      // cache: 'reload' skips the browser's HTTP cache (GitHub Pages sends max-age=600), so a
+      // new version never precaches a stale copy of its own files.
+      .then((cache) => cache.addAll(APP_SHELL.map((u) => new Request(u, { cache: 'reload' }))).then(() =>
         Promise.all(CDN_LIBS.map((u) => cache.add(u).catch(() => {})))))
       .then(() => self.skipWaiting())
   );
