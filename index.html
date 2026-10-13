@@ -262,10 +262,10 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.16.0"></script>
+    <script src="js/nutrition.js?v=3.17.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.16.0';
+        const APP_VERSION = '3.17.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -610,7 +610,7 @@
             const outdated = 'The AI worker needs updating to read food photos (redeploy proxy/worker.js).';
             if (!res.ok) throw new Error(data && data.error === 'Empty prompt' ? outdated : ((data && data.error) || `AI service error (${res.status})`));
             if (!data.food) throw new Error(data.text ? outdated : 'No food found in the photo.');
-            return data.food;
+            return { ...data.food, _model: data.model || '' };
         }
 
         // ============================================
@@ -1047,6 +1047,8 @@
 
             // Detect narrow cover screen (flip phones: nearly square or landscape aspect)
             const { isCover, w: vpW } = useViewport();
+            // Cover screen: Food lives in the top bar (next to profile) to keep this bar short.
+            const coverTabs = tabs.filter(t => t.id !== 'food');
 
             // Cover screen (flip): the cameras sit in the BOTTOM-RIGHT, so the nav must stay
             // in the bottom-LEFT and never stretch across. We use an auto-width pill anchored
@@ -1058,7 +1060,7 @@
                 // and size the buttons to use that space for big, easy tap targets — while
                 // staying clear of the bottom-right cameras.
                 const vw = vpW || window.innerWidth || 360;
-                const nTabs = tabs.length, gap = 3, padL = 6, padR = 8;
+                const nTabs = coverTabs.length, gap = 3, padL = 6, padR = 8;
                 const targetW = Math.min(vw * 0.62, 290); // bottom-left, well clear of cameras
                 let cell = Math.floor((targetW - padL - padR - nTabs * gap * 2) / nTabs);
                 cell = Math.max(34, Math.min(52, cell));
@@ -1080,7 +1082,7 @@
                         paddingRight: padR + 'px'
                     }
                 },
-                    tabs.map(tab => {
+                    coverTabs.map(tab => {
                         const isActive = activeTab === tab.id;
                         return e('button', {
                             key: tab.id,
@@ -1377,6 +1379,7 @@
             const [calCursor, setCalCursor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime(); });
             const [selectedDay, setSelectedDay] = useState(null); // ms at noon of the picked day, or null
             const [monthPicker, setMonthPicker] = useState(false);
+            const [weekInfo, setWeekInfo] = useState(null); // week rating shown in the breakdown dialog
 
             // Cover screen detection (flip phone: nearly square aspect) — shared hook
             const viewport = useViewport();
@@ -1622,7 +1625,14 @@
                     try { const raw = localStorage.getItem('cwa-' + field + '-' + uname); if (raw) return JSON.parse(raw); } catch (err) {}
                     return fallback;
                 };
-                setProfile({ ...DEFAULT_PROFILE, ...(pick('profile', {}) || {}) });
+                // The bulk/cut/... selector was replaced by free-text notes: carry an old choice over.
+                const prof = { ...DEFAULT_PROFILE, ...(pick('profile', {}) || {}) };
+                if (prof.goal) {
+                    const g = String(prof.goal);
+                    if (!(prof.notes || '').toLowerCase().includes(g.toLowerCase())) prof.notes = (`Goal: ${g}. ` + (prof.notes || '')).slice(0, PROFILE_NOTES_MAX);
+                    prof.goal = '';
+                }
+                setProfile(prof);
                 setMetrics(pick('metrics', []) || []);
                 setRecaps(pick('recaps', []) || []);
                 setChat(pick('chat', []) || []);
@@ -2343,7 +2353,6 @@
                 const now = Date.now();
                 const p = profile;
                 const goal = [
-                    p.goal ? `goal ${p.goal}` : null,
                     p.split ? `split ${p.split}` : null,
                     p.targetWeight ? `target ${p.targetWeight}kg` : null,
                     p.targetBodyFat ? `target ${p.targetBodyFat}% body fat` : null,
@@ -2361,7 +2370,7 @@
                 const todayW = workouts[todayName];
                 const lines = [];
                 lines.push(`Profile: ${goal}.`);
-                if (p.notes && p.notes.trim()) lines.push(`User's own notes (their training style, preferences, limitations, diet, etc.): ${p.notes.trim()}`);
+                if (p.notes && p.notes.trim()) lines.push(`User's own goal & notes (their goal, training style, preferences, limitations, diet, etc.): ${p.notes.trim()}`);
                 lines.push(`Training: ${workoutHistory.length} sessions logged all-time, ${last4w} in the last 4 weeks. Weekly plan days: ${DAYS.filter(d => workouts[d]).map(d => d + '=' + workouts[d].name).join(', ') || 'none'}.`);
                 lines.push(`Today is ${todayName}; today's planned workout: ${todayW ? todayW.name : 'rest / none'}.`);
 
@@ -2424,6 +2433,12 @@
                     } else {
                         lines.push('Food diary: nothing logged in the last 14 days.');
                     }
+                    // Deterministic week ratings (0-10; training done vs planned + nutrition vs targets).
+                    const planDaysCtx = DAYS.filter(d => workouts[d]);
+                    const wr = [2, 1].map(k => N.weekRating({ mondayMs: N.weekStartOf(now - k * 7 * DAY_MS), history: workoutHistory, planDays: planDaysCtx, log: foodLog, targets: tg, now }))
+                        .filter(r => r.score != null)
+                        .map(r => `week of ${dayKey(r.mondayMs)}: ${r.score.toFixed(1)}/10 (training ${r.training ? r.training.done + '/' + r.training.planned : 'n/a'}, nutrition ${r.nutrition ? Math.round(r.nutrition.score * 100) + '% with ' + r.nutrition.logged + '/7 days logged' : 'not logged'})`);
+                    if (wr.length) lines.push('Week ratings: ' + wr.join('; ') + '.');
                 }
                 return lines.join('\n');
             };
@@ -2538,12 +2553,22 @@
             // Open the unified profile/progress hub (reached from the person icon — there is
             // no longer a bottom-nav tab for it, to save space on cover screens).
             const openHub = () => { setProgressSub('hub'); setAiError(''); setActiveTab(''); setView('progress'); };
-            const profileBtn = e('button', {
+            const personBtn = e('button', {
                 onClick: openHub,
                 'aria-label': 'Profile',
                 className: 'w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90',
                 style: { background: 'rgba(209, 252, 0, 0.1)' }
             }, e(MIcon, { icon: 'person', fill: true, style: { fontSize: '20px', color: 'var(--primary-container)' } }));
+            // On the cover screen the bottom bar drops Food; its button sits here instead.
+            const profileBtn = isCoverScreen ? e('div', { className: 'flex items-center gap-2' },
+                e('button', {
+                    onClick: () => handleTabChange('food'),
+                    'aria-label': 'Food',
+                    className: 'w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90',
+                    style: view === 'food' ? { background: 'var(--primary-container)', color: 'var(--on-primary-container)' } : { background: 'rgba(209, 252, 0, 0.1)', color: 'var(--primary-container)' }
+                }, e(MIcon, { icon: 'restaurant', fill: view === 'food', style: { fontSize: '20px' } })),
+                personBtn
+            ) : personBtn;
 
             // ======================
             // LOADING
@@ -2793,15 +2818,60 @@
                             // Exercises
                             editingWorkout?.exercises.map((exercise, exIdx) =>
                                 e('div', { key: exIdx, className: 'mb-6 p-4 rounded-xl', style: { background: 'var(--surface-container-highest)' } },
-                                    e('div', { className: 'flex items-center justify-between mb-4 gap-2' },
+                                    e('input', {
+                                        type: 'text', value: exercise.name,
+                                        onChange: (ev) => updateExerciseName(exIdx, ev.target.value),
+                                        onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
+                                        className: 'w-full min-w-0 p-2.5 mb-2 rounded-lg outline-none text-base font-bold',
+                                        style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
+                                        placeholder: 'Exercise name'
+                                    }),
+                                    e('div', { className: 'mb-4' },
                                         e('input', {
-                                            type: 'text', value: exercise.name,
-                                            onChange: (ev) => updateExerciseName(exIdx, ev.target.value),
+                                            type: 'text', value: exercise.notes || '',
+                                            onChange: (ev) => updateExerciseNotes(exIdx, ev.target.value),
                                             onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
-                                            className: 'flex-1 min-w-0 p-2 rounded-lg outline-none font-bold',
-                                            style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
-                                            placeholder: 'Exercise name'
-                                        }),
+                                            className: 'w-full p-2 rounded-lg outline-none text-sm',
+                                            style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)', border: 'none', caretColor: 'var(--primary-container)' },
+                                            placeholder: 'Optional notes (e.g., form tips, tempo, rest time)'
+                                        })
+                                    ),
+                                    // Sets
+                                    e('div', { className: 'space-y-2' },
+                                        exercise.sets.map((set, setIdx) =>
+                                            e('div', { key: setIdx, className: 'grid items-center gap-2', style: { gridTemplateColumns: '3rem minmax(0, 1fr) minmax(0, 1.2fr) auto 2.25rem' } },
+                                                e('span', { className: 'text-sm whitespace-nowrap', style: { color: 'var(--on-surface-variant)' } }, `Set ${setIdx + 1}`),
+                                                e('input', {
+                                                    type: 'number', value: set.reps || '',
+                                                    onChange: (ev) => updateSet(exIdx, setIdx, 'reps', ev.target.value),
+                                                    onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
+                                                    className: 'w-full min-w-0 p-2 rounded-lg outline-none text-base',
+                                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
+                                                    placeholder: 'Reps', 'aria-label': `Set ${setIdx + 1} reps`
+                                                }),
+                                                e('input', {
+                                                    type: 'number', step: '0.01', value: set.weight || '',
+                                                    onChange: (ev) => updateSet(exIdx, setIdx, 'weight', ev.target.value),
+                                                    onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
+                                                    className: 'w-full min-w-0 p-2 rounded-lg outline-none text-base',
+                                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
+                                                    placeholder: 'Weight', 'aria-label': `Set ${setIdx + 1} weight (kg)`
+                                                }),
+                                                e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'kg'),
+                                                e('button', {
+                                                    onClick: () => removeSet(exIdx, setIdx), 'aria-label': `Remove set ${setIdx + 1}`,
+                                                    className: 'h-9 rounded-lg text-sm transition-opacity active:opacity-60',
+                                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)' }
+                                                }, '\u2715')
+                                            )
+                                        )
+                                    ),
+                                    e('div', { className: 'flex items-center justify-between gap-2 mt-3' },
+                                        e('button', {
+                                            onClick: () => addSet(exIdx),
+                                            className: 'px-3 py-2 rounded-lg text-sm font-bold transition-opacity active:opacity-80',
+                                            style: { background: 'var(--surface-container-low)', color: 'var(--primary-fixed-dim)' }
+                                        }, '+ Add Set'),
                                         e('div', { className: 'flex items-center gap-1 flex-shrink-0' },
                                             e('button', {
                                                 onClick: () => moveExercise(exIdx, exIdx - 1),
@@ -2832,57 +2902,12 @@
                                                 style: { background: 'var(--error-container)', color: 'var(--on-error-container)', opacity: editingWorkout.exercises.length <= 1 ? 0.4 : 1 }
                                             }, 'Remove')
                                         )
-                                    ),
-                                    e('div', { className: 'mb-4' },
-                                        e('input', {
-                                            type: 'text', value: exercise.notes || '',
-                                            onChange: (ev) => updateExerciseNotes(exIdx, ev.target.value),
-                                            onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
-                                            className: 'w-full p-2 rounded-lg outline-none text-sm',
-                                            style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)', border: 'none', caretColor: 'var(--primary-container)' },
-                                            placeholder: 'Optional notes (e.g., form tips, tempo, rest time)'
-                                        })
-                                    ),
-                                    // Sets
-                                    e('div', { className: 'space-y-2' },
-                                        exercise.sets.map((set, setIdx) =>
-                                            e('div', { key: setIdx, className: 'flex items-center gap-3' },
-                                                e('span', { className: 'w-12 text-sm whitespace-nowrap flex-shrink-0', style: { color: 'var(--on-surface-variant)' } }, `Set ${setIdx + 1}`),
-                                                e('input', {
-                                                    type: 'number', value: set.reps || '',
-                                                    onChange: (ev) => updateSet(exIdx, setIdx, 'reps', ev.target.value),
-                                                    onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
-                                                    className: 'w-20 p-2 rounded-lg outline-none',
-                                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
-                                                    placeholder: 'Reps'
-                                                }),
-                                                e('input', {
-                                                    type: 'number', step: '0.01', value: set.weight || '',
-                                                    onChange: (ev) => updateSet(exIdx, setIdx, 'weight', ev.target.value),
-                                                    onKeyDown: (ev) => { if (ev.key === 'Enter') ev.target.blur(); },
-                                                    className: 'w-24 p-2 rounded-lg outline-none',
-                                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' },
-                                                    placeholder: 'Weight'
-                                                }),
-                                                e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'kg'),
-                                                e('button', {
-                                                    onClick: () => removeSet(exIdx, setIdx),
-                                                    className: 'ml-auto px-2 py-1 rounded-lg text-sm transition-opacity active:opacity-60',
-                                                    style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)' }
-                                                }, '\u2715')
-                                            )
-                                        )
-                                    ),
-                                    e('button', {
-                                        onClick: () => addSet(exIdx),
-                                        className: 'mt-3 px-3 py-1 rounded-lg text-sm transition-opacity active:opacity-80',
-                                        style: { background: 'var(--surface-container-low)', color: 'var(--primary-fixed-dim)' }
-                                    }, '+ Add Set')
+                                    )
                                 )
                             ),
                             e('button', {
                                 onClick: addExercise,
-                                className: 'w-[47%] py-3 rounded-xl flex items-center justify-center gap-2 transition-opacity active:opacity-80',
+                                className: 'w-full py-3 rounded-xl text-base font-bold flex items-center justify-center gap-2 transition-opacity active:opacity-80',
                                 style: { background: 'var(--surface-container-highest)', color: 'var(--primary-fixed-dim)' }
                             }, e(Plus, { size: 20 }), 'Add Exercise'),
                             // Delete whole workout (only for an already-saved day)
@@ -3033,14 +3058,54 @@
                     e('div', { className: 'text-xs uppercase tracking-widest mt-1 text-center', style: { color: 'var(--on-surface-variant)' } }, label)
                 );
 
+                // Weekly rating: last 8 finished weeks + this week so far (CWANutrition.weekRating).
+                const NR = window.CWANutrition;
+                const weeklyCard = (() => {
+                    if (!NR) return null;
+                    const tg = NR.targetsFor(profile, metrics);
+                    const planDays = DAYS.filter(d => workouts[d]);
+                    const thisMon = NR.weekStartOf(Date.now());
+                    const rate = (mon) => NR.weekRating({ mondayMs: mon, history: workoutHistory, planDays, log: foodLog, targets: tg, now: Date.now() });
+                    const monOf = (k) => { const d = new Date(thisMon); d.setDate(d.getDate() - 7 * k); return d.getTime(); };
+                    const past = [8, 7, 6, 5, 4, 3, 2, 1].map(k => rate(monOf(k)));
+                    const current = rate(thisMon);
+                    if (!past.some(r => r.score != null) && current.score == null) return null;
+                    const last = past[past.length - 1];
+                    const dm = (ms) => { const d = new Date(ms); return `${d.getDate()}.${d.getMonth() + 1}.`; };
+                    const bar = (r, i, isCur) => e('button', {
+                        key: i, onClick: () => r.score != null && setWeekInfo(r), 'aria-label': r.score != null ? `Week of ${dm(r.mondayMs)}: ${r.score.toFixed(1)} of 10` : `Week of ${dm(r.mondayMs)}: no data`,
+                        className: 'flex-1 min-w-0 flex flex-col items-center justify-end gap-1 active:opacity-70', style: { height: 92 }
+                    },
+                        e('span', { className: 'text-[10px] font-bold', style: { color: 'var(--on-surface-variant)' } }, r.score != null ? (r.score >= 9.95 ? '10' : r.score.toFixed(1)) : ''),
+                        e('div', { style: { width: '70%', maxWidth: 22, height: r.score != null ? Math.max(4, r.score * 5.6) : 4, borderRadius: 4, background: r.score != null ? (isCur ? 'transparent' : NR.ratingColor(r.score)) : 'var(--surface-container-highest)', border: isCur && r.score != null ? `2px dashed ${NR.ratingColor(r.score)}` : 'none', boxSizing: 'border-box' } }),
+                        e('span', { className: 'text-[10px]', style: { color: isCur ? 'var(--primary-container)' : 'var(--outline)' } }, isCur ? 'now' : dm(r.mondayMs))
+                    );
+                    return e('div', { className: 'max-w-lg mx-auto mb-6' },
+                        e('div', { className: 'text-xs uppercase tracking-widest mb-3 px-1', style: { color: 'var(--on-surface-variant)' } }, 'Weekly rating'),
+                        e('div', { className: 'rounded-2xl p-4', style: { background: 'var(--surface-container-high)' } },
+                            e('button', { onClick: () => last.score != null && setWeekInfo(last), className: 'w-full flex items-center gap-4 text-left active:opacity-80' },
+                                e('div', { className: 'font-black leading-none', style: { fontSize: 46, color: NR.ratingColor(last.score) } }, last.score == null ? '—' : last.score.toFixed(1)),
+                                e('div', { className: 'flex-1 min-w-0' },
+                                    e('div', { className: 'text-sm font-bold' }, `Last week · ${dm(last.mondayMs)}–${dm(last.mondayMs + 6 * DAY_MS)}`),
+                                    e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } },
+                                        [last.training ? `Training ${last.training.done}/${last.training.planned}` : null, last.nutrition ? `Food ${Math.round(last.nutrition.score * 100)} % (${last.nutrition.logged}/7 days)` : 'No food logged'].filter(Boolean).join(' · ')),
+                                    current.score != null ? e('div', { className: 'text-xs mt-0.5', style: { color: 'var(--on-surface-variant)' } }, `This week so far: `, e('b', { style: { color: NR.ratingColor(current.score) } }, current.score.toFixed(1))) : null
+                                )
+                            ),
+                            e('div', { className: 'flex items-end gap-1 mt-4' }, past.map((r, i) => bar(r, i, false)), bar(current, 'cur', true))
+                        )
+                    );
+                })();
+
                 return e('div', {
                     className: 'min-h-screen flex flex-col',
                     style: { background: 'var(--void)', color: 'var(--on-surface)' }
                 },
                     e(TopAppBar, { title: 'STATS', rightAction: profileBtn }),
                     e('div', { className: 'flex-1 pt-20 pb-28 px-4 overflow-y-auto' },
+                        weeklyCard,
                         totalWorkouts === 0 ?
-                            e('div', { className: 'flex flex-col items-center justify-center h-full pt-32' },
+                            e('div', { className: 'flex flex-col items-center justify-center h-full ' + (weeklyCard ? 'pt-10' : 'pt-32') },
                                 e(MIcon, { icon: 'bar_chart', style: { fontSize: '64px', color: 'var(--surface-container-highest)' } }),
                                 e('h2', { className: 'text-2xl font-black mt-6 text-center' }, 'No Stats Yet'),
                                 e('p', { className: 'text-base mt-2 text-center', style: { color: 'var(--on-surface-variant)' } }, 'Complete a workout to see your stats')
@@ -3154,6 +3219,7 @@
                         )
                     ),
                     confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null,
+                    weekInfo && NR ? e(NR.WeekRatingDialog, { rating: weekInfo, onClose: () => setWeekInfo(null) }) : null,
                     e(BottomNavBar, { activeTab: 'stats', onTabChange: handleTabChange })
                 );
             }
@@ -3543,6 +3609,46 @@
                     style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' }
                 }, e(MIcon, { icon, style: { fontSize: '20px' } }));
 
+                const renderDayCell = (cell, idx) => {
+                    if (!cell) return e('div', { key: idx });
+                    const ck = dayKey(cell.getTime());
+                    const isToday = ck === todayKey;
+                    const isFuture = cell.getTime() > Date.now();
+                    const has = [];
+                    if (metricDays.has(ck)) has.push(dot('var(--primary-container)'));
+                    if (photoDays.has(ck)) has.push(dot('#00e5ff'));
+                    if (workoutDays.has(ck)) has.push(dot('var(--secondary)'));
+                    if (foodDays.has(ck)) has.push(dot('var(--macro-c)'));
+                    return e('button', {
+                        key: idx,
+                        onClick: () => { setSelectedDay(new Date(cell.getFullYear(), cell.getMonth(), cell.getDate(), 12, 0, 0, 0).getTime()); },
+                        className: 'rounded-xl flex flex-col items-center justify-start pt-1.5 active:scale-95 transition-transform',
+                        style: {
+                            minHeight: 52,
+                            background: isToday ? 'rgba(209,252,0,0.14)' : 'var(--surface-container-low)',
+                            border: isToday ? '1px solid var(--primary-container)' : '1px solid transparent',
+                            opacity: isFuture ? 0.45 : 1
+                        }
+                    },
+                        e('span', { className: 'text-sm font-bold', style: { color: isToday ? 'var(--primary-container)' : 'var(--on-surface)' } }, cell.getDate()),
+                        e('div', { className: 'flex gap-0.5 mt-1 h-1.5 items-center' }, has)
+                    );
+                };
+                // 8th column: the week's rating, once the week is over (see CWANutrition.weekRating).
+                const N = window.CWANutrition;
+                const weekCols = 'repeat(7, minmax(0, 1fr)) 34px';
+                const ratingTargets = N ? N.targetsFor(profile, metrics) : null;
+                const planDays = DAYS.filter(d => workouts[d]);
+                const weekCell = (row) => {
+                    const monday = new Date(year, month, 1 - leading + 7 * row).getTime();
+                    const r = N ? N.weekRating({ mondayMs: monday, history: workoutHistory, planDays, log: foodLog, targets: ratingTargets, now: Date.now() }) : null;
+                    if (!r || !r.complete || r.score == null) return e('div', { key: 'w' + row });
+                    return e('button', {
+                        key: 'w' + row, onClick: () => setWeekInfo(r), 'aria-label': `Week rating ${r.score.toFixed(1)} of 10`,
+                        className: 'flex items-center justify-center active:scale-90', style: { minHeight: 52 }
+                    }, e('span', { className: 'font-black', style: { width: 32, height: 32, borderRadius: 16, border: `2px solid ${N.ratingColor(r.score)}`, color: N.ratingColor(r.score), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 } }, r.score >= 9.95 ? '10' : r.score.toFixed(1)));
+                };
+
                 // ---- Day detail sheet ----
                 const daySheet = selectedDay != null ? (() => {
                     const d = new Date(selectedDay);
@@ -3649,35 +3755,15 @@
                                 navBtn('chevron_right', () => shiftMonth(1), 'Next month')
                             ),
                             // Weekday header
-                            e('div', { className: 'grid grid-cols-7 gap-1 mb-1' },
-                                ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((wd, i) => e('div', { key: i, className: 'text-center text-xs font-bold py-1', style: { color: 'var(--on-surface-variant)' } }, wd))
+                            e('div', { className: 'grid gap-1 mb-1', style: { gridTemplateColumns: weekCols } },
+                                ['M', 'T', 'W', 'T', 'F', 'S', 'S', 'Wk'].map((wd, i) => e('div', { key: i, className: 'text-center text-xs font-bold py-1', style: { color: i === 7 ? 'var(--outline)' : 'var(--on-surface-variant)' } }, wd))
                             ),
                             // Day grid
-                            e('div', { className: 'grid grid-cols-7 gap-1' },
-                                cells.map((cell, idx) => {
-                                    if (!cell) return e('div', { key: idx });
-                                    const ck = dayKey(cell.getTime());
-                                    const isToday = ck === todayKey;
-                                    const isFuture = cell.getTime() > Date.now();
-                                    const has = [];
-                                    if (metricDays.has(ck)) has.push(dot('var(--primary-container)'));
-                                    if (photoDays.has(ck)) has.push(dot('#00e5ff'));
-                                    if (workoutDays.has(ck)) has.push(dot('var(--secondary)'));
-                                    if (foodDays.has(ck)) has.push(dot('var(--macro-c)'));
-                                    return e('button', {
-                                        key: idx,
-                                        onClick: () => { setSelectedDay(new Date(cell.getFullYear(), cell.getMonth(), cell.getDate(), 12, 0, 0, 0).getTime()); },
-                                        className: 'rounded-xl flex flex-col items-center justify-start pt-1.5 active:scale-95 transition-transform',
-                                        style: {
-                                            minHeight: 52,
-                                            background: isToday ? 'rgba(209,252,0,0.14)' : 'var(--surface-container-low)',
-                                            border: isToday ? '1px solid var(--primary-container)' : '1px solid transparent',
-                                            opacity: isFuture ? 0.45 : 1
-                                        }
-                                    },
-                                        e('span', { className: 'text-sm font-bold', style: { color: isToday ? 'var(--primary-container)' : 'var(--on-surface)' } }, cell.getDate()),
-                                        e('div', { className: 'flex gap-0.5 mt-1 h-1.5 items-center' }, has)
-                                    );
+                            e('div', { className: 'grid gap-1', style: { gridTemplateColumns: weekCols } },
+                                cells.flatMap((cell, idx) => {
+                                    const parts = [renderDayCell(cell, idx)];
+                                    if (idx % 7 === 6) parts.push(weekCell(Math.floor(idx / 7)));
+                                    return parts;
                                 })
                             ),
                             // Legend
@@ -3687,11 +3773,13 @@
                                 e('div', { className: 'flex items-center gap-1.5' }, dot('var(--secondary)'), 'Workout'),
                                 e('div', { className: 'flex items-center gap-1.5' }, dot('var(--macro-c)'), 'Food')
                             ),
+                            e('div', { className: 'text-xs text-center mt-2', style: { color: 'var(--on-surface-variant)' } }, 'Wk = week rating out of 10 (finished weeks). Tap it for the breakdown.'),
                             e('div', { className: 'text-xs text-center mt-3 px-2', style: { color: 'var(--outline)' } }, 'Tap any day to see its food and log weight, sleep and photos. All of it is shared with your AI Coach as context.')
                         )
                     ),
                     pickerOverlay,
                     daySheet,
+                    weekInfo && N ? e(N.WeekRatingDialog, { rating: weekInfo, onClose: () => setWeekInfo(null) }) : null,
                     toast ? e('div', { className: 'fixed left-1/2 -translate-x-1/2 z-[170] px-4 py-2 rounded-xl text-sm font-bold', style: { bottom: 'max(env(safe-area-inset-bottom), 80px)', background: 'var(--primary-container)', color: 'var(--on-primary-container)', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' } }, toast) : null,
                     e(BottomNavBar, { activeTab: 'month', onTabChange: handleTabChange })
                 );
@@ -3748,20 +3836,32 @@
 
                 // ---- GOALS ----
                 if (progressSub === 'goals') {
-                    const goals = ['bulk', 'cut', 'maintain', 'recomp'];
+                    // Daily nutrition targets (shared with Food › targets). Empty = automatic value,
+                    // shown as the placeholder.
+                    const N = window.CWANutrition;
+                    const auto = N ? N.targetsFor({ targetWeight: profile.targetWeight }, metrics) : {};
+                    const sub = (t) => e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, t);
                     return shell('GOALS', true,
                         e('div', { className: 'space-y-5' },
                             e('div', null,
-                                e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, 'Current Goal'),
-                                e('div', { className: 'grid grid-cols-4 gap-2' },
-                                    goals.map(g => e('button', {
-                                        key: g,
-                                        onClick: () => updateProfileField('goal', profile.goal === g ? '' : g),
-                                        className: 'py-2.5 rounded-xl text-sm font-bold capitalize transition-all active:scale-95',
-                                        style: profile.goal === g
-                                            ? { background: 'linear-gradient(45deg, #d1fc00, #c4ec00)', color: 'var(--on-primary-container)' }
-                                            : { background: 'var(--surface-container-highest)', color: 'var(--on-surface-variant)' }
-                                    }, g))
+                                sub('Daily targets'),
+                                e('div', { className: 'grid grid-cols-2 gap-3' },
+                                    numField('Calories', profile.dailyKcal, (v) => updateProfileField('dailyKcal', v), String(auto.kcal || ''), 'kcal'),
+                                    numField('Protein', profile.proteinG, (v) => updateProfileField('proteinG', v), String(auto.p || ''), 'g'),
+                                    numField('Carbs', profile.carbsG, (v) => updateProfileField('carbsG', v), String(auto.c || ''), 'g'),
+                                    numField('Fat', profile.fatG, (v) => updateProfileField('fatG', v), String(auto.f || ''), 'g'),
+                                    numField('Fibre (min)', profile.fibreG, (v) => updateProfileField('fibreG', v), String(auto.fib || ''), 'g'),
+                                    numField('Sugar (max)', profile.sugarMaxG, (v) => updateProfileField('sugarMaxG', v), String(auto.sug || ''), 'g'),
+                                    numField('Salt (max)', profile.saltMaxG, (v) => updateProfileField('saltMaxG', v), String(auto.salt || ''), 'g')
+                                ),
+                                e('div', { className: 'text-xs mt-2 px-1', style: { color: 'var(--outline)' } }, 'Empty fields use the automatic value shown in grey (from your latest weight). Used by the Food tab, the week rating and your AI Coach.')
+                            ),
+                            e('div', null,
+                                sub('Body'),
+                                e('div', { className: 'grid grid-cols-2 gap-3' },
+                                    numField('Target Weight', profile.targetWeight, (v) => updateProfileField('targetWeight', v), '75', 'kg'),
+                                    numField('Target Body Fat', profile.targetBodyFat, (v) => updateProfileField('targetBodyFat', v), '12', '%'),
+                                    numField('Height', profile.heightCm, (v) => updateProfileField('heightCm', v), '180', 'cm')
                                 )
                             ),
                             e('div', null,
@@ -3774,21 +3874,15 @@
                                     style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' }
                                 })
                             ),
-                            e('div', { className: 'grid grid-cols-2 gap-3' },
-                                numField('Target Weight', profile.targetWeight, (v) => updateProfileField('targetWeight', v), '75', 'kg'),
-                                numField('Target Body Fat', profile.targetBodyFat, (v) => updateProfileField('targetBodyFat', v), '12', '%'),
-                                numField('Daily Calories', profile.dailyKcal, (v) => updateProfileField('dailyKcal', v), '2800', 'kcal'),
-                                numField('Height', profile.heightCm, (v) => updateProfileField('heightCm', v), '180', 'cm')
-                            ),
                             e('div', null,
                                 e('div', { className: 'flex items-center justify-between mb-1' },
-                                    e('div', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'About / Extra Notes'),
+                                    e('div', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Goal & notes'),
                                     e('div', { className: 'text-xs', style: { color: 'var(--outline)' } }, `${(profile.notes || '').length}/${PROFILE_NOTES_MAX}`)
                                 ),
                                 e('textarea', {
                                     value: profile.notes || '', rows: 4, maxLength: PROFILE_NOTES_MAX,
                                     onChange: (ev) => updateProfileField('notes', ev.target.value.slice(0, PROFILE_NOTES_MAX)),
-                                    placeholder: 'Anything the coach should know: training style, experience, injuries/limitations, diet preferences, schedule, equipment, what you want to work on…',
+                                    placeholder: 'Your goal (e.g. lean bulk, cut to 80 kg) and anything else the coach should know: training style, experience, injuries, diet preferences, schedule, equipment…',
                                     className: 'w-full p-2.5 rounded-lg outline-none text-sm leading-relaxed resize-none',
                                     style: { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' }
                                 })
@@ -4054,11 +4148,11 @@
                                 e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } }, latestWeight ? fmtNum(latestWeight.weight) : '—'),
                                 e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'Weight kg')),
                             e('div', { className: 'rounded-xl p-3 text-center', style: card },
-                                e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } }, profile.goal ? profile.goal[0].toUpperCase() + profile.goal.slice(1) : '—'),
-                                e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'Goal'))
+                                e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } }, window.CWANutrition ? window.CWANutrition.targetsFor(profile, metrics).kcal.toLocaleString('en-US') : '—'),
+                                e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'kcal / day'))
                         ),
                         e('div', { className: 'grid grid-cols-2 gap-3' },
-                            hubCard('flag', 'Goals', 'Bulk/cut, targets', 'goals'),
+                            hubCard('flag', 'Goals', 'Targets & notes', 'goals'),
                             hubCard('monitor_weight', 'Daily Log', 'Weight, kcal, sleep', 'metrics'),
                             hubCard('photo_camera', 'Photos', `${photos.length} saved`, 'photos'),
                             hubCard('forum', 'AI Coach', 'Chat & advice', 'chat'),
