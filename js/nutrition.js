@@ -13,8 +13,10 @@
 // Data shapes (stored in Firebase under users/<id>/foodLog/<YYYY-MM-DD> and users/<id>/foods):
 //   nutrients n = { kcal, p, c, f, fib, sug, salt }  — per 100 g (or 100 ml)
 //   food  = { id?, name, brand, code, src: 'off'|'custom'|'basic'|'ai', unit: 'g'|'ml', n, serving: { g, label } | null }
-//   entry = { id, t (ms), meal, name, brand, code, src, foodId, g (amount), unit, n }
+//           a recipe is a custom food with recipe: true and its ingredients (see RecipeEditor)
+//   entry = { id, t (ms), meal, name, brand, code, src, foodId, g (amount), unit, n, serving? }
 //           totals = n * g / 100. A quick add stores its absolute values in n with g = 100.
+//           serving (the food's piece size) lets the diary show and edit counts ("3× vejce").
 (function () {
     'use strict';
     const { useState, useEffect, useRef } = React;
@@ -459,7 +461,29 @@
         );
     }
 
-    const amountText = (en) => (en.src === 'quick' ? 'Quick add' : `${fmtG(en.g)} ${en.unit || 'g'}`);
+    // ---------- pieces ----------
+    // A food's serving ({ g, label }) doubles as its "piece": log 3 eggs instead of 165 g.
+    // The piece's name is the label without a leading "1 " ("1 vejce" → "vejce"); a label that
+    // is just a weight ("30 g") becomes "serving".
+    function pieceName(sv) {
+        const l = String((sv && sv.label) || '').trim().replace(/^1\s*[×x]?\s+/i, '');
+        return !l || /^[\d.,]+\s*(g|ml|l|kg)\b/i.test(l) ? 'serving' : l;
+    }
+    const fmtCount = (c) => String(Math.round(c * 100) / 100);
+    // Whole or half pieces in `g` (e.g. 2.5), else null.
+    function piecesOf(g, sv) {
+        if (!sv || !(sv.g > 0) || !(g > 0)) return null;
+        const c = g / sv.g;
+        return Math.abs(c * 2 - Math.round(c * 2)) < 0.02 ? Math.round(c * 2) / 2 : null;
+    }
+    const servingOf = (food) => (food && food.serving && food.serving.g > 0 ? { g: food.serving.g, label: food.serving.label || '' } : null);
+    // Entries and recipe ingredients: "3× vejce · 165 g", or just "120 g".
+    const amountText = (en) => {
+        if (en.src === 'quick') return 'Quick add';
+        const grams = `${fmtG(en.g)} ${en.unit || 'g'}`;
+        const c = piecesOf(en.g, en.serving);
+        return c ? `${fmtCount(c)}× ${pieceName(en.serving)} · ${grams}` : grams;
+    };
     function Timeline({ entries, onOpen }) {
         if (!entries.length) {
             return e('div', { className: 'text-center py-10' },
@@ -556,46 +580,83 @@
     const parseN = (n) => { const o = {}; KEYS.forEach(k => { const v = num(n[k]); if (v != null) o[k] = v; }); if (o.kcal == null && (o.p != null || o.c != null || o.f != null)) o.kcal = kcalFrom(o); return roundN(o); };
     const nToStrings = (n) => { const o = {}; KEYS.forEach(k => { if (n && n[k] != null) o[k] = String(n[k]); }); return o; };
 
-    // Amount + meal + time for a food (new entry), or edit an existing entry.
-    function AmountSheet({ food, entry, date, onSave, onDelete, onClose, onEditFood }) {
-        const initialG = entry ? entry.g : (food.lastG || (food.serving && food.serving.g) || 100);
+    const stepBtn = (icon, onClick, aria) => e('button', {
+        onClick, 'aria-label': aria, className: 'w-14 h-14 rounded-2xl flex items-center justify-center active:scale-90 flex-shrink-0', style: ghostBtn
+    }, e(MIcon, { icon, style: { fontSize: '26px' } }));
+    const recipeBadge = () => e('span', { className: 'flex items-center gap-0.5 text-[10px] font-black px-1.5 py-0.5 rounded flex-shrink-0', style: { background: 'rgba(209,252,0,0.14)', color: 'var(--primary-fixed-dim)' } },
+        e(MIcon, { icon: 'menu_book', style: { fontSize: '12px' } }), 'RECIPE');
+
+    // Amount + meal + time for a food (new entry), or edit an existing entry. A food with a
+    // serving gets a piece counter on top (3 eggs); the amount below follows it, and typing a
+    // weight updates the count. ingredient: amount only, for a recipe (no meal or time).
+    function AmountSheet({ food, entry, date, onSave, onDelete, onClose, onEditFood, ingredient }) {
+        const sv = servingOf(food);
+        const initialG = entry ? entry.g : (food.lastG || (sv && sv.g) || 100);
         const [g, setG] = useState(String(initialG));
-        const [time, setTime] = useState(entry ? hhmm(entry.t) : hhmm(Date.now()));
-        const [meal, setMeal] = useState(entry ? entry.meal : mealForTime(timeOnDay(date)));
+        const [cnt, setCnt] = useState(sv ? fmtCount(initialG / sv.g) : '');
+        const [time, setTime] = useState(entry && entry.t ? hhmm(entry.t) : hhmm(Date.now()));
+        const [meal, setMeal] = useState(entry && entry.meal ? entry.meal : mealForTime(timeOnDay(date)));
         const unit = (entry ? entry.unit : food.unit) || 'g';
         const n = (entry ? entry.n : food.n) || {};
         const grams = num(g) || 0;
         const t = entryTotals({ g: grams, n });
+        const setGrams = (v) => { setG(v); if (sv) { const x = num(v); setCnt(x > 0 ? fmtCount(x / sv.g) : ''); } };
+        const setCount = (v) => { setCnt(v); const c = num(v); setG(c > 0 ? String(Math.round(c * sv.g * 10) / 10) : ''); };
+        // − / + go to whole pieces (1.5 → 1 or 2); below one piece, a half is the smallest step.
+        const step = (dir) => {
+            const c = num(cnt) || 0;
+            setCount(fmtCount(dir > 0 ? (c <= 0 ? 1 : c < 0.5 ? 0.5 : c < 1 ? 1 : Math.floor(c) + 1) : (c > 1 ? Math.ceil(c) - 1 : 0.5)));
+        };
         const chips = [];
-        if (food.serving && food.serving.g) chips.push({ g: food.serving.g, label: food.serving.label || `${food.serving.g} ${unit}` });
-        [50, 100, 150, 200, 250].forEach(v => { if (!chips.some(c => c.g === v)) chips.push({ g: v, label: `${v} ${unit}` }); });
-        const save = () => { if (grams > 0) onSave({ g: Math.round(grams * 10) / 10, meal, t: timeOnDay(date, time) }); };
+        [50, 100, 150, 200, 250].forEach(v => chips.push({ g: v, label: `${v} ${unit}` }));
+        const save = () => { if (grams > 0) onSave(ingredient ? { g: Math.round(grams * 10) / 10 } : { g: Math.round(grams * 10) / 10, meal, t: timeOnDay(date, time) }); };
+        const src = (entry || food).src;
+        const ings = food.recipe && Array.isArray(food.ingredients) ? food.ingredients : null;
         return e(Sheet, {
-            title: entry ? 'EDIT' : 'ADD', onClose,
+            title: ingredient ? 'INGREDIENT' : entry ? 'EDIT' : 'ADD', onClose,
             footer: e('div', { className: 'flex gap-2' },
-                entry ? e('button', { onClick: onDelete, 'aria-label': 'Delete entry', className: 'w-14 rounded-2xl flex items-center justify-center active:scale-95', style: { background: 'var(--error-container)', color: 'var(--on-error-container)' } }, e(MIcon, { icon: 'delete', style: { fontSize: '22px' } })) : null,
-                e('button', { onClick: save, disabled: !(grams > 0), className: 'flex-1 py-4 rounded-2xl text-base font-black active:scale-95', style: Object.assign({}, primaryBtn, { opacity: grams > 0 ? 1 : 0.5 }) }, entry ? 'Save' : `Add ${fmtK(t.kcal)} kcal`)
+                entry && onDelete ? e('button', { onClick: onDelete, 'aria-label': ingredient ? 'Remove ingredient' : 'Delete entry', className: 'w-14 rounded-2xl flex items-center justify-center active:scale-95', style: { background: 'var(--error-container)', color: 'var(--on-error-container)' } }, e(MIcon, { icon: 'delete', style: { fontSize: '22px' } })) : null,
+                e('button', { onClick: save, disabled: !(grams > 0), className: 'flex-1 py-4 rounded-2xl text-base font-black active:scale-95', style: Object.assign({}, primaryBtn, { opacity: grams > 0 ? 1 : 0.5 }) },
+                    entry ? 'Save' : ingredient ? `Add to recipe · ${fmtK(t.kcal)} kcal` : `Add ${fmtK(t.kcal)} kcal`)
             )
         },
             e('div', { className: 'mb-4' },
                 e('div', { className: 'text-xl font-black leading-tight' }, (entry || food).name),
-                e('div', { className: 'text-sm mt-0.5', style: { color: 'var(--on-surface-variant)' } }, [(entry || food).brand, food.alt].filter(Boolean).join(' · ') || ({ off: 'Open Food Facts', custom: 'My food', basic: 'Typical values', ai: 'AI estimate' }[(entry || food).src] || '')),
+                e('div', { className: 'flex items-center gap-2 mt-0.5' },
+                    ings ? recipeBadge() : null,
+                    e('div', { className: 'text-sm min-w-0', style: { color: 'var(--on-surface-variant)' } },
+                        ings ? `${ings.length} ingredient${ings.length === 1 ? '' : 's'}`
+                            : [(entry || food).brand, food.alt].filter(Boolean).join(' · ') || ({ off: 'Open Food Facts', custom: 'My food', basic: 'Typical values', ai: 'AI estimate' }[src] || ''))
+                ),
+                ings ? e('div', { className: 'text-xs mt-1', style: { color: 'var(--on-surface-variant)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } }, ings.map(x => x.name).join(', ')) : null,
                 e('div', { className: 'text-xs mt-2', style: { color: 'var(--outline)' } }, `Per 100 ${unit}: ${fmtK(n.kcal)} kcal · P ${fmtG(n.p)} · C ${fmtG(n.c)} · F ${fmtG(n.f)}`),
-                onEditFood ? e('button', { onClick: onEditFood, className: 'text-xs font-bold mt-2 active:opacity-60', style: { color: 'var(--primary-fixed-dim)' } }, 'Edit food values') : null
+                onEditFood ? e('button', { onClick: onEditFood, className: 'text-xs font-bold mt-2 active:opacity-60', style: { color: 'var(--primary-fixed-dim)' } }, food.recipe ? 'Edit recipe' : 'Edit food values') : null
             ),
-            e(NumField, { label: 'Amount', value: g, onChange: setG, unit, big: true }),
+            sv ? e('div', { className: 'rounded-2xl p-3 mb-3', style: card },
+                e('div', { className: 'text-[11px] uppercase tracking-widest mb-2 truncate', style: { color: 'var(--on-surface-variant)' } }, `How many · ${pieceName(sv)} = ${fmtG(sv.g)} ${unit}`),
+                e('div', { className: 'flex items-center gap-2' },
+                    stepBtn('remove', () => step(-1), 'One less'),
+                    e('input', {
+                        type: 'text', inputMode: 'decimal', value: cnt, 'aria-label': 'How many',
+                        onChange: (ev) => setCount(ev.target.value.replace(/[^0-9.,]/g, '')),
+                        className: 'flex-1 min-w-0 text-center text-3xl font-black p-2 rounded-xl outline-none cwa-input', style: inputStyle
+                    }),
+                    stepBtn('add', () => step(1), 'One more')
+                )
+            ) : null,
+            e(NumField, { label: sv ? 'Total amount' : 'Amount', value: g, onChange: setGrams, unit, big: !sv }),
             e('div', { className: 'flex gap-1.5 flex-wrap mt-2 mb-5' }, chips.map(c => e('button', {
-                key: c.label, onClick: () => setG(String(c.g)),
+                key: c.label, onClick: () => setGrams(String(c.g)),
                 className: 'px-3 py-1.5 rounded-full text-xs font-bold active:scale-95',
                 style: Number(g) === c.g ? primaryBtn : ghostBtn
             }, c.label))),
-            label('Meal'),
-            e(Segmented, { options: MEALS, value: meal, onChange: setMeal }),
-            e('div', { className: 'flex items-center gap-3 mt-4' },
+            ingredient ? null : label('Meal'),
+            ingredient ? null : e(Segmented, { options: MEALS, value: meal, onChange: setMeal }),
+            ingredient ? null : e('div', { className: 'flex items-center gap-3 mt-4' },
                 e('div', { className: 'text-[11px] uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Time'),
                 e('input', { type: 'time', value: time, onChange: (ev) => setTime(ev.target.value || time), className: 'p-2 rounded-xl outline-none text-base', style: Object.assign({ colorScheme: 'dark' }, inputStyle) })
             ),
-            e('div', { className: 'rounded-2xl p-4 mt-5', style: card },
+            e('div', { className: 'rounded-2xl p-4 ' + (ingredient ? 'mt-1' : 'mt-5'), style: card },
                 e('div', { className: 'flex items-baseline gap-1.5' },
                     e('span', { className: 'text-3xl font-black', style: { fontVariantNumeric: 'tabular-nums' } }, fmtK(t.kcal)),
                     e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'kcal')
@@ -649,10 +710,141 @@
                 e('div', null, label('Values per'), e(Segmented, { options: [{ id: 'g', label: '100 g' }, { id: 'ml', label: '100 ml' }], value: unit, onChange: setUnit })),
                 e(NutrientFields, { n, setN, unit }),
                 e('div', { className: 'grid grid-cols-2 gap-2' },
-                    e(NumField, { label: 'Serving size', value: servingG, onChange: setServingG, unit }),
-                    e(TextField, { label: 'Serving name', value: servingLabel, onChange: setServingLabel, placeholder: 'e.g. 1 cup' })
-                )
+                    e(NumField, { label: 'Piece / serving', value: servingG, onChange: setServingG, unit }),
+                    e(TextField, { label: 'Its name', value: servingLabel, onChange: setServingLabel, placeholder: 'e.g. 1 bar' })
+                ),
+                e('div', { className: 'text-xs', style: { color: 'var(--outline)' } }, 'With a piece size you can log by count (2 bars) instead of weighing.')
             )
+        );
+    }
+
+    // ---------- recipes ----------
+    // A recipe is one of your foods made of other foods (src 'custom', recipe: true). Its
+    // values per 100 g are the ingredients' totals divided by the finished weight: the
+    // ingredients' own weight, or what the cooked dish weighs if you enter it (pasta soaks up
+    // water, stews lose it). Millilitres count as grams. Ingredient values are copied in, so
+    // editing or deleting an ingredient food later doesn't change the recipe. Its serving is
+    // one portion (finished weight ÷ portions), so the piece counter logs portions.
+    //   recipe = { ...food, recipe: true, ingredients: [ingredient], portions, weight (cooked g) | absent }
+    //   ingredient = { name, brand, src, foodId, code, g, unit, n, serving }
+    const toIngredient = (food, g) => ({
+        name: food.name, brand: food.brand || '', src: food.src || 'custom', foodId: food.src === 'custom' ? (food.id || '') : '',
+        code: food.code || '', g, unit: food.unit || 'g', n: food.n || {}, serving: servingOf(food),
+    });
+    const busyOverlay = (text) => e('div', { className: 'fixed inset-0 z-[180] flex flex-col items-center justify-center gap-3', style: { background: 'rgba(0,0,0,0.75)', color: '#fff' } },
+        e('div', { className: 'cwa-spin', style: { width: 36, height: 36, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.2)', borderTopColor: 'var(--primary-container)' } }),
+        e('div', { className: 'text-sm font-bold' }, text));
+
+    function RecipeEditor({ initial, app, onSave, onDelete, onClose }) {
+        const init = initial || {};
+        const editing = !!(init.recipe && init.id);
+        const [name, setName] = useState(init.name || '');
+        const [ings, setIngs] = useState(() => (Array.isArray(init.ingredients) ? init.ingredients : []).map(x => ({ ...x, key: newId('i') })));
+        const [portions, setPortions] = useState(init.portions ? String(init.portions) : '1');
+        const [cooked, setCooked] = useState(init.weight ? String(init.weight) : '');
+        const [sub, setSub] = useState(null); // { type: 'pick' | 'scan' | 'amount', food, index }
+        const [busy, setBusy] = useState(false);
+        const [notice, setNotice] = useState('');
+        const tot = dayTotals(ings);
+        const rawG = ings.reduce((s, x) => s + (num(x.g) || 0), 0);
+        const weight = num(cooked) > 0 ? num(cooked) : rawG;
+        const nPortions = num(portions) > 0 ? num(portions) : 1;
+        const portionG = weight / nPortions;
+        const per100 = {};
+        KEYS.forEach(k => { per100[k] = weight > 0 ? tot[k] * 100 / weight : 0; });
+        const ok = !!(name.trim() && ings.length && weight > 0);
+        const save = () => {
+            if (!ok) return;
+            onSave({
+                id: editing ? init.id : newId('f'), name: name.trim(), brand: '', code: '', src: 'custom', recipe: true, unit: 'g',
+                n: roundN(per100), serving: { g: Math.round(portionG * 10) / 10, label: '1 portion' },
+                ingredients: ings.map(({ key, ...x }) => x), portions: nPortions, weight: num(cooked) > 0 ? num(cooked) : null,
+                updated: Date.now(),
+            });
+        };
+        // Barcode → your foods, then Open Food Facts.
+        const lookup = async (code) => {
+            setNotice('');
+            const mine = Object.values(app.foods || {}).find(f => f.code === code);
+            if (mine) { setSub({ type: 'amount', food: mine }); return; }
+            setBusy(true);
+            try {
+                const r = await offLookup(code);
+                if (r.found && r.food.hasNutrition) setSub({ type: 'amount', food: r.food });
+                else { setNotice(`${r.found && r.food.name ? r.food.name : 'Barcode ' + code}: no nutrition data in Open Food Facts. Search by name, or save it as a new food first.`); setSub({ type: 'pick' }); }
+            } catch (err) {
+                setNotice("Couldn't reach Open Food Facts. Try again, or search by name."); setSub({ type: 'pick' });
+            } finally { setBusy(false); }
+        };
+        const pick = () => { setNotice(''); setSub({ type: 'pick' }); };
+
+        let subEl = null;
+        if (sub && sub.type === 'pick') {
+            subEl = e(AddSheet, {
+                app: { ...app, lookupCode: lookup }, mode: 'ingredient', exclude: init.id, notice, onClose: () => setSub(null),
+                onPick: (food) => setSub({ type: 'amount', food }), onScan: () => setSub({ type: 'scan' }),
+            });
+        } else if (sub && sub.type === 'scan') {
+            subEl = e(ScanSheet, { onCode: lookup, onClose: () => setSub({ type: 'pick' }) });
+        } else if (sub && sub.type === 'amount') {
+            const i = sub.index;
+            subEl = e(AmountSheet, {
+                key: i != null ? ings[i].key : 'new', food: sub.food, entry: i != null ? ings[i] : null, date: dayKey(Date.now()), ingredient: true,
+                onClose: () => setSub(i != null ? null : { type: 'pick' }),
+                onDelete: i != null ? () => { setIngs(ings.filter((_, j) => j !== i)); setSub(null); } : null,
+                onSave: ({ g }) => {
+                    setIngs(i != null ? ings.map((x, j) => (j === i ? { ...x, g } : x)) : ings.concat({ ...toIngredient(sub.food, g), key: newId('i') }));
+                    setSub(null);
+                },
+            });
+        }
+
+        const macro = (k) => e('div', { key: k },
+            e('div', { className: 'text-[11px] uppercase tracking-widest', style: { color: COLOR[k] } }, LABEL[k]),
+            e('div', { className: 'text-lg font-black', style: { fontVariantNumeric: 'tabular-nums' } }, fmtG(tot[k] / nPortions), e('span', { className: 'text-xs ml-0.5' }, 'g')));
+        return e(React.Fragment, null,
+            e(Sheet, {
+                title: editing ? 'EDIT RECIPE' : 'NEW RECIPE', onClose,
+                footer: e('div', { className: 'flex gap-2' },
+                    onDelete ? e('button', { onClick: onDelete, 'aria-label': 'Delete recipe', className: 'w-14 rounded-2xl flex items-center justify-center active:scale-95', style: { background: 'var(--error-container)', color: 'var(--on-error-container)' } }, e(MIcon, { icon: 'delete', style: { fontSize: '22px' } })) : null,
+                    e('button', { onClick: save, disabled: !ok, className: 'flex-1 py-4 rounded-2xl text-base font-black active:scale-95', style: Object.assign({}, primaryBtn, { opacity: ok ? 1 : 0.5 }) }, 'Save recipe')
+                )
+            },
+                e(TextField, { label: 'Name', value: name, onChange: setName, placeholder: 'e.g. Overnight oats' }),
+                e('div', { className: 'mt-4' },
+                    label(ings.length ? `Ingredients · ${ings.length}` : 'Ingredients'),
+                    ings.length ? e('div', { className: 'rounded-2xl px-3 mb-2', style: card }, ings.map((x, i) => e('button', {
+                        key: x.key, onClick: () => setSub({ type: 'amount', food: x, index: i }), 'aria-label': 'Change ' + x.name,
+                        className: 'w-full flex items-center gap-3 py-2.5 text-left active:opacity-70',
+                        style: { borderBottom: i < ings.length - 1 ? '1px solid var(--surface-container-highest)' : 'none' }
+                    },
+                        e('div', { className: 'flex-1 min-w-0' },
+                            e('div', { className: 'text-sm font-bold truncate' }, x.name),
+                            e('div', { className: 'text-xs truncate', style: { color: 'var(--on-surface-variant)' } }, [amountText(x), x.brand].filter(Boolean).join(' · '))
+                        ),
+                        e('div', { className: 'text-sm font-black flex-shrink-0', style: { fontVariantNumeric: 'tabular-nums' } }, fmtK(entryTotals(x).kcal), e('span', { className: 'text-[10px] font-bold ml-0.5', style: { color: 'var(--on-surface-variant)' } }, 'kcal'))
+                    ))) : e('div', { className: 'text-sm mb-2', style: { color: 'var(--outline)' } }, 'Add the foods it is made of: your foods, basic foods, a barcode or a product search. Eggs and other pieces can be counted.'),
+                    e('button', { onClick: pick, className: 'w-full py-3 rounded-2xl text-base font-bold flex items-center justify-center gap-2 active:scale-95', style: ghostBtn },
+                        e(MIcon, { icon: 'add', style: { fontSize: '20px' } }), 'Add ingredient')
+                ),
+                e('div', { className: 'grid grid-cols-2 gap-2 mt-5' },
+                    e(NumField, { label: 'Portions', value: portions, onChange: setPortions, placeholder: '1' }),
+                    e(NumField, { label: 'Cooked weight', value: cooked, onChange: setCooked, unit: 'g', placeholder: rawG > 0 ? String(Math.round(rawG)) : '' })
+                ),
+                e('div', { className: 'text-xs mt-1.5', style: { color: 'var(--outline)' } }, 'Cooked weight is optional: weigh the finished dish if cooking changes it, so a weighed amount logs right. Otherwise the ingredients add up.'),
+                ings.length ? e('div', { className: 'rounded-2xl p-4 mt-4', style: card },
+                    e('div', { className: 'text-[11px] uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, nPortions === 1 ? `Whole recipe · ${fmtG(weight)} g` : `1 portion of ${fmtCount(nPortions)} · ${fmtG(portionG)} g`),
+                    e('div', { className: 'flex items-baseline gap-1.5 mt-1' },
+                        e('span', { className: 'text-3xl font-black', style: { fontVariantNumeric: 'tabular-nums' } }, fmtK(tot.kcal / nPortions)),
+                        e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, 'kcal')
+                    ),
+                    e('div', { className: 'grid grid-cols-3 gap-2 mt-3' }, ['p', 'c', 'f'].map(macro)),
+                    e('div', { className: 'text-xs mt-3', style: { color: 'var(--outline)', fontVariantNumeric: 'tabular-nums' } },
+                        `Per 100 g: ${fmtK(per100.kcal)} kcal · P ${fmtG(per100.p)} · C ${fmtG(per100.c)} · F ${fmtG(per100.f)} · fibre ${fmtG(per100.fib)} · sugar ${fmtG(per100.sug)} · salt ${fmtSalt(per100.salt)}`)
+                ) : null
+            ),
+            subEl,
+            busy ? busyOverlay('Looking up barcode…') : null
         );
     }
 
@@ -773,14 +965,19 @@
                         className: 'flex-1 min-w-0 p-3 rounded-xl outline-none text-base cwa-input', style: inputStyle
                     }),
                     e('button', { onClick: submitManual, 'aria-label': 'Look up barcode', className: 'px-4 rounded-xl font-black active:scale-95', style: primaryBtn }, e(MIcon, { icon: 'search', style: { fontSize: '22px' } })),
-                    e('button', { onClick: onPhoto, 'aria-label': 'Take a photo instead', className: 'px-4 rounded-xl font-black active:scale-95', style: ghostBtn }, e(MIcon, { icon: 'photo_camera', style: { fontSize: '22px' } }))
+                    onPhoto ? e('button', { onClick: onPhoto, 'aria-label': 'Take a photo instead', className: 'px-4 rounded-xl font-black active:scale-95', style: ghostBtn }, e(MIcon, { icon: 'photo_camera', style: { fontSize: '22px' } })) : null
                 )
             )
         );
     }
 
     function FoodRow({ food, onClick, right }) {
-        const sub = [food.brand, food.alt, `${fmtK(food.n.kcal)} kcal / 100 ${food.unit || 'g'}`].filter(Boolean).join(' · ');
+        const n = food.n || {};
+        const recipe = food.recipe && Array.isArray(food.ingredients);
+        const sv = servingOf(food);
+        const sub = recipe
+            ? [`${food.ingredients.length} ingredient${food.ingredients.length === 1 ? '' : 's'}`, sv ? `${fmtK((n.kcal || 0) * sv.g / 100)} kcal / portion` : `${fmtK(n.kcal)} kcal / 100 g`].join(' · ')
+            : [food.brand, food.alt, `${fmtK(n.kcal)} kcal / 100 ${food.unit || 'g'}`].filter(Boolean).join(' · ');
         const badge = { off: 'OFF', custom: 'MY', basic: '', ai: 'AI' }[food.src] || '';
         return e('div', { className: 'flex items-center gap-2' },
             e('button', { onClick, className: 'flex-1 min-w-0 flex items-center gap-3 py-2.5 text-left active:opacity-70' },
@@ -788,7 +985,8 @@
                     e('div', { className: 'text-sm font-bold truncate' }, food.name),
                     e('div', { className: 'text-xs truncate', style: { color: 'var(--on-surface-variant)' } }, sub)
                 ),
-                badge ? e('span', { className: 'text-[10px] font-black px-1.5 py-0.5 rounded flex-shrink-0', style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface-variant)' } }, badge) : null
+                recipe ? recipeBadge()
+                    : badge ? e('span', { className: 'text-[10px] font-black px-1.5 py-0.5 rounded flex-shrink-0', style: { background: 'var(--surface-container-highest)', color: 'var(--on-surface-variant)' } }, badge) : null
             ),
             right || null
         );
@@ -806,18 +1004,23 @@
                 if (seen.has(key)) continue;
                 seen.add(key);
                 const live = en.foodId && customFoods[en.foodId];
-                out.push(live ? { ...live, lastG: en.g } : { id: en.foodId || '', name: en.name, brand: en.brand, code: en.code, src: en.src, unit: en.unit, n: en.n, serving: null, lastG: en.g });
+                out.push(live ? { ...live, lastG: en.g } : { id: en.foodId || '', name: en.name, brand: en.brand, code: en.code, src: en.src, unit: en.unit, n: en.n, serving: servingOf(en), lastG: en.g });
                 if (out.length >= 40) return out;
             }
         }
         return out;
     }
 
-    function AddSheet({ app, date, onPick, onScan, onPhoto, onQuick, onNewFood, onEditFood, onClose }) {
+    // mode 'ingredient': picking a recipe ingredient (search, scan, your foods; no logging
+    // actions), without the recipe being edited (exclude = its id).
+    function AddSheet({ app, onPick, onScan, onPhoto, onQuick, onNewFood, onNewRecipe, onEditFood, onClose, mode, exclude, notice }) {
+        const pickIng = mode === 'ingredient';
         const [q, setQ] = useState('');
         const [online, setOnline] = useState({ q: '', world: false, state: 'idle', items: [], error: '' });
-        const custom = Object.values(app.foods || {});
-        const recent = recentFoods(app.log, app.foods || {});
+        const custom = Object.values(app.foods || {}).filter(f => !exclude || f.id !== exclude);
+        const recent = recentFoods(app.log, app.foods || {}).filter(f => !exclude || f.id !== exclude);
+        const recipes = custom.filter(f => f.recipe).sort((a, b) => a.name.localeCompare(b.name));
+        const plain = custom.filter(f => !f.recipe).sort((a, b) => a.name.localeCompare(b.name));
         const fq = fold(q.trim());
         const tokens = fq.split(/\s+/).filter(Boolean);
         const matches = (f) => { const h = fold([f.name, f.brand, f.alt, f.code].join(' ')); return tokens.every(t => h.includes(t)); };
@@ -833,26 +1036,32 @@
         const section = (title, items, opts) => items.length ? e('div', { className: 'mt-4' },
             label(title),
             e('div', { className: 'rounded-2xl px-3', style: card }, items.map((f, i) => e('div', { key: (f.id || f.code || f.name) + i, style: { borderBottom: i < items.length - 1 ? '1px solid var(--surface-container-highest)' : 'none' } },
-                e(FoodRow, { food: f, onClick: () => onPick(f), right: opts && opts.editable && f.src === 'custom' ? iconBtn('edit', () => onEditFood(f), 'Edit ' + f.name, { width: 34, height: 34, background: 'transparent', color: 'var(--on-surface-variant)' }) : null })
+                e(FoodRow, { food: f, onClick: () => onPick(f), right: !pickIng && opts && opts.editable && f.src === 'custom' ? iconBtn('edit', () => onEditFood(f), 'Edit ' + f.name, { width: 34, height: 34, background: 'transparent', color: 'var(--on-surface-variant)' }) : null })
             )))) : null;
-        const action = (icon, text, onClick) => e('button', { onClick, className: 'flex flex-col items-center justify-center gap-1 py-3 rounded-2xl active:scale-95', style: card },
-            e(MIcon, { icon, style: { fontSize: '22px', color: 'var(--primary-container)' } }), e('span', { className: 'text-[11px] font-bold' }, text));
-        return e(Sheet, { title: 'ADD FOOD', onClose },
+        const action = (icon, text, onClick) => e('button', { onClick, className: 'flex flex-col items-center justify-center gap-1 py-3 px-0.5 rounded-2xl active:scale-95 min-w-0', style: card },
+            e(MIcon, { icon, style: { fontSize: '22px', color: 'var(--primary-container)' } }), e('span', { className: 'text-[11px] font-bold leading-tight text-center' }, text));
+        return e(Sheet, { title: pickIng ? 'ADD INGREDIENT' : 'ADD FOOD', onClose },
+            notice ? e('div', { className: 'mb-3 rounded-xl px-3 py-2 text-sm', style: { background: 'rgba(255,115,81,0.12)', color: 'var(--error)' } }, notice) : null,
             e('div', { className: 'flex items-center gap-2 rounded-2xl px-3', style: inputStyle },
                 e(MIcon, { icon: 'search', style: { fontSize: '20px', color: 'var(--on-surface-variant)' } }),
                 e('input', { type: 'text', enterKeyHint: 'search', value: q, autoFocus: true, placeholder: 'Search foods or type a barcode', onChange: (ev) => setQ(ev.target.value),
                     onKeyDown: (ev) => { if (ev.key === 'Enter') { ev.target.blur(); if (/^\d{8,14}$/.test(q.trim())) app.lookupCode(q.trim()); else runSearch(false); } }, className: 'flex-1 min-w-0 py-3 bg-transparent outline-none text-base cwa-input', style: { color: 'var(--on-surface)' } }),
                 q ? e('button', { onClick: () => setQ(''), 'aria-label': 'Clear search', className: 'active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(MIcon, { icon: 'close', style: { fontSize: '20px' } })) : null
             ),
-            e('div', { className: 'grid grid-cols-4 gap-2 mt-3' },
-                action('barcode_scanner', 'Scan', onScan),
-                action('photo_camera', 'Photo', onPhoto),
-                action('bolt', 'Quick add', onQuick),
-                action('add', 'New food', () => onNewFood({}))
-            ),
+            pickIng
+                ? e('button', { onClick: onScan, className: 'w-full mt-3 py-3 rounded-2xl text-base font-bold flex items-center justify-center gap-2 active:scale-95', style: card },
+                    e(MIcon, { icon: 'barcode_scanner', style: { fontSize: '20px', color: 'var(--primary-container)' } }), 'Scan a barcode')
+                : e('div', { className: 'grid grid-cols-5 gap-1.5 mt-3' },
+                    action('barcode_scanner', 'Scan', onScan),
+                    action('photo_camera', 'Photo', onPhoto),
+                    action('bolt', 'Quick add', onQuick),
+                    action('add', 'New food', () => onNewFood({})),
+                    action('menu_book', 'Recipe', onNewRecipe)
+                ),
             isCode ? e('button', { onClick: () => app.lookupCode(q.trim()), className: 'w-full mt-4 py-3 rounded-2xl text-base font-bold active:scale-95', style: primaryBtn }, `Look up barcode ${q.trim()}`) : null,
             fq ? null : section('Recent', recent.slice(0, 15)),
-            fq ? null : section('My foods', custom.sort((a, b) => a.name.localeCompare(b.name)), { editable: true }),
+            fq ? null : section('My recipes', recipes, { editable: true }),
+            fq ? null : section('My foods', plain, { editable: true }),
             fq ? section('Matches', local, { editable: true }) : null,
             fq && !isCode ? e('div', { className: 'mt-4' },
                 label('Open Food Facts'),
@@ -869,7 +1078,7 @@
                                 online.world ? null : e('button', { onClick: () => runSearch(true), className: 'mt-2 w-full py-2.5 rounded-xl text-sm font-bold active:scale-95', style: ghostBtn }, 'Search worldwide too')
                             )
             ) : null,
-            !fq && !recent.length && !custom.length ? e('div', { className: 'text-sm mt-6 text-center', style: { color: 'var(--outline)' } }, 'Search above — your recent foods will show up here.') : null,
+            !fq && !recent.length && !custom.length ? e('div', { className: 'text-sm mt-6 text-center', style: { color: 'var(--outline)' } }, pickIng ? 'Search above — basic foods like eggs, oats or rice are built in.' : 'Search above — your recent foods will show up here.') : null,
             e('div', { className: 'text-[10px] mt-6 text-center', style: { color: 'var(--outline)' } }, 'Product data: Open Food Facts (ODbL). Basic foods: typical values.')
         );
     }
@@ -927,7 +1136,7 @@
             name: String(r.name || 'Food').trim(), brand: String(r.brand || '').trim(), code: String(r.barcode || '').replace(/\D/g, ''),
             src: 'ai', unit: r.unit === 'ml' ? 'ml' : 'g',
             n: roundN({ kcal: p.kcal, p: p.protein, c: p.carbs, f: p.fat, fib: p.fibre != null ? p.fibre : p.fiber, sug: p.sugar, salt: p.salt }),
-            serving: sg > 0 ? { g: Math.round(sg), label: `portion ~${Math.round(sg)} g` } : null,
+            serving: sg > 0 ? { g: Math.round(sg), label: '1 portion' } : null,
         };
     }
 
@@ -950,6 +1159,8 @@
 
         const addEntry = (food, { g, meal, t }) => {
             const entry = { id: newId('e'), t, meal, name: food.name, brand: food.brand || '', code: food.code || '', src: food.src || 'custom', foodId: food.src === 'custom' ? (food.id || '') : '', g, unit: food.unit || 'g', n: food.n };
+            const sv = servingOf(food);
+            if (sv) entry.serving = sv; // so the diary can say "3× vejce" and edit by count
             app.saveDay(date, entries.concat(entry).sort((a, b) => a.t - b.t));
             app.toast(`Added ${fmtK(entryTotals(entry).kcal)} kcal`);
             setSheet(null);
@@ -1033,23 +1244,32 @@
             const close = () => setSheet(null);
             if (sheet.type === 'add') {
                 sheetEl = e(AddSheet, {
-                    app, date, onClose: close,
+                    app, onClose: close,
                     onPick: (food) => setSheet({ type: 'amount', food }),
                     onScan: () => setSheet({ type: 'scan' }),
                     onPhoto: takePhoto,
                     onQuick: () => setSheet({ type: 'quick' }),
                     onNewFood: (food) => setSheet({ type: 'editor', food, thenAdd: true }),
-                    onEditFood: (food) => setSheet({ type: 'editor', food, back: 'add' }),
+                    onNewRecipe: () => setSheet({ type: 'recipe', food: null, thenAdd: true }),
+                    onEditFood: (food) => setSheet({ type: food.recipe ? 'recipe' : 'editor', food, back: 'add' }),
                 });
             } else if (sheet.type === 'amount') {
                 const en = sheet.entry;
                 const food = sheet.food || {};
-                const editable = (food.src === 'custom' && food.id) ? food : (en && en.foodId && app.foods[en.foodId]) || null;
+                // A diary entry edits the food it came from (by foodId; the entry's own id is not a food id).
+                const editable = en ? (en.foodId && app.foods[en.foodId]) || null : (food.src === 'custom' && food.id ? food : null);
                 sheetEl = e(AmountSheet, {
                     key: (en && en.id) || food.code || food.name, food, entry: en, date, onClose: close,
                     onSave: (v) => (en ? updateEntry(en, v) : addEntry(food, v)),
                     onDelete: en ? () => deleteEntry(en) : null,
-                    onEditFood: editable ? () => setSheet({ type: 'editor', food: editable, back: en ? null : 'amount' }) : (food.src === 'ai' ? () => setSheet({ type: 'editor', food, thenAdd: true, note: 'AI estimate — adjust the numbers, then save as your food.' }) : null),
+                    onEditFood: editable ? () => setSheet({ type: editable.recipe ? 'recipe' : 'editor', food: editable, back: en ? null : 'amount' }) : (food.src === 'ai' ? () => setSheet({ type: 'editor', food, thenAdd: true, note: 'AI estimate — adjust the numbers, then save as your food.' }) : null),
+                });
+            } else if (sheet.type === 'recipe' || (sheet.type === 'editor' && sheet.food && sheet.food.recipe)) {
+                const f = sheet.food || {};
+                sheetEl = e(RecipeEditor, {
+                    key: f.id || 'new-recipe', initial: f, app, onClose: close,
+                    onDelete: f.id && app.foods[f.id] ? () => app.confirm({ title: 'Delete recipe?', message: `"${f.name}" will be removed from your foods. Logged entries stay.`, confirmLabel: 'Delete', onConfirm: () => { deleteFood(f); setSheet(null); } }) : null,
+                    onSave: (food) => { saveFood(food); app.toast('Recipe saved'); setSheet(sheet.thenAdd || sheet.back === 'amount' ? { type: 'amount', food } : sheet.back === 'add' ? { type: 'add' } : null); },
                 });
             } else if (sheet.type === 'editor') {
                 const f = sheet.food || {};
@@ -1112,14 +1332,15 @@
                         e('button', { onClick: takePhoto, className: 'py-3.5 rounded-2xl text-base font-bold flex items-center justify-center gap-1.5 active:scale-95', style: ghostBtn }, e(MIcon, { icon: 'photo_camera', style: { fontSize: '20px' } }), 'Photo')
                     ),
                     error ? e('div', { className: 'mt-3 rounded-xl px-3 py-2 text-sm', style: { background: 'rgba(255,115,81,0.12)', color: 'var(--error)' } }, error) : null,
-                    e('div', { className: 'mt-4' }, e(Timeline, { entries, onOpen: (en) => setSheet({ type: 'amount', entry: en, food: { ...en, serving: en.foodId && app.foods[en.foodId] ? app.foods[en.foodId].serving : null } }) }))
+                    e('div', { className: 'mt-4' }, e(Timeline, { entries, onOpen: (en) => {
+                        const live = (en.foodId && app.foods[en.foodId]) || {};
+                        setSheet({ type: 'amount', entry: en, food: { ...en, serving: servingOf(en) || servingOf(live), recipe: live.recipe, ingredients: live.ingredients } });
+                    } }))
                 )
             ),
             e('input', { ref: photoInput, type: 'file', accept: 'image/*', capture: 'environment', className: 'hidden', onChange: (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; onPhotoFile(f); } }),
             sheetEl,
-            busy ? e('div', { className: 'fixed inset-0 z-[180] flex flex-col items-center justify-center gap-3', style: { background: 'rgba(0,0,0,0.75)', color: '#fff' } },
-                e('div', { className: 'cwa-spin', style: { width: 36, height: 36, borderRadius: '50%', border: '3px solid rgba(255,255,255,0.2)', borderTopColor: 'var(--primary-container)' } }),
-                e('div', { className: 'text-sm font-bold' }, busy)) : null,
+            busy ? busyOverlay(busy) : null,
             app.toastText ? e('div', { className: 'fixed left-1/2 -translate-x-1/2 z-[190] px-4 py-2 rounded-xl text-sm font-bold', style: { bottom: 'max(env(safe-area-inset-bottom), 90px)', background: 'var(--primary-container)', color: 'var(--on-primary-container)', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' } }, app.toastText) : null,
             app.confirmEl || null,
             e(BottomNavBar, { activeTab: 'food', onTabChange: app.onTabChange })

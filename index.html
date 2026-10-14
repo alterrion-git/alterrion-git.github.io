@@ -262,10 +262,10 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.17.0"></script>
+    <script src="js/nutrition.js?v=3.18.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.17.0';
+        const APP_VERSION = '3.18.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -963,7 +963,7 @@
         // Icons render by codepoint from the self-hosted subset font (fonts/material-symbols.woff2),
         // so a missing font shows nothing instead of the icon's name as text. New icon? Add it to
         // tools/build-icons.py, rebuild, and paste the printed ICON_CP here.
-        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","bolt":"ea0b","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","content_copy":"e14d","delete":"e872","delete_sweep":"e16c","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","fitness_center":"eb43","flag":"e153","flash_off":"e3e6","flash_on":"e3e7","forum":"e0bf","history":"e28e","info":"e88e","local_fire_department":"ea05","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","play_arrow":"e037","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","tune":"e429","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
+        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","bolt":"ea0b","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","content_copy":"e14d","delete":"e872","delete_sweep":"e16c","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","fitness_center":"eb43","flag":"e153","flash_off":"e3e6","flash_on":"e3e7","forum":"e0bf","history":"e28e","info":"e88e","local_fire_department":"ea05","menu_book":"ea19","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","play_arrow":"e037","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","tune":"e429","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
         const MIcon = ({ icon, fill = false, className = '', style = {} }) => e('span', {
             className: `material-symbols-outlined ${className}`,
             'aria-hidden': true,
