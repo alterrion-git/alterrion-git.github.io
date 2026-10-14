@@ -262,10 +262,10 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.19.0"></script>
+    <script src="js/nutrition.js?v=3.19.1"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.19.0';
+        const APP_VERSION = '3.19.1';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -335,7 +335,7 @@
             try { data = await res.json(); } catch (err) {}
             if (!res.ok) throw new Error((data && data.error) || `AI service error (${res.status})`);
             if (!data.text) throw new Error('The response came back empty — try again.');
-            return full ? { text: data.text, model: data.model || '' } : data.text;
+            return full ? { text: data.text, model: data.model || '', fallback: data.fallback || '' } : data.text;
         }
 
         const ASSISTANT_SYSTEM = "You are Coach, a friendly, knowledgeable strength-training and fitness assistant built into a workout-tracking app. Help with training, programming, technique, exercise selection, nutrition, recovery and motivation. You are given the user's own logged data below — reference their real numbers, goals and trends when it's relevant, but you can also answer general fitness questions. Be concise and practical (a few short paragraphs or bullets). Avoid medical claims; for pain, injury or medical concerns, suggest seeing a qualified professional. For questions about eating or calories, use the food diary below: what they ate (item by item for the last few days), the day's totals and what is left of their targets; say so if a day looks incompletely logged. Format replies in Markdown: short paragraphs, **bold** for key numbers, bullet or numbered lists, a small table only when comparing options. No HTML, no code blocks unless asked.";
@@ -2511,6 +2511,62 @@
                 const nowD = new Date(now);
                 lines.push(`Now: ${todayName} ${dayKey(now)}, ${String(nowD.getHours()).padStart(2, '0')}:${String(nowD.getMinutes()).padStart(2, '0')} (user's local time).`);
                 lines.push(`Today is ${todayName}; today's planned workout: ${todayW ? todayW.name : 'rest / none'}.`);
+                // Nutrition before the (long) training data, so it's never the part that gets cut.
+                const N = window.CWANutrition;
+                if (N) {
+                    const tg = N.targetsFor(p, metrics);
+                    const fmtT = (t) => `${Math.round(t.kcal)} kcal, P ${Math.round(t.p)}g, C ${Math.round(t.c)}g, F ${Math.round(t.f)}g, fibre ${Math.round(t.fib)}g, sugar ${Math.round(t.sug)}g, salt ${Math.round(t.salt * 10) / 10}g`;
+                    lines.push(`Nutrition targets: ${tg.kcal} kcal, protein ${tg.p}g, carbs ${tg.c}g, fat ${tg.f}g, fibre >=${tg.fib}g, sugar <=${tg.sug}g, salt <=${tg.salt}g.`);
+                    const todayKey = dayKey(now);
+                    const days = Object.keys(foodLog).filter(d => d >= dayKey(now - 14 * DAY_MS) && d <= todayKey && (foodLog[d] || []).length).sort();
+                    if (days.length) {
+                        // Item by item for today and the two days before, by meal.
+                        const r0 = (x) => Math.round(x || 0);
+                        const MEAL_NAMES = { breakfast: 'Breakfast', lunch: 'Lunch', snack: 'Snack', dinner: 'Dinner' };
+                        const itemText = (en) => {
+                            const t = N.entryTotals(en);
+                            const sv = en.serving && en.serving.g > 0 ? en.serving : null;
+                            const pcs = sv ? Math.round(en.g / sv.g * 2) / 2 : 0;
+                            const amount = en.src === 'quick' ? 'quick add' : (pcs > 0 && Math.abs(en.g / sv.g - pcs) < 0.02 ? `${pcs}× ${String(sv.label || 'serving').replace(/^1\s+/, '')} = ` : '') + `${r0(en.g)}${en.unit || 'g'}`;
+                            return `${en.name}${en.brand ? ' (' + en.brand + ')' : ''} ${amount}: ${r0(t.kcal)} kcal, P${r0(t.p)} C${r0(t.c)} F${r0(t.f)}`;
+                        };
+                        const detailDays = [0, 1, 2].map(k => dayKey(now - k * DAY_MS)).filter(d => (foodLog[d] || []).length);
+                        if (!(foodLog[todayKey] || []).length) lines.push(`Today (${todayKey}): no food logged yet.`);
+                        if (detailDays.length) {
+                            lines.push('Food diary detail (what was eaten, grams and per-item kcal / protein / carbs / fat):');
+                            detailDays.forEach(d => {
+                                const list = foodLog[d] || [];
+                                const t = N.dayTotals(list);
+                                const label = d === todayKey ? 'today, so far' : d === dayKey(now - DAY_MS) ? 'yesterday' : '2 days ago';
+                                const left = d === todayKey ? ` — ${r0(tg.kcal - t.kcal) >= 0 ? r0(tg.kcal - t.kcal) + ' kcal left' : r0(t.kcal - tg.kcal) + ' kcal over'}, protein ${r0(t.p)}/${tg.p}g, carbs ${r0(t.c)}/${tg.c}g, fat ${r0(t.f)}/${tg.f}g` : '';
+                                lines.push(`  ${d} (${label}): total ${r0(t.kcal)} of ${tg.kcal} kcal${left}`);
+                                const meals = ['breakfast', 'lunch', 'snack', 'dinner'].concat([...new Set(list.map(en => en.meal))].filter(m => !MEAL_NAMES[m]));
+                                meals.forEach(m => {
+                                    const items = list.filter(en => en.meal === m).sort((a, b) => a.t - b.t);
+                                    if (!items.length) return;
+                                    const mk = items.reduce((sum, en) => sum + N.entryTotals(en).kcal, 0);
+                                    lines.push(`    ${MEAL_NAMES[m] || 'Other'} (${r0(mk)} kcal): ${items.map(itemText).join('; ')}`);
+                                });
+                            });
+                        }
+                        lines.push('Food diary totals (last 14 days):');
+                        days.forEach(d => lines.push(`  ${d}${d === todayKey ? ' (today, so far)' : ''}: ${fmtT(N.dayTotals(foodLog[d]))}`));
+                        const full = days.filter(d => d !== todayKey);
+                        if (full.length >= 2) {
+                            const sum = full.map(d => N.dayTotals(foodLog[d])).reduce((a, t) => { Object.keys(t).forEach(k => { a[k] = (a[k] || 0) + t[k]; }); return a; }, {});
+                            Object.keys(sum).forEach(k => { sum[k] /= full.length; });
+                            lines.push(`  Average of ${full.length} logged days: ${fmtT(sum)}`);
+                        }
+                    } else {
+                        lines.push('Food diary: nothing logged in the last 14 days.');
+                    }
+                    // Deterministic week ratings (0-10; training done vs planned + nutrition vs targets).
+                    const planDaysCtx = DAYS.filter(d => workouts[d]);
+                    const wr = [2, 1].map(k => N.weekRating({ mondayMs: N.weekStartOf(now - k * 7 * DAY_MS), history: workoutHistory, planDays: planDaysCtx, log: foodLog, targets: tg, now }))
+                        .filter(r => r.score != null)
+                        .map(r => `week of ${dayKey(r.mondayMs)}: ${r.score.toFixed(1)}/10 (training ${r.training ? r.training.done + '/' + r.training.planned : 'n/a'}, nutrition ${r.nutrition ? Math.round(r.nutrition.score * 100) + '% with ' + r.nutrition.logged + '/7 days logged' : 'not logged'})`);
+                    if (wr.length) lines.push('Week ratings: ' + wr.join('; ') + '.');
+                }
 
                 // Full current program: every planned day with each exercise's set scheme.
                 const fmtSets = (ex) => {
@@ -2550,60 +2606,6 @@
                 if (kc) body.push(`avg intake ~${kc} kcal/day (last 4w)`);
                 if (sl) body.push(`avg sleep ~${sl}h`);
                 if (body.length) lines.push('Body: ' + body.join(', ') + '.');
-                const N = window.CWANutrition;
-                if (N) {
-                    const tg = N.targetsFor(p, metrics);
-                    const fmtT = (t) => `${Math.round(t.kcal)} kcal, P ${Math.round(t.p)}g, C ${Math.round(t.c)}g, F ${Math.round(t.f)}g, fibre ${Math.round(t.fib)}g, sugar ${Math.round(t.sug)}g, salt ${Math.round(t.salt * 10) / 10}g`;
-                    lines.push(`Nutrition targets: ${tg.kcal} kcal, protein ${tg.p}g, carbs ${tg.c}g, fat ${tg.f}g, fibre >=${tg.fib}g, sugar <=${tg.sug}g, salt <=${tg.salt}g.`);
-                    const todayKey = dayKey(now);
-                    const days = Object.keys(foodLog).filter(d => d >= dayKey(now - 14 * DAY_MS) && d <= todayKey && (foodLog[d] || []).length).sort();
-                    if (days.length) {
-                        lines.push('Food diary totals (last 14 days):');
-                        days.forEach(d => lines.push(`  ${d}${d === todayKey ? ' (today, so far)' : ''}: ${fmtT(N.dayTotals(foodLog[d]))}`));
-                        const full = days.filter(d => d !== todayKey);
-                        if (full.length >= 2) {
-                            const sum = full.map(d => N.dayTotals(foodLog[d])).reduce((a, t) => { Object.keys(t).forEach(k => { a[k] = (a[k] || 0) + t[k]; }); return a; }, {});
-                            Object.keys(sum).forEach(k => { sum[k] /= full.length; });
-                            lines.push(`  Average of ${full.length} logged days: ${fmtT(sum)}`);
-                        }
-                        // Item by item for today and the two days before, by meal.
-                        const r0 = (x) => Math.round(x || 0);
-                        const MEAL_NAMES = { breakfast: 'Breakfast', lunch: 'Lunch', snack: 'Snack', dinner: 'Dinner' };
-                        const itemText = (en) => {
-                            const t = N.entryTotals(en);
-                            const sv = en.serving && en.serving.g > 0 ? en.serving : null;
-                            const pcs = sv ? Math.round(en.g / sv.g * 2) / 2 : 0;
-                            const amount = en.src === 'quick' ? 'quick add' : (pcs > 0 && Math.abs(en.g / sv.g - pcs) < 0.02 ? `${pcs}× ${String(sv.label || 'serving').replace(/^1\s+/, '')} = ` : '') + `${r0(en.g)}${en.unit || 'g'}`;
-                            return `${en.name}${en.brand ? ' (' + en.brand + ')' : ''} ${amount}: ${r0(t.kcal)} kcal, P${r0(t.p)} C${r0(t.c)} F${r0(t.f)}`;
-                        };
-                        const detailDays = [0, 1, 2].map(k => dayKey(now - k * DAY_MS)).filter(d => (foodLog[d] || []).length);
-                        if (detailDays.length) {
-                            lines.push('Food diary detail (what was eaten, grams and per-item kcal / protein / carbs / fat):');
-                            detailDays.forEach(d => {
-                                const list = foodLog[d] || [];
-                                const t = N.dayTotals(list);
-                                const label = d === todayKey ? 'today, so far' : d === dayKey(now - DAY_MS) ? 'yesterday' : '2 days ago';
-                                const left = d === todayKey ? ` — ${r0(tg.kcal - t.kcal) >= 0 ? r0(tg.kcal - t.kcal) + ' kcal left' : r0(t.kcal - tg.kcal) + ' kcal over'}, protein ${r0(t.p)}/${tg.p}g, carbs ${r0(t.c)}/${tg.c}g, fat ${r0(t.f)}/${tg.f}g` : '';
-                                lines.push(`  ${d} (${label}): total ${r0(t.kcal)} of ${tg.kcal} kcal${left}`);
-                                const meals = ['breakfast', 'lunch', 'snack', 'dinner'].concat([...new Set(list.map(en => en.meal))].filter(m => !MEAL_NAMES[m]));
-                                meals.forEach(m => {
-                                    const items = list.filter(en => en.meal === m).sort((a, b) => a.t - b.t);
-                                    if (!items.length) return;
-                                    const mk = items.reduce((sum, en) => sum + N.entryTotals(en).kcal, 0);
-                                    lines.push(`    ${MEAL_NAMES[m] || 'Other'} (${r0(mk)} kcal): ${items.map(itemText).join('; ')}`);
-                                });
-                            });
-                        }
-                    } else {
-                        lines.push('Food diary: nothing logged in the last 14 days.');
-                    }
-                    // Deterministic week ratings (0-10; training done vs planned + nutrition vs targets).
-                    const planDaysCtx = DAYS.filter(d => workouts[d]);
-                    const wr = [2, 1].map(k => N.weekRating({ mondayMs: N.weekStartOf(now - k * 7 * DAY_MS), history: workoutHistory, planDays: planDaysCtx, log: foodLog, targets: tg, now }))
-                        .filter(r => r.score != null)
-                        .map(r => `week of ${dayKey(r.mondayMs)}: ${r.score.toFixed(1)}/10 (training ${r.training ? r.training.done + '/' + r.training.planned : 'n/a'}, nutrition ${r.nutrition ? Math.round(r.nutrition.score * 100) + '% with ' + r.nutrition.logged + '/7 days logged' : 'not logged'})`);
-                    if (wr.length) lines.push('Week ratings: ' + wr.join('; ') + '.');
-                }
                 return lines.join('\n');
             };
 
@@ -2632,6 +2634,7 @@
                     const reply = await callAIProxy({ system, messages: turns, user: currentUser ? currentUser.username : '', maxTokens: 900 }, true);
                     const answer = { role: 'assistant', content: reply.text, ts: Date.now() };
                     if (reply.model) answer.model = reply.model.split('/').pop();
+                    if (reply.fallback) answer.fallback = true; // the preferred model didn't answer
                     setChats(list => { const c = list.find(x => x.id === id); return upsert(list, [...(c ? c.messages : next), answer]); });
                     setAiUsage({ date: today, count: used + 1 }); // count only successful replies
                 } catch (err) {
@@ -4177,7 +4180,8 @@
                             }, isUser ? m.content : e(Markdown, { text: m.content }))
                         );
                     };
-                    const lastModel = (msgs.slice().reverse().find(m => m.role === 'assistant' && m.model) || {}).model;
+                    const lastAnswer = msgs.slice().reverse().find(m => m.role === 'assistant' && m.model);
+                    const lastModel = lastAnswer ? lastAnswer.model + (lastAnswer.fallback ? ' (fallback)' : '') : '';
                     const suggestions = ["How's my eating today?", "How's my recent progress?", 'What should I focus on next?', "Suggest a warm-up for today's workout"];
                     const headBtn = (icon, onClick, aria, disabled) => e('button', { onClick, disabled, 'aria-label': aria, className: 'w-9 h-9 flex items-center justify-center rounded-full active:opacity-60', style: { color: 'var(--on-surface-variant)', opacity: disabled ? 0.35 : 1 } }, e(MIcon, { icon, style: { fontSize: '22px' } }));
                     const newChat = () => { setChatId(null); setChatListOpen(false); setAiError(''); };
@@ -4250,7 +4254,13 @@
                                     proxyEnabled() ? e('button', {
                                         onClick: async () => {
                                             setAiError(''); setAiBusy(true);
-                                            try { await callAIProxy({ system: 'You are a fitness coach.', prompt: 'Reply with exactly: OK', maxTokens: 30 }); setToast('AI service works ✓'); }
+                                            try {
+                                                const r = await callAIProxy({ system: 'You are a fitness coach.', prompt: 'Reply with exactly: OK', maxTokens: 30 }, true);
+                                                const model = (r.model || '').split('/').pop();
+                                                setToast('AI service works ✓' + (model ? ' · ' + model : ''));
+                                                // Shown below the button: why the preferred model was skipped.
+                                                if (r.fallback) setAiError(`Answered by ${model}. Skipped: ${r.fallback}`);
+                                            }
                                             catch (err) { setAiError(err.message || 'Test failed'); }
                                             finally { setAiBusy(false); }
                                         },
