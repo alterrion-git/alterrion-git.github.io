@@ -6,7 +6,7 @@
 //
 // Two jobs:
 //  1. AI Coach chat / text: POST { system, prompt | messages, user, maxTokens }
-//     → { text, model }
+//     → { text, model, fallback? }  (fallback: why the models before `model` didn't answer)
 //  2. Food photos (nutrition labels / products / plates):
 //     POST { task: 'food-photo', image: 'data:image/jpeg;base64,...', user }
 //     → { food: { name, brand, barcode, unit, source, per100: {...}, servingGrams, confidence }, model }
@@ -103,7 +103,9 @@ export default {
       return foodPhoto(env, image, json);
     }
 
-    const system = String(body.system || '').slice(0, 6000);
+    // The app's context (profile, food diary, program, recent sets) runs to several thousand
+    // characters; 24k chars is ~6k tokens, well inside both chat models' context windows.
+    const system = String(body.system || '').slice(0, 24000);
     const prompt = String(body.prompt || '').slice(0, 12000);
     const turns = Array.isArray(body.messages) ? body.messages : null; // chat history
     const maxTokens = Math.min(Math.max(parseInt(body.maxTokens, 10) || 700, 64), 2048);
@@ -129,11 +131,12 @@ export default {
     for (const model of models) {
       try {
         const text = await chat(env, model, system, msgs, maxTokens);
-        if (text) return json({ text, model });
+        if (text) return json(errors.length ? { text, model, fallback: errors.join(' | ').slice(0, 600) } : { text, model });
         errors.push(`${model}: empty reply`);
       } catch (e) {
         errors.push(`${model}: ${e && e.message ? e.message : e}`);
       }
+      console.log('chat model failed:', errors[errors.length - 1]); // shows in the Worker's logs
     }
     return json({ error: 'Model error: ' + errors.join(' | ').slice(0, 600) }, 502);
   },
@@ -141,19 +144,20 @@ export default {
 
 // One chat turn on one model → reply text ('' if it said nothing).
 async function chat(env, model, system, msgs, maxTokens) {
-  if (/gpt-oss/.test(model)) {
-    // OpenAI Responses API shape: instructions + input. It reasons before answering, so it
-    // gets no output cap here (a cap would cut the answer, not the reasoning).
-    const base = { instructions: system || undefined, reasoning: { effort: 'medium' } };
-    try {
-      return responseText(await env.AI.run(model, { ...base, input: msgs }));
-    } catch (e) {
-      // Some versions only take a string input: send the conversation as a transcript.
-      const transcript = msgs.map((m) => `${m.role === 'user' ? 'User' : 'Coach'}: ${m.content}`).join('\n\n');
-      return responseText(await env.AI.run(model, { ...base, input: msgs.length === 1 ? msgs[0].content : transcript + '\n\nCoach:' }));
-    }
-  }
   const messages = system ? [{ role: 'system', content: system }, ...msgs] : msgs;
+  if (/gpt-oss/.test(model)) {
+    // gpt-oss always reasons first, and max_tokens covers the reasoning too, so it gets far
+    // more room than the visible answer needs (a small cap leaves the answer empty).
+    let firstError = null;
+    try {
+      const text = responseText(await env.AI.run(model, { messages, max_tokens: Math.max(4096, maxTokens * 4) }));
+      if (text) return text;
+    } catch (e) { firstError = e; }
+    // The model's other input shape: OpenAI Responses API (system prompt as a message).
+    try {
+      return responseText(await env.AI.run(model, { input: messages, reasoning: { effort: 'medium' } }));
+    } catch (e) { throw firstError || e; }
+  }
   return responseText(await env.AI.run(model, { messages, max_tokens: maxTokens, temperature: 0.6 }));
 }
 

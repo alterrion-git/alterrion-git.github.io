@@ -1,12 +1,12 @@
 // Service Worker with Cache Versioning
-const CACHE_VERSION = 'v3.19.0'; // UPDATE THIS WITH EACH NEW VERSION!
+const CACHE_VERSION = 'v3.19.1'; // UPDATE THIS WITH EACH NEW VERSION!
 const CACHE_NAME = `workout-tracker-${CACHE_VERSION}`;
 
 // Same-origin app shell: must all cache, or the install fails (and the old SW keeps serving).
 const APP_SHELL = [
   './',
   './index.html',
-  './js/nutrition.js?v=3.19.0', // same URL as the <script> in index.html
+  './js/nutrition.js?v=3.19.1', // same URL as the <script> in index.html
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
