@@ -487,34 +487,119 @@
         const c = piecesOf(en.g, en.serving);
         return c ? `${fmtCount(c)}× ${pieceName(en.serving)} · ${grams}` : grams;
     };
-    function Timeline({ entries, onOpen }) {
-        if (!entries.length) {
+    // ---------- usual foods (today's suggestions) ----------
+    // A food logged in a meal on more than half of the logged days of the last USUAL_DAYS (with
+    // at least USUAL_MIN_DAYS logged days) is suggested in that meal today, greyed out, in its
+    // most common amount: the amount logged most often, or the median when every day differed.
+    const USUAL_DAYS = 28, USUAL_MIN_DAYS = 4;
+    const foodKey = (en) => (en.foodId ? 'f:' + en.foodId : en.code ? 'c:' + en.code : 'n:' + fold(en.name + '|' + (en.brand || '')));
+    const minutesOf = (ts) => { const d = new Date(ts); return d.getHours() * 60 + d.getMinutes(); };
+    const median = (arr) => { const a = arr.slice().sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+    // → { breakfast: [{ key, meal, food, g, time: 'HH:MM', days, of }], ... }
+    function usualFoods(log, todayKey, customFoods) {
+        const start = dayKey(keyToDate(todayKey).getTime() - USUAL_DAYS * 86400000);
+        const days = Object.keys(log || {}).filter(d => d < todayKey && d >= start && (log[d] || []).length);
+        const out = {};
+        if (days.length < USUAL_MIN_DAYS) return out;
+        MEALS.forEach(({ id }) => {
+            const stats = {};
+            days.forEach(d => {
+                const perDay = {}; // the same food twice in one meal counts once, with both amounts added
+                (log[d] || []).filter(en => en.meal === id && en.src !== 'quick' && en.n).forEach(en => {
+                    const k = foodKey(en);
+                    const p = perDay[k] || (perDay[k] = { g: 0, en, mins: [] });
+                    p.g += num(en.g) || 0; p.mins.push(minutesOf(en.t));
+                    if (en.t > p.en.t) p.en = en;
+                });
+                Object.keys(perDay).forEach(k => {
+                    const p = perDay[k];
+                    const st = stats[k] || (stats[k] = { days: 0, gs: [], mins: [], last: p.en });
+                    st.days++; st.gs.push(Math.round(p.g * 10) / 10); st.mins.push(...p.mins);
+                    if (p.en.t > st.last.t) st.last = p.en;
+                });
+            });
+            const list = Object.keys(stats).filter(k => stats[k].days / days.length > 0.5).map(k => {
+                const st = stats[k];
+                const freq = {};
+                st.gs.forEach(g => { freq[g] = (freq[g] || 0) + 1; });
+                const top = Object.keys(freq).map(Number).sort((a, b) => freq[b] - freq[a] || b - a)[0];
+                const g = freq[top] >= 2 ? top : Math.round(median(st.gs));
+                const mins = Math.round(median(st.mins));
+                const en = st.last, live = en.foodId && customFoods && customFoods[en.foodId];
+                const food = live || { id: en.foodId || '', name: en.name, brand: en.brand || '', code: en.code || '', src: en.src || 'custom', unit: en.unit || 'g', n: en.n, serving: servingOf(en) };
+                return { key: k, meal: id, food, g, time: `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`, mins, days: st.days, of: days.length };
+            }).sort((a, b) => a.mins - b.mins).slice(0, 5);
+            if (list.length) out[id] = list;
+        });
+        return out;
+    }
+    // Today's suggestions still to show: a meal's suggestions go once anything else is logged there.
+    function pendingUsual(usual, entries) {
+        const out = {};
+        Object.keys(usual || {}).forEach(meal => {
+            const inMeal = entries.filter(en => en.meal === meal);
+            const keys = new Set(usual[meal].map(u => u.key));
+            if (inMeal.some(en => !keys.has(foodKey(en)))) return;
+            const have = new Set(inMeal.map(foodKey));
+            const rest = usual[meal].filter(u => !have.has(u.key));
+            if (rest.length) out[meal] = rest;
+        });
+        return out;
+    }
+
+    // Diary for one day, grouped by meal. suggest: today's usual foods not logged yet (greyed
+    // out, ✓ logs one, tapping it opens the amount first).
+    function Timeline({ entries, onOpen, suggest, onAccept, onOpenSuggestion }) {
+        const sug = suggest || {};
+        const hasSug = Object.keys(sug).length > 0;
+        if (!entries.length && !hasSug) {
             return e('div', { className: 'text-center py-10' },
                 e(MIcon, { icon: 'restaurant', style: { fontSize: '44px', color: 'var(--surface-container-highest)' } }),
                 e('div', { className: 'text-base font-bold mt-3' }, 'Nothing logged yet'),
                 e('div', { className: 'text-sm mt-1', style: { color: 'var(--on-surface-variant)' } }, 'Scan a barcode, snap a label, or search for a food.')
             );
         }
-        const rows = [];
-        let lastMeal = null;
-        entries.forEach((en, i) => {
-            if (en.meal !== lastMeal) {
-                lastMeal = en.meal;
-                const mealKcal = entries.filter(x => x.meal === en.meal).reduce((s, x) => s + entryTotals(x).kcal, 0);
-                rows.push(e('div', { key: 'h' + i, className: 'flex items-center gap-2 pl-[54px] pt-3 pb-1' },
-                    e('span', { className: 'text-[11px] font-black uppercase tracking-widest', style: { color: 'var(--primary-fixed-dim)' } }, MEAL_LABEL[en.meal] || 'Meal'),
-                    e('span', { className: 'text-[11px]', style: { color: 'var(--outline)' } }, `${fmtK(mealKcal)} kcal`)
-                ));
+        const known = MEALS.map(m => m.id);
+        const meals = known.concat([...new Set(entries.map(en => en.meal))].filter(m => !known.includes(m)));
+        const flat = [];
+        meals.forEach(m => {
+            const items = entries.filter(en => en.meal === m);
+            const sugs = sug[m] || [];
+            if (!items.length && !sugs.length) return;
+            flat.push({ type: 'head', meal: m, items });
+            items.forEach(en => flat.push({ type: 'entry', en }));
+            sugs.forEach(u => flat.push({ type: 'sug', u }));
+        });
+        const lastIdx = flat.length - 1;
+        const dot = (style) => e('div', { style: Object.assign({ width: 9, height: 9, borderRadius: '50%', marginTop: 16, flexShrink: 0 }, style) });
+        const line = (i) => (i === lastIdx ? null : e('div', { style: { width: 2, flex: 1, background: 'var(--surface-container-highest)', marginTop: 3 } }));
+        const rowBorder = (i) => ({ borderBottom: i === lastIdx || (flat[i + 1] && flat[i + 1].type === 'head') ? 'none' : '1px solid var(--surface-container-high)' });
+        const rows = flat.map((r, i) => {
+            if (r.type === 'head') {
+                const kcal = r.items.reduce((s, x) => s + entryTotals(x).kcal, 0);
+                return e('div', { key: 'h' + r.meal, className: 'flex items-center gap-2 pl-[54px] pt-3 pb-1' },
+                    e('span', { className: 'text-[11px] font-black uppercase tracking-widest', style: { color: 'var(--primary-fixed-dim)' } }, MEAL_LABEL[r.meal] || 'Meal'),
+                    e('span', { className: 'text-[11px]', style: { color: 'var(--outline)' } }, r.items.length ? `${fmtK(kcal)} kcal` : 'usual foods'));
             }
-            const t = entryTotals(en);
-            const last = i === entries.length - 1;
-            rows.push(e('button', { key: en.id, onClick: () => onOpen(en), className: 'w-full flex items-stretch text-left active:opacity-70' },
+            if (r.type === 'sug') {
+                const u = r.u, t = entryTotals({ g: u.g, n: u.food.n });
+                return e('div', { key: 's' + u.meal + u.key, className: 'w-full flex items-stretch' },
+                    e('div', { className: 'w-[42px] pt-3 text-[11px] flex-shrink-0', style: { color: 'var(--outline)', opacity: 0.6, fontVariantNumeric: 'tabular-nums' } }, u.time),
+                    e('div', { className: 'w-3 flex flex-col items-center flex-shrink-0 mr-2.5' }, dot({ border: '1.5px dashed var(--outline)' }), line(i)),
+                    e('div', { className: 'flex-1 min-w-0 py-1.5 flex items-center gap-2', style: rowBorder(i) },
+                        e('button', { onClick: () => onOpenSuggestion(u), 'aria-label': `Choose amount of ${u.food.name}`, className: 'flex-1 min-w-0 text-left active:opacity-70', style: { opacity: 0.5 } },
+                            e('div', { className: 'text-sm font-bold truncate' }, u.food.name),
+                            e('div', { className: 'text-xs truncate', style: { color: 'var(--on-surface-variant)', fontVariantNumeric: 'tabular-nums' } },
+                                `Usual · ${amountText({ g: u.g, unit: u.food.unit, serving: servingOf(u.food) })} · ${fmtK(t.kcal)} kcal`)),
+                        e('button', { onClick: () => onAccept(u), 'aria-label': 'Log ' + u.food.name, className: 'w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 active:scale-90', style: { border: '1.5px solid var(--primary-container)', color: 'var(--primary-container)', opacity: 0.85 } },
+                            e(MIcon, { icon: 'check', style: { fontSize: '20px' } }))
+                    ));
+            }
+            const en = r.en, t = entryTotals(en);
+            return e('button', { key: en.id, onClick: () => onOpen(en), className: 'w-full flex items-stretch text-left active:opacity-70' },
                 e('div', { className: 'w-[42px] pt-3 text-[11px] flex-shrink-0', style: { color: 'var(--outline)', fontVariantNumeric: 'tabular-nums' } }, hhmm(en.t)),
-                e('div', { className: 'w-3 flex flex-col items-center flex-shrink-0 mr-2.5' },
-                    e('div', { style: { width: 9, height: 9, borderRadius: '50%', marginTop: 16, background: 'var(--primary-container)', flexShrink: 0 } }),
-                    last ? null : e('div', { style: { width: 2, flex: 1, background: 'var(--surface-container-highest)', marginTop: 3 } })
-                ),
-                e('div', { className: 'flex-1 min-w-0 py-2.5', style: { borderBottom: last ? 'none' : '1px solid var(--surface-container-high)' } },
+                e('div', { className: 'w-3 flex flex-col items-center flex-shrink-0 mr-2.5' }, dot({ background: 'var(--primary-container)' }), line(i)),
+                e('div', { className: 'flex-1 min-w-0 py-2.5', style: rowBorder(i) },
                     e('div', { className: 'flex items-start gap-2' },
                         e('div', { className: 'flex-1 min-w-0' },
                             e('div', { className: 'text-sm font-bold truncate' }, en.name),
@@ -528,9 +613,11 @@
                             `${k.toUpperCase()} ${fmtG(t[k])}`))
                     )
                 )
-            ));
+            );
         });
-        return e('div', null, rows);
+        return e('div', null,
+            hasSug && !entries.length ? e('div', { className: 'text-xs px-1 pt-1', style: { color: 'var(--outline)' } }, 'Your usual foods. Tap ✓ to log one, or tap it to change the amount first.') : null,
+            rows);
     }
 
     // ---------- forms ----------
@@ -592,13 +679,13 @@
     // Amount + meal + time for a food (new entry), or edit an existing entry. A food with a
     // serving gets a piece counter on top (3 eggs); the amount below follows it, and typing a
     // weight updates the count. ingredient: amount only, for a recipe (no meal or time).
-    function AmountSheet({ food, entry, date, onSave, onDelete, onClose, onEditFood, ingredient }) {
+    function AmountSheet({ food, entry, date, onSave, onDelete, onClose, onEditFood, ingredient, defaultMeal, defaultTime }) {
         const sv = servingOf(food);
         const initialG = entry ? entry.g : (food.lastG || (sv && sv.g) || 100);
         const [g, setG] = useState(String(initialG));
         const [cnt, setCnt] = useState(sv ? fmtCount(initialG / sv.g) : '');
-        const [time, setTime] = useState(entry && entry.t ? hhmm(entry.t) : hhmm(Date.now()));
-        const [meal, setMeal] = useState(entry && entry.meal ? entry.meal : mealForTime(timeOnDay(date)));
+        const [time, setTime] = useState(entry && entry.t ? hhmm(entry.t) : (defaultTime || hhmm(Date.now())));
+        const [meal, setMeal] = useState(entry && entry.meal ? entry.meal : (defaultMeal || mealForTime(timeOnDay(date))));
         const unit = (entry ? entry.unit : food.unit) || 'g';
         const n = (entry ? entry.n : food.n) || {};
         const grams = num(g) || 0;
@@ -1262,7 +1349,7 @@
                 // A diary entry edits the food it came from (by foodId; the entry's own id is not a food id).
                 const editable = en ? (en.foodId && app.foods[en.foodId]) || null : (food.src === 'custom' && food.id ? food : null);
                 sheetEl = e(AmountSheet, {
-                    key: (en && en.id) || food.code || food.name, food, entry: en, date, onClose: close,
+                    key: (en && en.id) || food.code || food.name, food, entry: en, date, onClose: close, defaultMeal: sheet.meal, defaultTime: sheet.time,
                     onSave: (v) => (en ? updateEntry(en, v) : addEntry(food, v)),
                     onDelete: en ? () => deleteEntry(en) : null,
                     onEditFood: editable ? () => setSheet({ type: editable.recipe ? 'recipe' : 'editor', food: editable, back: en ? null : 'amount' }) : (food.src === 'ai' ? () => setSheet({ type: 'editor', food, thenAdd: true, note: 'AI estimate — adjust the numbers, then save as your food.' }) : null),
@@ -1335,7 +1422,12 @@
                         e('button', { onClick: takePhoto, className: 'py-3.5 rounded-2xl text-base font-bold flex items-center justify-center gap-1.5 active:scale-95', style: ghostBtn }, e(MIcon, { icon: 'photo_camera', style: { fontSize: '20px' } }), 'Photo')
                     ),
                     error ? e('div', { className: 'mt-3 rounded-xl px-3 py-2 text-sm', style: { background: 'rgba(255,115,81,0.12)', color: 'var(--error)' } }, error) : null,
-                    e('div', { className: 'mt-4' }, e(Timeline, { entries, onOpen: (en) => {
+                    e('div', { className: 'mt-4' }, e(Timeline, {
+                        entries,
+                        suggest: date === today ? pendingUsual(usualFoods(app.log, today, app.foods), entries) : null,
+                        onAccept: (u) => addEntry(u.food, { g: u.g, meal: u.meal, t: timeOnDay(date, u.time) }),
+                        onOpenSuggestion: (u) => setSheet({ type: 'amount', food: { ...u.food, lastG: u.g }, meal: u.meal, time: u.time }),
+                        onOpen: (en) => {
                         const live = (en.foodId && app.foods[en.foodId]) || {};
                         setSheet({ type: 'amount', entry: en, food: { ...en, serving: servingOf(en) || servingOf(live), recipe: live.recipe, ingredients: live.ingredients } });
                     } }))
@@ -1376,5 +1468,5 @@
         );
     }
 
-    window.CWANutrition = { FoodScreen, dayTotals, entryTotals, targetsFor, weekRating, weekStartOf, ratingColor, WeekRatingDialog, KEYS, LABEL, BASIC_FOODS, offToFood };
+    window.CWANutrition = { usualFoods, pendingUsual, FoodScreen, dayTotals, entryTotals, targetsFor, weekRating, weekStartOf, ratingColor, WeekRatingDialog, KEYS, LABEL, BASIC_FOODS, offToFood };
 })();

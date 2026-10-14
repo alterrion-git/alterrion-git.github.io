@@ -69,7 +69,7 @@ allocation):
 1. Cloudflare → **Storage & Databases → KV → Create namespace** (e.g. `cwa-rl`).
 2. Worker → **Settings → Bindings → Add → KV namespace** → variable name **`RL`**
    → pick that namespace → **Deploy**.
-3. (Optional) plain variables `DAILY_LIMIT` (chat, defaults to `5`) and
+3. (Optional) plain variables `DAILY_LIMIT` (chat, defaults to `10`) and
    `VISION_DAILY_LIMIT` (food photos, defaults to `30`).
 
 With `RL` bound, the Worker counts requests per user per day and returns 429

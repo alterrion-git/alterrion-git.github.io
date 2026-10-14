@@ -262,10 +262,11 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.19.1"></script>
+    <script src="js/nutrition.js?v=3.20.0"></script>
+    <script src="js/coach.js?v=3.20.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.19.1';
+        const APP_VERSION = '3.20.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -338,12 +339,12 @@
             return full ? { text: data.text, model: data.model || '', fallback: data.fallback || '' } : data.text;
         }
 
-        const ASSISTANT_SYSTEM = "You are Coach, a friendly, knowledgeable strength-training and fitness assistant built into a workout-tracking app. Help with training, programming, technique, exercise selection, nutrition, recovery and motivation. You are given the user's own logged data below — reference their real numbers, goals and trends when it's relevant, but you can also answer general fitness questions. Be concise and practical (a few short paragraphs or bullets). Avoid medical claims; for pain, injury or medical concerns, suggest seeing a qualified professional. For questions about eating or calories, use the food diary below: what they ate (item by item for the last few days), the day's totals and what is left of their targets; say so if a day looks incompletely logged. Format replies in Markdown: short paragraphs, **bold** for key numbers, bullet or numbered lists, a small table only when comparing options. No HTML, no code blocks unless asked.";
+        // The coach's prompt and its view of the user's data live in js/coach.js (window.CWACoach).
 
         // Coach conversations: the newest COACH_MAX_CHATS are kept; the coach sees the open one only.
         const COACH_MAX_CHATS = 5;
         const COACH_MAX_MESSAGES = 60;   // stored per conversation
-        const COACH_CONTEXT_MESSAGES = 20; // sent to the model (the latest turns)
+        const COACH_CONTEXT_MESSAGES = 12; // sent to the model (the latest turns)
         const chatTitle = (text) => { const t = String(text || '').replace(/\s+/g, ' ').trim(); return t.length > 48 ? t.slice(0, 46).trim() + '…' : (t || 'Chat'); };
         // The old single never-ending chat → one conversation per day, newest first.
         function chatsFromLegacy(msgs) {
@@ -359,7 +360,7 @@
             });
         }
 
-        const DAILY_AI_LIMIT = 5;
+        const DAILY_AI_LIMIT = 10;
 
         // ============================================
         // FIREBASE AUTH (optional, secure mode) — OFF until you paste a Web API key.
@@ -516,7 +517,7 @@
         // of one GET of users/<id> (which would download all of it on every launch) the known
         // fields are read in parallel and the log only for the last FOOD_LOG_RECENT_DAYS.
         // Older days come from this device's copy or loadFoodRange (calendar / date browsing).
-        const USER_FIELDS = ['email', 'createdAt', 'passwordHash', 'workouts', 'history', 'profile', 'metrics', 'recaps', 'chat', 'chats', 'aiUsage', 'foods'];
+        const USER_FIELDS = ['email', 'createdAt', 'passwordHash', 'workouts', 'history', 'profile', 'metrics', 'recaps', 'chat', 'chats', 'coachMemory', 'aiUsage', 'foods'];
         const FOOD_LOG_RECENT_DAYS = 62;
         function foodRangeParams(startKey, endKey) {
             return 'orderBy=' + encodeURIComponent('"$key"')
@@ -1018,6 +1019,16 @@
             return e('div', { className: 'cwa-md' }, blocks);
         }
 
+        // --- Add a fact to the coach's memory by hand ---
+        function MemoryInput({ onAdd }) {
+            const [text, setText] = useState('');
+            const add = () => { const t = text.trim(); if (t) { onAdd(t.slice(0, 200)); setText(''); } };
+            return e('div', { className: 'flex gap-2 mt-2' },
+                e('input', { type: 'text', value: text, placeholder: 'Tell the coach something to remember', 'aria-label': 'New memory', onChange: (ev) => setText(ev.target.value), onKeyDown: (ev) => { if (ev.key === 'Enter') add(); },
+                    className: 'flex-1 min-w-0 px-3 py-2.5 rounded-xl outline-none text-sm', style: { background: 'var(--surface-container-high)', color: 'var(--on-surface)', border: 'none' } }),
+                e('button', { onClick: add, disabled: !text.trim(), className: 'px-4 rounded-xl text-sm font-bold active:scale-95', style: { background: text.trim() ? 'var(--primary-container)' : 'var(--surface-container-high)', color: text.trim() ? 'var(--on-primary-container)' : 'var(--outline)' } }, 'Add'));
+        }
+
         // --- Chat input bar (self-managed text; grows to a few lines) ---
         function ChatInput({ onSend, disabled, placeholder }) {
             const [text, setText] = useState('');
@@ -1076,7 +1087,7 @@
         // Icons render by codepoint from the self-hosted subset font (fonts/material-symbols.woff2),
         // so a missing font shows nothing instead of the icon's name as text. New icon? Add it to
         // tools/build-icons.py, rebuild, and paste the printed ICON_CP here.
-        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","bolt":"ea0b","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","content_copy":"e14d","delete":"e872","delete_sweep":"e16c","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","fitness_center":"eb43","flag":"e153","flash_off":"e3e6","flash_on":"e3e7","forum":"e0bf","history":"e28e","info":"e88e","local_fire_department":"ea05","menu_book":"ea19","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","play_arrow":"e037","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","tune":"e429","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
+        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","bolt":"ea0b","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","content_copy":"e14d","delete":"e872","delete_sweep":"e16c","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","fitness_center":"eb43","flag":"e153","flash_off":"e3e6","flash_on":"e3e7","forum":"e0bf","history":"e28e","info":"e88e","local_fire_department":"ea05","menu_book":"ea19","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","play_arrow":"e037","psychology":"ea4a","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","tune":"e429","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
         const MIcon = ({ icon, fill = false, className = '', style = {} }) => e('span', {
             className: `material-symbols-outlined ${className}`,
             'aria-hidden': true,
@@ -1481,6 +1492,7 @@
             const [chatId, setChatId] = useState(null);         // open conversation; null = a new one
             const [chatListOpen, setChatListOpen] = useState(false);
             const legacyChatRef = useRef(false);                 // old 'chat' field still needs clearing
+            const [coachMemory, setCoachMemory] = useState([]);  // what the coach remembers: [{ id, text, ts }], oldest first
             const [aiUsage, setAiUsage] = useState({ date: '', count: 0 }); // per-day AI message counter (synced)
             // Nutrition (js/nutrition.js): diary per day, custom foods, the day shown in the Food tab.
             const [foodLog, setFoodLog] = useState({});   // { 'YYYY-MM-DD': [entry] }
@@ -1683,7 +1695,7 @@
                 setProfile(DEFAULT_PROFILE);
                 setMetrics([]);
                 setRecaps([]);
-                setChats([]); setChatId(null);
+                setChats([]); setChatId(null); setCoachMemory([]);
                 setAiUsage({ date: '', count: 0 });
                 setFoodLog({});
                 setFoods({});
@@ -1761,6 +1773,8 @@
                     legacyChatRef.current = true;
                 }
                 setChats(convs.filter(c => c && Array.isArray(c.messages)));
+                const mem = pick('coachMemory', []);
+                setCoachMemory(Array.isArray(mem) ? mem.filter(m => m && m.text) : []);
                 setAiUsage(pick('aiUsage', { date: '', count: 0 }) || { date: '', count: 0 });
                 setFoods(pick('foods', {}) || {});
                 // cloudReadUser marks how far back its diary read went (foodLogSince); a record
@@ -1943,6 +1957,7 @@
                 if (legacyChatRef.current) { legacyChatRef.current = false; cloudSaveField('chat', []); }
             }, [chats]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('aiUsage', aiUsage); }, [aiUsage]);
+            useEffect(() => { if (!isLoading && currentUser) cloudSaveField('coachMemory', coachMemory); }, [coachMemory]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('foods', foods); }, [foods]);
             // Upload diary days that were changed without a connection last time.
             useEffect(() => {
@@ -2461,154 +2476,6 @@
 
             // Exercises with "proper history": appear in >=2 logged sessions. Used so the LLM
             // only reasons about lifts the user has actually stuck with.
-            const buildExerciseTrends = (sinceTs) => {
-                const byName = {};
-                workoutHistory.forEach(w => {
-                    w.exercises.forEach(ex => {
-                        const top = ex.sets.reduce((b, s) => (s.weight > b.weight ? s : b), { reps: 0, weight: 0 });
-                        const vol = ex.sets.reduce((sum, s) => sum + s.reps * s.weight, 0);
-                        (byName[ex.name] = byName[ex.name] || []).push({ date: w.date, topWeight: top.weight, topReps: top.reps, vol });
-                    });
-                });
-                const lines = [];
-                Object.keys(byName).forEach(name => {
-                    const sessions = byName[name].sort((a, b) => a.date - b.date);
-                    if (sessions.length < 2) return; // skip exercises without real history
-                    const recent = sessions.filter(s => s.date >= sinceTs);
-                    const ref = recent.length >= 2 ? recent : sessions.slice(-Math.min(4, sessions.length));
-                    const first = ref[0], last = ref[ref.length - 1];
-                    const dW = (last.topWeight - first.topWeight);
-                    lines.push(`- ${name}: top set ${first.topWeight}kg×${first.topReps} → ${last.topWeight}kg×${last.topReps} (${dW >= 0 ? '+' : ''}${Math.round(dW * 10) / 10}kg) over ${ref.length} sessions`);
-                });
-                return lines;
-            };
-
-            // Compact snapshot of the user's real data, given to the assistant as context so
-            // it can reference their actual training/body when relevant.
-            const buildAssistantContext = () => {
-                const now = Date.now();
-                const p = profile;
-                const goal = [
-                    p.split ? `split ${p.split}` : null,
-                    p.targetWeight ? `target ${p.targetWeight}kg` : null,
-                    p.targetBodyFat ? `target ${p.targetBodyFat}% body fat` : null,
-                    p.dailyKcal ? `${p.dailyKcal} kcal/day target` : null,
-                    p.heightCm ? `height ${p.heightCm}cm` : null,
-                ].filter(Boolean).join(', ') || 'none set';
-                const last4w = workoutHistory.filter(w => w.date >= now - 28 * DAY_MS).length;
-                const trends = buildExerciseTrends(now - 42 * DAY_MS);
-                const m4 = metrics.filter(m => m.date >= now - 28 * DAY_MS);
-                const avg = (arr) => arr.length ? Math.round(arr.reduce((x, y) => x + y, 0) / arr.length * 10) / 10 : null;
-                const latestW = metrics.filter(m => m.weight != null).sort((a, b) => b.date - a.date)[0];
-                const kc = avg(m4.filter(m => m.kcal).map(m => m.kcal));
-                const sl = avg(m4.filter(m => m.sleep).map(m => m.sleep));
-                const todayName = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
-                const todayW = workouts[todayName];
-                const lines = [];
-                lines.push(`Profile: ${goal}.`);
-                if (p.notes && p.notes.trim()) lines.push(`User's own goal & notes (their goal, training style, preferences, limitations, diet, etc.): ${p.notes.trim()}`);
-                lines.push(`Training: ${workoutHistory.length} sessions logged all-time, ${last4w} in the last 4 weeks. Weekly plan days: ${DAYS.filter(d => workouts[d]).map(d => d + '=' + workouts[d].name).join(', ') || 'none'}.`);
-                const nowD = new Date(now);
-                lines.push(`Now: ${todayName} ${dayKey(now)}, ${String(nowD.getHours()).padStart(2, '0')}:${String(nowD.getMinutes()).padStart(2, '0')} (user's local time).`);
-                lines.push(`Today is ${todayName}; today's planned workout: ${todayW ? todayW.name : 'rest / none'}.`);
-                // Nutrition before the (long) training data, so it's never the part that gets cut.
-                const N = window.CWANutrition;
-                if (N) {
-                    const tg = N.targetsFor(p, metrics);
-                    const fmtT = (t) => `${Math.round(t.kcal)} kcal, P ${Math.round(t.p)}g, C ${Math.round(t.c)}g, F ${Math.round(t.f)}g, fibre ${Math.round(t.fib)}g, sugar ${Math.round(t.sug)}g, salt ${Math.round(t.salt * 10) / 10}g`;
-                    lines.push(`Nutrition targets: ${tg.kcal} kcal, protein ${tg.p}g, carbs ${tg.c}g, fat ${tg.f}g, fibre >=${tg.fib}g, sugar <=${tg.sug}g, salt <=${tg.salt}g.`);
-                    const todayKey = dayKey(now);
-                    const days = Object.keys(foodLog).filter(d => d >= dayKey(now - 14 * DAY_MS) && d <= todayKey && (foodLog[d] || []).length).sort();
-                    if (days.length) {
-                        // Item by item for today and the two days before, by meal.
-                        const r0 = (x) => Math.round(x || 0);
-                        const MEAL_NAMES = { breakfast: 'Breakfast', lunch: 'Lunch', snack: 'Snack', dinner: 'Dinner' };
-                        const itemText = (en) => {
-                            const t = N.entryTotals(en);
-                            const sv = en.serving && en.serving.g > 0 ? en.serving : null;
-                            const pcs = sv ? Math.round(en.g / sv.g * 2) / 2 : 0;
-                            const amount = en.src === 'quick' ? 'quick add' : (pcs > 0 && Math.abs(en.g / sv.g - pcs) < 0.02 ? `${pcs}× ${String(sv.label || 'serving').replace(/^1\s+/, '')} = ` : '') + `${r0(en.g)}${en.unit || 'g'}`;
-                            return `${en.name}${en.brand ? ' (' + en.brand + ')' : ''} ${amount}: ${r0(t.kcal)} kcal, P${r0(t.p)} C${r0(t.c)} F${r0(t.f)}`;
-                        };
-                        const detailDays = [0, 1, 2].map(k => dayKey(now - k * DAY_MS)).filter(d => (foodLog[d] || []).length);
-                        if (!(foodLog[todayKey] || []).length) lines.push(`Today (${todayKey}): no food logged yet.`);
-                        if (detailDays.length) {
-                            lines.push('Food diary detail (what was eaten, grams and per-item kcal / protein / carbs / fat):');
-                            detailDays.forEach(d => {
-                                const list = foodLog[d] || [];
-                                const t = N.dayTotals(list);
-                                const label = d === todayKey ? 'today, so far' : d === dayKey(now - DAY_MS) ? 'yesterday' : '2 days ago';
-                                const left = d === todayKey ? ` — ${r0(tg.kcal - t.kcal) >= 0 ? r0(tg.kcal - t.kcal) + ' kcal left' : r0(t.kcal - tg.kcal) + ' kcal over'}, protein ${r0(t.p)}/${tg.p}g, carbs ${r0(t.c)}/${tg.c}g, fat ${r0(t.f)}/${tg.f}g` : '';
-                                lines.push(`  ${d} (${label}): total ${r0(t.kcal)} of ${tg.kcal} kcal${left}`);
-                                const meals = ['breakfast', 'lunch', 'snack', 'dinner'].concat([...new Set(list.map(en => en.meal))].filter(m => !MEAL_NAMES[m]));
-                                meals.forEach(m => {
-                                    const items = list.filter(en => en.meal === m).sort((a, b) => a.t - b.t);
-                                    if (!items.length) return;
-                                    const mk = items.reduce((sum, en) => sum + N.entryTotals(en).kcal, 0);
-                                    lines.push(`    ${MEAL_NAMES[m] || 'Other'} (${r0(mk)} kcal): ${items.map(itemText).join('; ')}`);
-                                });
-                            });
-                        }
-                        lines.push('Food diary totals (last 14 days):');
-                        days.forEach(d => lines.push(`  ${d}${d === todayKey ? ' (today, so far)' : ''}: ${fmtT(N.dayTotals(foodLog[d]))}`));
-                        const full = days.filter(d => d !== todayKey);
-                        if (full.length >= 2) {
-                            const sum = full.map(d => N.dayTotals(foodLog[d])).reduce((a, t) => { Object.keys(t).forEach(k => { a[k] = (a[k] || 0) + t[k]; }); return a; }, {});
-                            Object.keys(sum).forEach(k => { sum[k] /= full.length; });
-                            lines.push(`  Average of ${full.length} logged days: ${fmtT(sum)}`);
-                        }
-                    } else {
-                        lines.push('Food diary: nothing logged in the last 14 days.');
-                    }
-                    // Deterministic week ratings (0-10; training done vs planned + nutrition vs targets).
-                    const planDaysCtx = DAYS.filter(d => workouts[d]);
-                    const wr = [2, 1].map(k => N.weekRating({ mondayMs: N.weekStartOf(now - k * 7 * DAY_MS), history: workoutHistory, planDays: planDaysCtx, log: foodLog, targets: tg, now }))
-                        .filter(r => r.score != null)
-                        .map(r => `week of ${dayKey(r.mondayMs)}: ${r.score.toFixed(1)}/10 (training ${r.training ? r.training.done + '/' + r.training.planned : 'n/a'}, nutrition ${r.nutrition ? Math.round(r.nutrition.score * 100) + '% with ' + r.nutrition.logged + '/7 days logged' : 'not logged'})`);
-                    if (wr.length) lines.push('Week ratings: ' + wr.join('; ') + '.');
-                }
-
-                // Full current program: every planned day with each exercise's set scheme.
-                const fmtSets = (ex) => {
-                    const sets = ex.sets || [];
-                    if (!sets.length) return '';
-                    const same = sets.every(s => s.reps === sets[0].reps && s.weight === sets[0].weight);
-                    if (same) return `${sets.length}×${fmtNum(sets[0].reps)}@${fmtNum(sets[0].weight)}kg`;
-                    return sets.map(s => `${fmtNum(s.reps)}@${fmtNum(s.weight)}kg`).join(', ');
-                };
-                const planDays = DAYS.filter(d => workouts[d]);
-                if (planDays.length) {
-                    lines.push('Current program (planned exercises, sets×reps@weight):');
-                    planDays.forEach(d => {
-                        const w = workouts[d];
-                        lines.push(`  ${d} — ${w.name}: ${w.exercises.map(ex => `${ex.name} ${fmtSets(ex)}${ex.notes ? ' [' + ex.notes + ']' : ''}`).join('; ')}`);
-                    });
-                }
-
-                // Most recent actually-performed sets per exercise (from history), so the
-                // coach can compare plan vs. performance and suggest progression.
-                const latestByEx = {};
-                workoutHistory.slice().sort((a, b) => a.date - b.date).forEach(w => {
-                    w.exercises.forEach(ex => { latestByEx[ex.name] = { date: w.date, sets: ex.sets }; });
-                });
-                const exNames = Object.keys(latestByEx);
-                if (exNames.length) {
-                    lines.push('Most recent performed sets per exercise:');
-                    exNames.slice(0, 40).forEach(name => {
-                        const rec = latestByEx[name];
-                        const setsStr = rec.sets.map(s => `${fmtNum(s.reps)}@${fmtNum(s.weight)}kg`).join(', ');
-                        lines.push(`  ${name}: ${setsStr}`);
-                    });
-                }
-                if (trends.length) { lines.push('Lift progression (top set, first→latest):'); trends.slice(0, 20).forEach(t => lines.push(t)); }
-                const body = [];
-                if (latestW) body.push(`latest weight ${fmtNum(latestW.weight)}kg`);
-                if (kc) body.push(`avg intake ~${kc} kcal/day (last 4w)`);
-                if (sl) body.push(`avg sleep ~${sl}h`);
-                if (body.length) lines.push('Body: ' + body.join(', ') + '.');
-                return lines.join('\n');
-            };
-
             const aiUsedToday = () => (aiUsage.date === dayKey(Date.now()) ? aiUsage.count : 0);
 
             const sendChat = async (text) => {
@@ -2629,12 +2496,19 @@
                 setChatId(id);
                 setAiBusy(true); setAiError('');
                 try {
-                    const system = ASSISTANT_SYSTEM + "\n\n--- The user's logged data (reference if relevant) ---\n" + buildAssistantContext();
-                    const turns = next.slice(-COACH_CONTEXT_MESSAGES).map(m => ({ role: m.role, content: m.content }));
-                    const reply = await callAIProxy({ system, messages: turns, user: currentUser ? currentUser.username : '', maxTokens: 900 }, true);
-                    const answer = { role: 'assistant', content: reply.text, ts: Date.now() };
+                    const C = window.CWACoach;
+                    // The topic of the last few questions decides which data gets the detailed version.
+                    const focus = C.focusFrom(next.filter(m => m.role === 'user').slice(-3).map(m => m.content));
+                    const context = C.buildContext({ now: Date.now(), profile, workouts, history: workoutHistory, metrics, foodLog, memory: coachMemory, N: window.CWANutrition, focus });
+                    const system = C.SYSTEM + "\n\n--- The user's data (analysed by the app) ---\n" + context;
+                    // Recent turns only; older answers are shortened (the memory carries what lasts).
+                    const turns = next.slice(-COACH_CONTEXT_MESSAGES).map((m, i, arr) => ({ role: m.role, content: m.role === 'assistant' && i < arr.length - 2 && m.content.length > 1500 ? m.content.slice(0, 1500) + ' […]' : m.content }));
+                    const reply = await callAIProxy({ system, messages: turns, user: currentUser ? currentUser.username : '', maxTokens: 1200 }, true);
+                    const { text: replyText, memories } = C.extractMemories(reply.text);
+                    const answer = { role: 'assistant', content: replyText || reply.text, ts: Date.now() };
                     if (reply.model) answer.model = reply.model.split('/').pop();
                     if (reply.fallback) answer.fallback = true; // the preferred model didn't answer
+                    if (memories.length) { answer.remembered = memories; setCoachMemory(list => C.mergeMemories(list, memories, Date.now())); }
                     setChats(list => { const c = list.find(x => x.id === id); return upsert(list, [...(c ? c.messages : next), answer]); });
                     setAiUsage({ date: today, count: used + 1 }); // count only successful replies
                 } catch (err) {
@@ -4177,12 +4051,15 @@
                                     color: isUser ? 'var(--on-primary-container)' : 'var(--on-surface)',
                                     borderRadius: isUser ? '18px 18px 6px 18px' : '18px 18px 18px 6px'
                                 }
-                            }, isUser ? m.content : e(Markdown, { text: m.content }))
+                            }, isUser ? m.content : e(Markdown, { text: m.content }),
+                                !isUser && Array.isArray(m.remembered) && m.remembered.length ? e('div', { className: 'flex items-start gap-1.5 mt-2 pt-2 text-xs', style: { borderTop: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' } },
+                                    e(MIcon, { icon: 'psychology', style: { fontSize: '16px', color: 'var(--primary-fixed-dim)' } }),
+                                    e('span', null, 'Noted: ' + m.remembered.join(' · '))) : null)
                         );
                     };
                     const lastAnswer = msgs.slice().reverse().find(m => m.role === 'assistant' && m.model);
                     const lastModel = lastAnswer ? lastAnswer.model + (lastAnswer.fallback ? ' (fallback)' : '') : '';
-                    const suggestions = ["How's my eating today?", "How's my recent progress?", 'What should I focus on next?', "Suggest a warm-up for today's workout"];
+                    const suggestions = ['What should I eat for the rest of today?', 'Review my last workout', 'Where am I stalling and what should I change?', 'How was my week?'];
                     const headBtn = (icon, onClick, aria, disabled) => e('button', { onClick, disabled, 'aria-label': aria, className: 'w-9 h-9 flex items-center justify-center rounded-full active:opacity-60', style: { color: 'var(--on-surface-variant)', opacity: disabled ? 0.35 : 1 } }, e(MIcon, { icon, style: { fontSize: '22px' } }));
                     const newChat = () => { setChatId(null); setChatListOpen(false); setAiError(''); };
                     // Recent conversations (the newest COACH_MAX_CHATS are kept).
@@ -4195,7 +4072,16 @@
                                 e('div', { className: 'text-xs mt-0.5', style: { color: 'var(--on-surface-variant)' } }, `${dayLabel(c.updated)} · ${c.messages.length} message${c.messages.length === 1 ? '' : 's'}`)),
                             e('button', { onClick: () => deleteChat(c), 'aria-label': 'Delete ' + c.title, className: 'w-11 h-11 flex items-center justify-center flex-shrink-0 active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(MIcon, { icon: 'delete', style: { fontSize: '20px' } }))
                         ))) : e('div', { className: 'text-sm px-1', style: { color: 'var(--outline)' } }, 'No chats yet.'),
-                        e('div', { className: 'text-xs mt-3 px-1 leading-snug', style: { color: 'var(--outline)' } }, `The coach remembers what was said within a chat, not across chats. Your ${COACH_MAX_CHATS} most recent chats are kept.`)
+                        e('div', { className: 'text-xs mt-3 px-1 leading-snug', style: { color: 'var(--outline)' } }, `Each chat continues its own conversation; your ${COACH_MAX_CHATS} most recent chats are kept. What should carry across chats goes into the coach's memory below.`),
+                        // Coach memory: facts the coach saved (or you added), sent with every question.
+                        e('div', { className: 'flex items-center gap-2 mt-6 mb-2 px-1' },
+                            e(MIcon, { icon: 'psychology', style: { fontSize: '18px', color: 'var(--primary-fixed-dim)' } }),
+                            e('div', { className: 'text-xs uppercase tracking-widest flex-1', style: { color: 'var(--on-surface-variant)' } }, `Coach memory · ${coachMemory.length}`)),
+                        coachMemory.length ? e('div', { className: 'rounded-2xl overflow-hidden', style: { background: 'var(--surface-container-high)' } }, coachMemory.slice().reverse().map((m, i) => e('div', { key: m.id || i, className: 'flex items-center', style: { borderTop: i ? '1px solid var(--surface-container-highest)' : 'none' } },
+                            e('div', { className: 'flex-1 min-w-0 px-4 py-2.5 text-sm' }, m.text),
+                            e('button', { onClick: () => setCoachMemory(list => list.filter(x => x !== m)), 'aria-label': 'Forget ' + m.text, className: 'w-11 h-11 flex items-center justify-center flex-shrink-0 active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(MIcon, { icon: 'close', style: { fontSize: '18px' } }))
+                        ))) : e('div', { className: 'text-sm px-1', style: { color: 'var(--outline)' } }, 'Nothing yet. The coach saves lasting facts you tell it (goals, injuries, preferences, plans you agree on).'),
+                        e(MemoryInput, { onAdd: (text) => setCoachMemory(list => window.CWACoach.mergeMemories(list, [text], Date.now())) })
                     );
                     return e('div', { className: 'fixed inset-0 flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' } },
                         // Header
@@ -4215,7 +4101,7 @@
                                     e('div', { className: 'flex flex-col items-center text-center mb-6' },
                                         e('div', { className: 'w-14 h-14 rounded-2xl flex items-center justify-center mb-3', style: { background: 'rgba(209, 252, 0, 0.1)' } }, e(MIcon, { icon: 'sports_gymnastics', fill: true, style: { fontSize: '32px', color: 'var(--primary-container)' } })),
                                         e('div', { className: 'font-black text-lg' }, 'Your AI Coach'),
-                                        e('div', { className: 'text-sm mt-1 px-4', style: { color: 'var(--on-surface-variant)' } }, 'Ask about training, technique, programming, nutrition or recovery. It can see your logged workouts, what you ate (item by item), your targets and goals.')
+                                        e('div', { className: 'text-sm mt-1 px-4', style: { color: 'var(--on-surface-variant)' } }, 'Ask about training, nutrition or recovery. It sees your workouts and progress, what you ate, your targets, goals and what it remembers about you, and tells you what to work on.')
                                     ),
                                     e('div', { className: 'space-y-2' }, suggestions.map((s, i) => e('button', {
                                         key: i, onClick: () => { if (!aiBusy && remaining > 0 && proxyEnabled()) sendChat(s); },

@@ -111,7 +111,7 @@ export default {
     const maxTokens = Math.min(Math.max(parseInt(body.maxTokens, 10) || 700, 64), 2048);
     if (!turns && !prompt) return json({ error: 'Empty prompt' }, 400);
 
-    const DAILY_LIMIT = parseInt(env.DAILY_LIMIT || '5', 10);
+    const DAILY_LIMIT = parseInt(env.DAILY_LIMIT || '10', 10);
     if (await overLimit('rl', DAILY_LIMIT)) return json({ error: `Daily message limit reached (${DAILY_LIMIT}/day). Resets tomorrow.` }, 429);
 
     const msgs = [];
