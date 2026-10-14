@@ -32,6 +32,9 @@
         { id: 'dinner', label: 'Dinner' },
     ];
     const MEAL_LABEL = Object.fromEntries(MEALS.map(m => [m.id, m.label]));
+    // Diary order: by meal (breakfast first, even if logged after lunch), then by time.
+    const MEAL_RANK = Object.fromEntries(MEALS.map((m, i) => [m.id, i]));
+    const byMeal = (a, b) => ((MEAL_RANK[a.meal] ?? MEALS.length) - (MEAL_RANK[b.meal] ?? MEALS.length)) || (a.t - b.t);
     const PHOTO_DAILY_LIMIT = 30;
     const BARCODE_POLYFILL = 'https://cdn.jsdelivr.net/npm/barcode-detector@3.2.2/dist/iife/ponyfill.js';
 
@@ -1144,7 +1147,7 @@
     function FoodScreen({ app }) {
         const date = app.date;
         const today = dayKey(Date.now());
-        const entries = (app.log[date] || []).slice().sort((a, b) => a.t - b.t);
+        const entries = (app.log[date] || []).slice().sort(byMeal);
         const totals = dayTotals(entries);
         const targets = targetsFor(app.profile, app.metrics);
         const [sheet, setSheet] = useState(null); // { type, ... }
@@ -1161,12 +1164,12 @@
             const entry = { id: newId('e'), t, meal, name: food.name, brand: food.brand || '', code: food.code || '', src: food.src || 'custom', foodId: food.src === 'custom' ? (food.id || '') : '', g, unit: food.unit || 'g', n: food.n };
             const sv = servingOf(food);
             if (sv) entry.serving = sv; // so the diary can say "3× vejce" and edit by count
-            app.saveDay(date, entries.concat(entry).sort((a, b) => a.t - b.t));
+            app.saveDay(date, entries.concat(entry).sort(byMeal));
             app.toast(`Added ${fmtK(entryTotals(entry).kcal)} kcal`);
             setSheet(null);
         };
         const updateEntry = (entry, changes) => {
-            app.saveDay(date, entries.map(x => (x.id === entry.id ? { ...x, ...changes } : x)).sort((a, b) => a.t - b.t));
+            app.saveDay(date, entries.map(x => (x.id === entry.id ? { ...x, ...changes } : x)).sort(byMeal));
             setSheet(null);
         };
         const deleteEntry = (entry) => { app.saveDay(date, entries.filter(x => x.id !== entry.id)); setSheet(null); app.toast('Removed'); };
