@@ -29,8 +29,11 @@ That's it — no API key needed. Workers AI is billed in "neurons"; the free
 allocation (10,000 neurons/day) is far more than gated recaps use.
 
 ### Optional
-- Plain variable `AI_MODEL` to change the chat model. Default is
-  `@cf/meta/llama-3.3-70b-instruct-fp8-fast`.
+- Plain variable `AI_MODEL` to put another chat model first. Without it the
+  Worker uses `@cf/openai/gpt-oss-120b` (OpenAI's open-weight reasoning model)
+  and falls back to `@cf/meta/llama-3.3-70b-instruct-fp8-fast` if that model
+  is unavailable or returns nothing. The app shows which model answered under
+  the chat box.
 - Plain variable `VISION_MODEL` to pin the food-photo model. Without it the
   Worker tries `@cf/meta/llama-4-scout-17b-16e-instruct`, then
   `@cf/mistralai/mistral-small-3.1-24b-instruct`, `@cf/google/gemma-3-12b-it`

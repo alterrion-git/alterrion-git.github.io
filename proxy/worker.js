@@ -6,21 +6,27 @@
 //
 // Two jobs:
 //  1. AI Coach chat / text: POST { system, prompt | messages, user, maxTokens }
-//     → { text }
+//     → { text, model }
 //  2. Food photos (nutrition labels / products / plates):
 //     POST { task: 'food-photo', image: 'data:image/jpeg;base64,...', user }
 //     → { food: { name, brand, barcode, unit, source, per100: {...}, servingGrams, confidence }, model }
 //
 // Setup (see proxy/README.md):
 //   - Add a Workers AI binding named  AI  (Worker > Settings > Bindings).
-//   - Optional plain var  AI_MODEL      (chat model).
+//   - Optional plain var  AI_MODEL      (chat model; tried before the defaults).
 //   - Optional plain var  VISION_MODEL  (food-photo model; tried first).
 //   - Optional plain var  ALLOW_ORIGIN  (defaults to the GitHub Pages origin).
 
 const DEFAULT_ALLOW = 'https://alterrion-git.github.io';
-// Override with the AI_MODEL var if this is ever deprecated. See the current
-// catalog: https://developers.cloudflare.com/workers-ai/models/
-const DEFAULT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+// Chat models, best first: the first that answers is used, so a model that is renamed or
+// retired just falls through to the next. gpt-oss-120b (OpenAI's open-weight reasoning
+// model) coaches noticeably better than Llama 3.3 70B, which stays as the fallback. Set the
+// AI_MODEL var to put another model in front. Catalog:
+// https://developers.cloudflare.com/workers-ai/models/
+const CHAT_MODELS = [
+  '@cf/openai/gpt-oss-120b',
+  '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+];
 // Vision models that take OpenAI-style image_url content parts, tried in order
 // until one answers (the catalog changes; VISION_MODEL lets you pin one).
 const VISION_MODELS = [
@@ -106,41 +112,70 @@ export default {
     const DAILY_LIMIT = parseInt(env.DAILY_LIMIT || '5', 10);
     if (await overLimit('rl', DAILY_LIMIT)) return json({ error: `Daily message limit reached (${DAILY_LIMIT}/day). Resets tomorrow.` }, 429);
 
-    const model = env.AI_MODEL || DEFAULT_MODEL;
-    const messages = [];
-    if (system) messages.push({ role: 'system', content: system });
+    const msgs = [];
     if (turns) {
       for (const m of turns.slice(-24)) {
         if (m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content) {
-          messages.push({ role: m.role, content: m.content.slice(0, 6000) });
+          msgs.push({ role: m.role, content: m.content.slice(0, 6000) });
         }
       }
     } else {
-      messages.push({ role: 'user', content: prompt });
+      msgs.push({ role: 'user', content: prompt });
     }
-    if (messages.length === (system ? 1 : 0)) return json({ error: 'No message content' }, 400);
+    if (!msgs.length) return json({ error: 'No message content' }, 400);
 
-    let out;
-    try {
-      out = await env.AI.run(model, { messages, max_tokens: maxTokens, temperature: 0.6 });
-    } catch (e) {
-      return json({ error: 'Model error: ' + (e && e.message ? e.message : String(e)) }, 502);
+    const models = [env.AI_MODEL, ...CHAT_MODELS].filter((m, i, a) => m && a.indexOf(m) === i);
+    const errors = [];
+    for (const model of models) {
+      try {
+        const text = await chat(env, model, system, msgs, maxTokens);
+        if (text) return json({ text, model });
+        errors.push(`${model}: empty reply`);
+      } catch (e) {
+        errors.push(`${model}: ${e && e.message ? e.message : e}`);
+      }
     }
-
-    const text = responseText(out);
-    if (!text) return json({ error: 'Empty response from model' }, 502);
-    return json({ text });
+    return json({ error: 'Model error: ' + errors.join(' | ').slice(0, 600) }, 502);
   },
 };
 
-// Workers AI chat models return { response: "..." }; some return an already-parsed object.
+// One chat turn on one model → reply text ('' if it said nothing).
+async function chat(env, model, system, msgs, maxTokens) {
+  if (/gpt-oss/.test(model)) {
+    // OpenAI Responses API shape: instructions + input. It reasons before answering, so it
+    // gets no output cap here (a cap would cut the answer, not the reasoning).
+    const base = { instructions: system || undefined, reasoning: { effort: 'medium' } };
+    try {
+      return responseText(await env.AI.run(model, { ...base, input: msgs }));
+    } catch (e) {
+      // Some versions only take a string input: send the conversation as a transcript.
+      const transcript = msgs.map((m) => `${m.role === 'user' ? 'User' : 'Coach'}: ${m.content}`).join('\n\n');
+      return responseText(await env.AI.run(model, { ...base, input: msgs.length === 1 ? msgs[0].content : transcript + '\n\nCoach:' }));
+    }
+  }
+  const messages = system ? [{ role: 'system', content: system }, ...msgs] : msgs;
+  return responseText(await env.AI.run(model, { messages, max_tokens: maxTokens, temperature: 0.6 }));
+}
+
+// Workers AI chat models return { response: "..." } (some an already-parsed object),
+// OpenAI-style ones { choices: [{ message: { content } }] }, and Responses-API ones (gpt-oss)
+// { output: [{ type: 'reasoning', ... }, { type: 'message', content: [{ type: 'output_text', text }] }] }.
 function responseText(out) {
   if (!out) return '';
+  if (typeof out === 'string') return out.trim();
+  if (typeof out.output_text === 'string' && out.output_text.trim()) return out.output_text.trim();
+  if (Array.isArray(out.output)) {
+    const text = out.output.filter((o) => o && o.type === 'message')
+      .flatMap((o) => (Array.isArray(o.content) ? o.content : []))
+      .filter((c) => c && (c.type === 'output_text' || c.type === 'text') && typeof c.text === 'string')
+      .map((c) => c.text).join('').trim();
+    if (text) return text;
+  }
   const r = out.response ?? out.result ?? out.text;
   if (r && typeof r === 'object') return JSON.stringify(r);
-  if (typeof r === 'string') return r;
+  if (typeof r === 'string') return r.trim();
   const c = out.choices && out.choices[0] && out.choices[0].message && out.choices[0].message.content;
-  return typeof c === 'string' ? c : '';
+  return typeof c === 'string' ? c.trim() : '';
 }
 
 function parseFoodJson(text) {

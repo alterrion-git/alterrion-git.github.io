@@ -262,10 +262,10 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.18.1"></script>
+    <script src="js/nutrition.js?v=3.19.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.18.1';
+        const APP_VERSION = '3.19.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -323,8 +323,9 @@
         const proxyEnabled = () => LLM_PROXY_URL.length > 0;
 
         // Ask the AI proxy. body = { system, prompt } (one-shot) or
-        // { system, messages:[{role,content}], user } (chat). Returns text.
-        async function callAIProxy(body) {
+        // { system, messages:[{role,content}], user } (chat). Returns the text, or with
+        // full = true { text, model } (model = which Workers AI model answered).
+        async function callAIProxy(body, full) {
             const res = await fetch(LLM_PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -334,10 +335,29 @@
             try { data = await res.json(); } catch (err) {}
             if (!res.ok) throw new Error((data && data.error) || `AI service error (${res.status})`);
             if (!data.text) throw new Error('The response came back empty — try again.');
-            return data.text;
+            return full ? { text: data.text, model: data.model || '' } : data.text;
         }
 
-        const ASSISTANT_SYSTEM = "You are Coach, a friendly, knowledgeable strength-training and fitness assistant built into a workout-tracking app. Help with training, programming, technique, exercise selection, nutrition, recovery and motivation. You are given the user's own logged data below — reference their real numbers, goals and trends when it's relevant, but you can also answer general fitness questions. Be concise and practical (a few short paragraphs or bullets). Avoid medical claims; for pain, injury or medical concerns, suggest seeing a qualified professional.";
+        const ASSISTANT_SYSTEM = "You are Coach, a friendly, knowledgeable strength-training and fitness assistant built into a workout-tracking app. Help with training, programming, technique, exercise selection, nutrition, recovery and motivation. You are given the user's own logged data below — reference their real numbers, goals and trends when it's relevant, but you can also answer general fitness questions. Be concise and practical (a few short paragraphs or bullets). Avoid medical claims; for pain, injury or medical concerns, suggest seeing a qualified professional. For questions about eating or calories, use the food diary below: what they ate (item by item for the last few days), the day's totals and what is left of their targets; say so if a day looks incompletely logged. Format replies in Markdown: short paragraphs, **bold** for key numbers, bullet or numbered lists, a small table only when comparing options. No HTML, no code blocks unless asked.";
+
+        // Coach conversations: the newest COACH_MAX_CHATS are kept; the coach sees the open one only.
+        const COACH_MAX_CHATS = 5;
+        const COACH_MAX_MESSAGES = 60;   // stored per conversation
+        const COACH_CONTEXT_MESSAGES = 20; // sent to the model (the latest turns)
+        const chatTitle = (text) => { const t = String(text || '').replace(/\s+/g, ' ').trim(); return t.length > 48 ? t.slice(0, 46).trim() + '…' : (t || 'Chat'); };
+        // The old single never-ending chat → one conversation per day, newest first.
+        function chatsFromLegacy(msgs) {
+            const byDay = [];
+            (msgs || []).filter(m => m && m.content).forEach(m => {
+                const k = dayKey(m.ts || 0);
+                if (!byDay.length || byDay[byDay.length - 1].k !== k) byDay.push({ k, messages: [] });
+                byDay[byDay.length - 1].messages.push(m);
+            });
+            return byDay.reverse().slice(0, COACH_MAX_CHATS).map(g => {
+                const first = g.messages[0], firstUser = g.messages.find(m => m.role === 'user') || first;
+                return { id: 'c' + (first.ts || 0).toString(36), title: chatTitle(firstUser.content), created: first.ts || 0, updated: g.messages[g.messages.length - 1].ts || 0, messages: g.messages.slice(-COACH_MAX_MESSAGES) };
+            });
+        }
 
         const DAILY_AI_LIMIT = 5;
 
@@ -496,7 +516,7 @@
         // of one GET of users/<id> (which would download all of it on every launch) the known
         // fields are read in parallel and the log only for the last FOOD_LOG_RECENT_DAYS.
         // Older days come from this device's copy or loadFoodRange (calendar / date browsing).
-        const USER_FIELDS = ['email', 'createdAt', 'passwordHash', 'workouts', 'history', 'profile', 'metrics', 'recaps', 'chat', 'aiUsage', 'foods'];
+        const USER_FIELDS = ['email', 'createdAt', 'passwordHash', 'workouts', 'history', 'profile', 'metrics', 'recaps', 'chat', 'chats', 'aiUsage', 'foods'];
         const FOOD_LOG_RECENT_DAYS = 62;
         function foodRangeParams(startKey, endKey) {
             return 'orderBy=' + encodeURIComponent('"$key"')
@@ -903,6 +923,99 @@
                 e('div', { className: 'text-xs mt-3 leading-snug', style: { color: 'var(--outline)' } },
                     'Stored only on this device (localStorage) — never uploaded to the cloud. Used directly from your browser to call OpenAI for recaps.')
             );
+        }
+
+        // --- Markdown for coach replies ---
+        // The subset chat models write: headings, **bold**, *italic*, `code`, ~~strike~~,
+        // [links](https://…), bullet / numbered lists (indented = nested), > quotes, --- rules,
+        // ``` code blocks and | tables |. Builds React elements (never HTML), so a reply can't
+        // inject markup; links open only http(s) URLs.
+        const MD_INLINE = /(\*\*([^*]+?)\*\*|__([^_]+?)__|`([^`]+)`|~~([^~]+?)~~|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*([^*\s](?:[^*]*?[^*\s])?)\*)/g;
+        function mdInline(text, keyBase) {
+            const out = [];
+            const re = new RegExp(MD_INLINE.source, 'g'); // own copy: the calls below recurse
+            let last = 0, m, i = 0;
+            const s = String(text);
+            while ((m = re.exec(s))) {
+                if (m.index > last) out.push(s.slice(last, m.index));
+                last = m.index + m[0].length;
+                const k = keyBase + '-' + (i++);
+                if (m[2] != null || m[3] != null) out.push(e('strong', { key: k, style: { fontWeight: 700, color: 'var(--on-surface)' } }, mdInline(m[2] != null ? m[2] : m[3], k)));
+                else if (m[4] != null) out.push(e('code', { key: k, className: 'px-1 rounded', style: { background: 'var(--surface-container-low)', fontSize: '0.9em' } }, m[4]));
+                else if (m[5] != null) out.push(e('s', { key: k }, mdInline(m[5], k)));
+                else if (m[6] != null) out.push(e('a', { key: k, href: m[7], target: '_blank', rel: 'noopener noreferrer', style: { color: 'var(--primary-fixed-dim)', textDecoration: 'underline' } }, mdInline(m[6], k)));
+                else out.push(e('em', { key: k }, mdInline(m[8], k)));
+            }
+            if (last < s.length) out.push(s.slice(last));
+            return out;
+        }
+        function Markdown({ text }) {
+            const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+            const blocks = [];
+            const isTable = (l) => /^\s*\|.*\|\s*$/.test(l);
+            const listRe = /^(\s*)([-*•+]|\d+[.)])\s+(.*)$/;
+            let i = 0;
+            while (i < lines.length) {
+                const line = lines[i];
+                const key = 'b' + blocks.length;
+                if (!line.trim()) { i++; continue; }
+                if (/^\s*```/.test(line)) {
+                    const code = [];
+                    for (i++; i < lines.length && !/^\s*```/.test(lines[i]); i++) code.push(lines[i]);
+                    i++;
+                    blocks.push(e('pre', { key, className: 'my-2 p-2.5 rounded-xl overflow-x-auto text-xs', style: { background: 'var(--surface-container-low)', whiteSpace: 'pre' } }, code.join('\n')));
+                    continue;
+                }
+                const h = line.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/);
+                if (h) {
+                    blocks.push(e('div', { key, className: (h[1].length <= 2 ? 'text-base' : 'text-sm') + ' font-bold mt-3 mb-1 first:mt-0', style: { color: 'var(--on-surface)' } }, mdInline(h[2], key)));
+                    i++; continue;
+                }
+                if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { blocks.push(e('hr', { key, className: 'my-3', style: { border: 0, borderTop: '1px solid var(--outline-variant)' } })); i++; continue; }
+                if (isTable(line)) {
+                    const rows = [];
+                    for (; i < lines.length && isTable(lines[i]); i++) {
+                        if (/^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i]) && lines[i].includes('-')) continue; // |---|:--:|
+                        rows.push(lines[i].trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()));
+                    }
+                    const cell = (tag, c, ci, rk) => e(tag, { key: ci, className: 'px-2 py-1 text-left align-top', style: { borderBottom: '1px solid var(--outline-variant)', fontWeight: tag === 'th' ? 700 : 400, whiteSpace: 'nowrap' } }, mdInline(c, rk + '-' + ci));
+                    blocks.push(e('div', { key, className: 'my-2 overflow-x-auto' },
+                        e('table', { className: 'text-xs', style: { borderCollapse: 'collapse' } },
+                            rows.length ? e('thead', null, e('tr', null, rows[0].map((c, ci) => cell('th', c, ci, key + 'h')))) : null,
+                            e('tbody', null, rows.slice(1).map((r, ri) => e('tr', { key: ri }, r.map((c, ci) => cell('td', c, ci, key + 'r' + ri))))))));
+                    continue;
+                }
+                if (/^\s*>/.test(line)) {
+                    const q = [];
+                    for (; i < lines.length && /^\s*>/.test(lines[i]); i++) q.push(lines[i].replace(/^\s*>\s?/, ''));
+                    blocks.push(e('div', { key, className: 'my-2 pl-3', style: { borderLeft: '3px solid var(--outline-variant)', color: 'var(--on-surface-variant)' } }, e(Markdown, { text: q.join('\n') })));
+                    continue;
+                }
+                if (listRe.test(line)) {
+                    const items = [];
+                    for (; i < lines.length; i++) {
+                        const l = lines[i];
+                        const lm = l.match(listRe);
+                        if (lm) items.push({ indent: lm[1].replace(/\t/g, '  ').length, num: /\d/.test(lm[2]) ? parseInt(lm[2], 10) : null, parts: [lm[3]] });
+                        else if (l.trim() && /^\s{2,}/.test(l) && items.length) items[items.length - 1].parts.push(l.trim()); // wrapped item text
+                        else if (!l.trim() && i + 1 < lines.length && listRe.test(lines[i + 1])) continue;                 // blank line inside a list
+                        else break;
+                    }
+                    const base = Math.min(...items.map(it => it.indent));
+                    blocks.push(e('div', { key, className: 'my-1.5 space-y-1' }, items.map((it, ii) => {
+                        const depth = Math.min(3, Math.floor((it.indent - base) / 2));
+                        return e('div', { key: ii, className: 'flex gap-2', style: { paddingLeft: depth * 14 } },
+                            e('span', { className: 'flex-shrink-0', style: { color: 'var(--primary-fixed-dim)', minWidth: it.num != null ? '1.1em' : undefined, fontVariantNumeric: 'tabular-nums' } }, it.num != null ? it.num + '.' : (depth ? '◦' : '•')),
+                            e('div', { className: 'min-w-0' }, mdInline(it.parts.join(' '), key + '-' + ii)));
+                    })));
+                    continue;
+                }
+                const para = [];
+                for (; i < lines.length && lines[i].trim() && !listRe.test(lines[i]) && !isTable(lines[i]) && !/^\s*(#{1,6}\s|```|>)/.test(lines[i]); i++) para.push(lines[i].trim());
+                if (!para.length) { para.push(line.trim()); i++; } // safety: always advance
+                blocks.push(e('p', { key, className: 'my-1.5 first:mt-0 last:mb-0' }, para.map((pl, pi) => [pi ? e('br', { key: 'br' + pi }) : null, ...mdInline(pl, key + '-' + pi)])));
+            }
+            return e('div', { className: 'cwa-md' }, blocks);
         }
 
         // --- Chat input bar (self-managed text; grows to a few lines) ---
@@ -1362,7 +1475,12 @@
             const [profile, setProfile] = useState(DEFAULT_PROFILE);
             const [metrics, setMetrics] = useState([]); // [{ date, weight, kcal, sleep, steps, note }]
             const [recaps, setRecaps] = useState([]);   // legacy one-shot recaps (kept for old data)
-            const [chat, setChat] = useState([]);       // [{ role:'user'|'assistant', content, ts }]
+            // Coach conversations, newest first: [{ id, title, created, updated, messages: [{ role:'user'|'assistant', content, ts, model? }] }].
+            // ('chat' is the old single conversation; it's split into these on load, then cleared.)
+            const [chats, setChats] = useState([]);
+            const [chatId, setChatId] = useState(null);         // open conversation; null = a new one
+            const [chatListOpen, setChatListOpen] = useState(false);
+            const legacyChatRef = useRef(false);                 // old 'chat' field still needs clearing
             const [aiUsage, setAiUsage] = useState({ date: '', count: 0 }); // per-day AI message counter (synced)
             // Nutrition (js/nutrition.js): diary per day, custom foods, the day shown in the Food tab.
             const [foodLog, setFoodLog] = useState({});   // { 'YYYY-MM-DD': [entry] }
@@ -1565,7 +1683,7 @@
                 setProfile(DEFAULT_PROFILE);
                 setMetrics([]);
                 setRecaps([]);
-                setChat([]);
+                setChats([]); setChatId(null);
                 setAiUsage({ date: '', count: 0 });
                 setFoodLog({});
                 setFoods({});
@@ -1635,7 +1753,14 @@
                 setProfile(prof);
                 setMetrics(pick('metrics', []) || []);
                 setRecaps(pick('recaps', []) || []);
-                setChat(pick('chat', []) || []);
+                let convs = pick('chats', []);
+                if (!Array.isArray(convs)) convs = [];
+                const legacy = pick('chat', []);
+                if (Array.isArray(legacy) && legacy.length) {
+                    if (!convs.length) convs = chatsFromLegacy(legacy);
+                    legacyChatRef.current = true;
+                }
+                setChats(convs.filter(c => c && Array.isArray(c.messages)));
                 setAiUsage(pick('aiUsage', { date: '', count: 0 }) || { date: '', count: 0 });
                 setFoods(pick('foods', {}) || {});
                 // cloudReadUser marks how far back its diary read went (foodLogSince); a record
@@ -1812,7 +1937,11 @@
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('profile', profile); }, [profile]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('metrics', metrics); }, [metrics]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('recaps', recaps); }, [recaps]);
-            useEffect(() => { if (!isLoading && currentUser) cloudSaveField('chat', chat); }, [chat]);
+            useEffect(() => {
+                if (isLoading || !currentUser) return;
+                cloudSaveField('chats', chats);
+                if (legacyChatRef.current) { legacyChatRef.current = false; cloudSaveField('chat', []); }
+            }, [chats]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('aiUsage', aiUsage); }, [aiUsage]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('foods', foods); }, [foods]);
             // Upload diary days that were changed without a connection last time.
@@ -1836,9 +1965,16 @@
             // Keep the chat scrolled to the newest message.
             useEffect(() => {
                 if (progressSub === 'chat' && chatScrollRef.current) {
-                    chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+                    chatScrollRef.current.scrollTop = chatListOpen ? 0 : chatScrollRef.current.scrollHeight;
                 }
-            }, [chat, aiBusy, progressSub]);
+            }, [chats, chatId, aiBusy, progressSub, chatListOpen]);
+            // Opening the coach continues today's conversation, otherwise starts a new one.
+            useEffect(() => {
+                if (progressSub !== 'chat') return;
+                const latest = chats[0];
+                setChatId(latest && dayKey(latest.updated) === dayKey(Date.now()) ? latest.id : null);
+                setChatListOpen(false);
+            }, [progressSub]);
 
             // Load this user's progress photos from IndexedDB whenever the user changes.
             useEffect(() => {
@@ -2372,6 +2508,8 @@
                 lines.push(`Profile: ${goal}.`);
                 if (p.notes && p.notes.trim()) lines.push(`User's own goal & notes (their goal, training style, preferences, limitations, diet, etc.): ${p.notes.trim()}`);
                 lines.push(`Training: ${workoutHistory.length} sessions logged all-time, ${last4w} in the last 4 weeks. Weekly plan days: ${DAYS.filter(d => workouts[d]).map(d => d + '=' + workouts[d].name).join(', ') || 'none'}.`);
+                const nowD = new Date(now);
+                lines.push(`Now: ${todayName} ${dayKey(now)}, ${String(nowD.getHours()).padStart(2, '0')}:${String(nowD.getMinutes()).padStart(2, '0')} (user's local time).`);
                 lines.push(`Today is ${todayName}; today's planned workout: ${todayW ? todayW.name : 'rest / none'}.`);
 
                 // Full current program: every planned day with each exercise's set scheme.
@@ -2428,8 +2566,34 @@
                             Object.keys(sum).forEach(k => { sum[k] /= full.length; });
                             lines.push(`  Average of ${full.length} logged days: ${fmtT(sum)}`);
                         }
-                        const todays = (foodLog[todayKey] || []).slice().sort((a, b) => a.t - b.t);
-                        if (todays.length) lines.push("Today's foods: " + todays.map(en => en.src === 'quick' ? `${en.name} (${Math.round(N.entryTotals(en).kcal)} kcal)` : `${en.name} ${Math.round(en.g)}${en.unit || 'g'}`).join('; ') + '.');
+                        // Item by item for today and the two days before, by meal.
+                        const r0 = (x) => Math.round(x || 0);
+                        const MEAL_NAMES = { breakfast: 'Breakfast', lunch: 'Lunch', snack: 'Snack', dinner: 'Dinner' };
+                        const itemText = (en) => {
+                            const t = N.entryTotals(en);
+                            const sv = en.serving && en.serving.g > 0 ? en.serving : null;
+                            const pcs = sv ? Math.round(en.g / sv.g * 2) / 2 : 0;
+                            const amount = en.src === 'quick' ? 'quick add' : (pcs > 0 && Math.abs(en.g / sv.g - pcs) < 0.02 ? `${pcs}× ${String(sv.label || 'serving').replace(/^1\s+/, '')} = ` : '') + `${r0(en.g)}${en.unit || 'g'}`;
+                            return `${en.name}${en.brand ? ' (' + en.brand + ')' : ''} ${amount}: ${r0(t.kcal)} kcal, P${r0(t.p)} C${r0(t.c)} F${r0(t.f)}`;
+                        };
+                        const detailDays = [0, 1, 2].map(k => dayKey(now - k * DAY_MS)).filter(d => (foodLog[d] || []).length);
+                        if (detailDays.length) {
+                            lines.push('Food diary detail (what was eaten, grams and per-item kcal / protein / carbs / fat):');
+                            detailDays.forEach(d => {
+                                const list = foodLog[d] || [];
+                                const t = N.dayTotals(list);
+                                const label = d === todayKey ? 'today, so far' : d === dayKey(now - DAY_MS) ? 'yesterday' : '2 days ago';
+                                const left = d === todayKey ? ` — ${r0(tg.kcal - t.kcal) >= 0 ? r0(tg.kcal - t.kcal) + ' kcal left' : r0(t.kcal - tg.kcal) + ' kcal over'}, protein ${r0(t.p)}/${tg.p}g, carbs ${r0(t.c)}/${tg.c}g, fat ${r0(t.f)}/${tg.f}g` : '';
+                                lines.push(`  ${d} (${label}): total ${r0(t.kcal)} of ${tg.kcal} kcal${left}`);
+                                const meals = ['breakfast', 'lunch', 'snack', 'dinner'].concat([...new Set(list.map(en => en.meal))].filter(m => !MEAL_NAMES[m]));
+                                meals.forEach(m => {
+                                    const items = list.filter(en => en.meal === m).sort((a, b) => a.t - b.t);
+                                    if (!items.length) return;
+                                    const mk = items.reduce((sum, en) => sum + N.entryTotals(en).kcal, 0);
+                                    lines.push(`    ${MEAL_NAMES[m] || 'Other'} (${r0(mk)} kcal): ${items.map(itemText).join('; ')}`);
+                                });
+                            });
+                        }
                     } else {
                         lines.push('Food diary: nothing logged in the last 14 days.');
                     }
@@ -2450,25 +2614,36 @@
                 const today = dayKey(Date.now());
                 const used = aiUsedToday();
                 if (used >= DAILY_AI_LIMIT) { setAiError(`Daily limit reached (${DAILY_AI_LIMIT} messages/day). Resets tomorrow.`); return; }
-                const next = [...chat, { role: 'user', content: text, ts: Date.now() }];
-                setChat(next);
+                const cur = chats.find(c => c.id === chatId);
+                const id = cur ? cur.id : 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+                const next = [...(cur ? cur.messages : []), { role: 'user', content: text, ts: Date.now() }];
+                // Put the conversation (new or updated) first; only the newest COACH_MAX_CHATS stay.
+                const upsert = (list, messages) => {
+                    const prev = list.find(c => c.id === id);
+                    const conv = { id, title: prev ? prev.title : chatTitle(text), created: prev ? prev.created : Date.now(), updated: Date.now(), messages: messages.slice(-COACH_MAX_MESSAGES) };
+                    return [conv, ...list.filter(c => c.id !== id)].slice(0, COACH_MAX_CHATS);
+                };
+                setChats(list => upsert(list, next));
+                setChatId(id);
                 setAiBusy(true); setAiError('');
                 try {
                     const system = ASSISTANT_SYSTEM + "\n\n--- The user's logged data (reference if relevant) ---\n" + buildAssistantContext();
-                    const window = next.slice(-16).map(m => ({ role: m.role, content: m.content }));
-                    const reply = await callAIProxy({ system, messages: window, user: currentUser ? currentUser.username : '', maxTokens: 700 });
-                    setChat(prev => [...prev, { role: 'assistant', content: reply, ts: Date.now() }]);
+                    const turns = next.slice(-COACH_CONTEXT_MESSAGES).map(m => ({ role: m.role, content: m.content }));
+                    const reply = await callAIProxy({ system, messages: turns, user: currentUser ? currentUser.username : '', maxTokens: 900 }, true);
+                    const answer = { role: 'assistant', content: reply.text, ts: Date.now() };
+                    if (reply.model) answer.model = reply.model.split('/').pop();
+                    setChats(list => { const c = list.find(x => x.id === id); return upsert(list, [...(c ? c.messages : next), answer]); });
                     setAiUsage({ date: today, count: used + 1 }); // count only successful replies
                 } catch (err) {
                     setAiError(err.message || 'Message failed');
                 } finally { setAiBusy(false); }
             };
 
-            const clearChat = () => setConfirmState({
-                title: 'Clear conversation?',
-                message: 'This deletes your entire coach chat history.',
-                confirmLabel: 'Clear',
-                onConfirm: () => { setChat([]); setConfirmState(null); }
+            const deleteChat = (conv) => setConfirmState({
+                title: 'Delete conversation?',
+                message: `"${conv.title}" will be deleted.`,
+                confirmLabel: 'Delete',
+                onConfirm: () => { setChats(list => list.filter(c => c.id !== conv.id)); if (chatId === conv.id) setChatId(null); setConfirmState(null); }
             });
 
             // --- Full backup export / import (JSON). Also the migration path between
@@ -3972,6 +4147,8 @@
                 if (progressSub === 'chat') {
                     const today = dayKey(Date.now());
                     const remaining = Math.max(0, DAILY_AI_LIMIT - aiUsedToday());
+                    const conv = chats.find(c => c.id === chatId) || null;
+                    const msgs = conv ? conv.messages : [];
                     const dayLabel = (ts) => {
                         const k = dayKey(ts);
                         if (k === today) return 'Today';
@@ -3981,7 +4158,7 @@
                     // group messages by calendar day
                     const groups = [];
                     let curKey = null;
-                    chat.forEach(m => {
+                    msgs.forEach(m => {
                         const k = dayKey(m.ts);
                         if (k !== curKey) { curKey = k; groups.push({ ts: m.ts, msgs: [] }); }
                         groups[groups.length - 1].msgs.push(m);
@@ -3990,37 +4167,57 @@
                         const isUser = m.role === 'user';
                         return e('div', { key, className: 'flex mb-2 ' + (isUser ? 'justify-end' : 'justify-start') },
                             e('div', {
-                                className: 'px-3.5 py-2.5 text-sm leading-relaxed',
+                                className: 'px-3.5 py-2.5 text-sm leading-relaxed min-w-0',
                                 style: {
-                                    maxWidth: '86%', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+                                    maxWidth: isUser ? '86%' : '94%', whiteSpace: isUser ? 'pre-wrap' : 'normal', overflowWrap: 'anywhere',
                                     background: isUser ? 'var(--primary-container)' : 'var(--surface-container-highest)',
                                     color: isUser ? 'var(--on-primary-container)' : 'var(--on-surface)',
                                     borderRadius: isUser ? '18px 18px 6px 18px' : '18px 18px 18px 6px'
                                 }
-                            }, m.content)
+                            }, isUser ? m.content : e(Markdown, { text: m.content }))
                         );
                     };
-                    const suggestions = ["How's my recent progress?", 'What should I focus on next?', "Suggest a warm-up for today's workout", 'Am I training each muscle enough?'];
+                    const lastModel = (msgs.slice().reverse().find(m => m.role === 'assistant' && m.model) || {}).model;
+                    const suggestions = ["How's my eating today?", "How's my recent progress?", 'What should I focus on next?', "Suggest a warm-up for today's workout"];
+                    const headBtn = (icon, onClick, aria, disabled) => e('button', { onClick, disabled, 'aria-label': aria, className: 'w-9 h-9 flex items-center justify-center rounded-full active:opacity-60', style: { color: 'var(--on-surface-variant)', opacity: disabled ? 0.35 : 1 } }, e(MIcon, { icon, style: { fontSize: '22px' } }));
+                    const newChat = () => { setChatId(null); setChatListOpen(false); setAiError(''); };
+                    // Recent conversations (the newest COACH_MAX_CHATS are kept).
+                    const listView = e('div', { className: 'max-w-lg mx-auto' },
+                        e('button', { onClick: newChat, className: 'w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold active:scale-[0.98] mb-4', style: { background: 'var(--primary-container)', color: 'var(--on-primary-container)' } }, e(MIcon, { icon: 'add', style: { fontSize: '20px' } }), 'New chat'),
+                        e('div', { className: 'text-xs uppercase tracking-widest mb-2 px-1', style: { color: 'var(--on-surface-variant)' } }, 'Recent chats'),
+                        chats.length ? e('div', { className: 'rounded-2xl overflow-hidden', style: { background: 'var(--surface-container-high)' } }, chats.map((c, i) => e('div', { key: c.id, className: 'flex items-center', style: { borderTop: i ? '1px solid var(--surface-container-highest)' : 'none', background: c.id === chatId ? 'rgba(209,252,0,0.06)' : 'transparent' } },
+                            e('button', { onClick: () => { setChatId(c.id); setChatListOpen(false); setAiError(''); }, className: 'flex-1 min-w-0 text-left px-4 py-3 active:opacity-70' },
+                                e('div', { className: 'text-sm font-bold truncate', style: { color: c.id === chatId ? 'var(--primary-fixed-dim)' : 'var(--on-surface)' } }, c.title),
+                                e('div', { className: 'text-xs mt-0.5', style: { color: 'var(--on-surface-variant)' } }, `${dayLabel(c.updated)} · ${c.messages.length} message${c.messages.length === 1 ? '' : 's'}`)),
+                            e('button', { onClick: () => deleteChat(c), 'aria-label': 'Delete ' + c.title, className: 'w-11 h-11 flex items-center justify-center flex-shrink-0 active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(MIcon, { icon: 'delete', style: { fontSize: '20px' } }))
+                        ))) : e('div', { className: 'text-sm px-1', style: { color: 'var(--outline)' } }, 'No chats yet.'),
+                        e('div', { className: 'text-xs mt-3 px-1 leading-snug', style: { color: 'var(--outline)' } }, `The coach remembers what was said within a chat, not across chats. Your ${COACH_MAX_CHATS} most recent chats are kept.`)
+                    );
                     return e('div', { className: 'fixed inset-0 flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' } },
                         // Header
-                        e('div', { className: 'flex items-center justify-between px-3 flex-shrink-0', style: { minHeight: '56px', paddingTop: 'env(safe-area-inset-top)', background: 'var(--surface-container-low)' } },
-                            e('button', { onClick: backToHub, className: 'flex items-center gap-1 active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(ArrowLeft, { size: 20 }), e('span', { className: 'text-sm' }, 'Back')),
-                            e('div', { className: 'font-black uppercase tracking-wide text-lg', style: { color: 'var(--primary-container)' } }, 'AI COACH'),
-                            chat.length ? e('button', { onClick: clearChat, 'aria-label': 'Clear chat', className: 'p-1.5 active:opacity-60', style: { color: 'var(--on-surface-variant)' } }, e(MIcon, { icon: 'delete_sweep', style: { fontSize: '20px' } })) : e('div', { style: { width: '28px' } })
+                        e('div', { className: 'flex items-center gap-2 px-3 flex-shrink-0', style: { minHeight: '56px', paddingTop: 'env(safe-area-inset-top)', background: 'var(--surface-container-low)' } },
+                            e('button', { onClick: chatListOpen ? () => setChatListOpen(false) : backToHub, className: 'flex items-center gap-1 active:opacity-60 flex-shrink-0', style: { color: 'var(--on-surface-variant)' } }, e(ArrowLeft, { size: 20 }), e('span', { className: 'text-sm' }, 'Back')),
+                            e('div', { className: 'flex-1 min-w-0 text-center' },
+                                e('div', { className: 'font-black uppercase tracking-wide text-lg leading-tight', style: { color: 'var(--primary-container)' } }, 'AI COACH'),
+                                e('div', { className: 'text-[11px] truncate', style: { color: 'var(--on-surface-variant)' } }, chatListOpen ? 'Recent chats' : conv ? conv.title : 'New chat')),
+                            e('div', { className: 'flex items-center flex-shrink-0' },
+                                headBtn('history', () => setChatListOpen(!chatListOpen), 'Recent chats'),
+                                headBtn('add', newChat, 'New chat', !conv && !chatListOpen))
                         ),
-                        // Messages
+                        // Messages, or the list of chats
                         e('div', { ref: chatScrollRef, className: 'flex-1 overflow-y-auto px-3 py-3', style: { minHeight: 0 } },
-                            e('div', { className: 'max-w-lg mx-auto' },
-                                chat.length === 0 ? e('div', { className: 'pt-8' },
+                            chatListOpen ? listView : e('div', { className: 'max-w-lg mx-auto' },
+                                msgs.length === 0 ? e('div', { className: 'pt-8' },
                                     e('div', { className: 'flex flex-col items-center text-center mb-6' },
                                         e('div', { className: 'w-14 h-14 rounded-2xl flex items-center justify-center mb-3', style: { background: 'rgba(209, 252, 0, 0.1)' } }, e(MIcon, { icon: 'sports_gymnastics', fill: true, style: { fontSize: '32px', color: 'var(--primary-container)' } })),
                                         e('div', { className: 'font-black text-lg' }, 'Your AI Coach'),
-                                        e('div', { className: 'text-sm mt-1 px-4', style: { color: 'var(--on-surface-variant)' } }, 'Ask about training, technique, programming, nutrition or recovery. It can see your logged workouts, food diary and goals.')
+                                        e('div', { className: 'text-sm mt-1 px-4', style: { color: 'var(--on-surface-variant)' } }, 'Ask about training, technique, programming, nutrition or recovery. It can see your logged workouts, what you ate (item by item), your targets and goals.')
                                     ),
                                     e('div', { className: 'space-y-2' }, suggestions.map((s, i) => e('button', {
                                         key: i, onClick: () => { if (!aiBusy && remaining > 0 && proxyEnabled()) sendChat(s); },
                                         className: 'w-full text-left px-4 py-3 rounded-xl text-sm active:scale-[0.98]', style: { background: 'var(--surface-container-high)', color: 'var(--on-surface)' }
-                                    }, s)))
+                                    }, s))),
+                                    chats.length ? e('button', { onClick: () => setChatListOpen(true), className: 'w-full mt-4 py-2.5 text-sm font-bold active:opacity-60', style: { color: 'var(--primary-fixed-dim)' } }, `Recent chats (${chats.length})`) : null
                                 ) : groups.map((g, gi) => e('div', { key: gi },
                                     e('div', { className: 'text-center my-3' }, e('span', { className: 'text-xs px-2.5 py-0.5 rounded-full', style: { background: 'var(--surface-container-high)', color: 'var(--on-surface-variant)' } }, dayLabel(g.ts))),
                                     g.msgs.map((m, mi) => bubble(m, gi + '-' + mi))
@@ -4029,10 +4226,10 @@
                             )
                         ),
                         // Input
-                        e('div', { className: 'flex-shrink-0 px-3 pt-2', style: { paddingBottom: 'max(env(safe-area-inset-bottom), 8px)', background: 'var(--surface-container-low)', borderTop: '1px solid var(--outline-variant)' } },
+                        chatListOpen ? null : e('div', { className: 'flex-shrink-0 px-3 pt-2', style: { paddingBottom: 'max(env(safe-area-inset-bottom), 8px)', background: 'var(--surface-container-low)', borderTop: '1px solid var(--outline-variant)' } },
                             aiError ? e('div', { className: 'text-xs mb-1.5 px-1', style: { color: 'var(--error)' } }, aiError) : null,
                             e(ChatInput, { onSend: sendChat, disabled: aiBusy || remaining <= 0 || !proxyEnabled(), placeholder: !proxyEnabled() ? 'AI not configured' : (remaining <= 0 ? 'Daily limit reached — resets tomorrow' : 'Ask your coach…') }),
-                            e('div', { className: 'text-center mt-1', style: { fontSize: '10px', color: 'var(--outline)' } }, proxyEnabled() ? `${remaining}/${DAILY_AI_LIMIT} messages left today` : 'AI not configured yet')
+                            e('div', { className: 'text-center mt-1', style: { fontSize: '10px', color: 'var(--outline)' } }, proxyEnabled() ? `${remaining}/${DAILY_AI_LIMIT} messages left today` + (lastModel ? ` · ${lastModel}` : '') : 'AI not configured yet')
                         ),
                         confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null
                     );
