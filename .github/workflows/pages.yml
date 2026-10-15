@@ -30,10 +30,31 @@ jobs:
         env:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
         run: |
-          if [ -z "$FIREBASE_API_KEY" ]; then echo "::error::The FIREBASE_API_KEY repository secret is missing."; exit 1; fi
+          # Take the key itself (AIza + 35 characters) out of whatever was pasted into the secret:
+          # quotes, spaces, newlines or a whole `const … = '…';` line would otherwise break the page.
+          KEY=$(printf '%s' "$FIREBASE_API_KEY" | grep -oE 'AIza[0-9A-Za-z_-]{35}' | head -n1 || true)
+          if [ -z "$KEY" ]; then
+            echo "::error::The FIREBASE_API_KEY secret doesn't contain a Firebase Web API key (AIza… 39 characters); it has ${#FIREBASE_API_KEY} characters."
+            exit 1
+          fi
+          echo "::add-mask::$KEY"
+          if [ "$KEY" != "$FIREBASE_API_KEY" ]; then
+            echo "::warning::The FIREBASE_API_KEY secret has extra characters around the key (${#FIREBASE_API_KEY} instead of 39) — only the key is used. You can re-save the secret as just the key."
+          fi
           grep -q "__FIREBASE_API_KEY__" index.html || { echo "::error::Placeholder __FIREBASE_API_KEY__ not found in index.html."; exit 1; }
-          sed -i "s|__FIREBASE_API_KEY__|${FIREBASE_API_KEY}|g" index.html
+          sed -i "s|__FIREBASE_API_KEY__|${KEY}|g" index.html
           if grep -q "__FIREBASE_API_KEY__" index.html; then echo "::error::Placeholder still present."; exit 1; fi
+
+      - name: Check the page's scripts still parse
+        run: |
+          python3 - <<'PY'
+          import re
+          html = open('index.html', encoding='utf-8').read()
+          scripts = re.findall(r'<script>(.*?)</script>', html, re.S)
+          open('/tmp/main.js', 'w', encoding='utf-8').write(max(scripts, key=len))
+          PY
+          node --check /tmp/main.js
+          for f in js/*.js sw.js; do node --check "$f"; done
 
       - name: Keep only the site's files
         run: rm -rf android tools proxy .github README.md
