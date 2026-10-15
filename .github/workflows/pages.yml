@@ -1,0 +1,48 @@
+# Publishes the site to GitHub Pages, with the Firebase Web API key inserted from the
+# FIREBASE_API_KEY repository secret (the code only holds a placeholder).
+# Requires: Settings › Pages › Build and deployment › Source = "GitHub Actions".
+name: Deploy site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Insert the Firebase API key
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+        run: |
+          if [ -z "$FIREBASE_API_KEY" ]; then echo "::error::The FIREBASE_API_KEY repository secret is missing."; exit 1; fi
+          grep -q "__FIREBASE_API_KEY__" index.html || { echo "::error::Placeholder __FIREBASE_API_KEY__ not found in index.html."; exit 1; }
+          sed -i "s|__FIREBASE_API_KEY__|${FIREBASE_API_KEY}|g" index.html
+          if grep -q "__FIREBASE_API_KEY__" index.html; then echo "::error::Placeholder still present."; exit 1; fi
+
+      - name: Keep only the site's files
+        run: rm -rf android tools proxy .github README.md
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
