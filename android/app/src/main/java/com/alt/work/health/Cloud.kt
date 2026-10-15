@@ -24,6 +24,9 @@ class Cloud(context: Context) {
             requestMethod = method
             connectTimeout = 15_000
             readTimeout = 20_000
+            // Same origin as the web app, so the token refresh keeps working if the Firebase API
+            // key is restricted to the site (Google Cloud › Credentials › HTTP referrers).
+            setRequestProperty("Referer", "https://alterrion-git.github.io/")
             if (body != null) {
                 doOutput = true
                 setRequestProperty("Content-Type", contentType)
