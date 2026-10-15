@@ -372,7 +372,11 @@
         //   3. Realtime Database > Rules > paste the rules shown in Settings (in-app),
         //      which restrict each user to users/<their-uid>.
         // While this is empty, the app keeps the original username login unchanged.
-        const FIREBASE_API_KEY = 'AIzaSyDf4kFXmHgparBHdDhaBUIJT5otJTHd-Zw'; // Firebase Web API key (public by design; security comes from DB rules)
+        // Firebase Web API key: not kept in the code. The deploy workflow (.github/workflows/pages.yml)
+        // puts the FIREBASE_API_KEY repository secret in place of the placeholder; the published page
+        // still contains it (browsers need it — security comes from the database rules).
+        const FIREBASE_API_KEY_RAW = '__FIREBASE_API_KEY__';
+        const FIREBASE_API_KEY = FIREBASE_API_KEY_RAW.startsWith('__') ? '' : FIREBASE_API_KEY_RAW; // not injected (local copy) → no sign-in
         // Derive auth domain / project id from the DB URL's project ('workout-app-423a6').
         const FIREBASE_PROJECT_ID = (FIREBASE_DB_URL.match(/https:\/\/([^.]+)/) || [])[1] || '';
         const FIREBASE_CONFIG = {
@@ -4246,7 +4250,7 @@
                                 sectionTitle('Secure accounts (setup)'),
                                 e('div', { className: 'rounded-2xl p-4', style: card },
                                     e('div', { className: 'text-sm leading-snug mb-3', style: { color: 'var(--on-surface-variant)' } },
-                                        'To make accounts private (each user sees only their own data): in the Firebase console enable Email/Password sign-in, paste your Web API key into the app source (FIREBASE_API_KEY), then set the Realtime Database rules to:'),
+                                        'To make accounts private (each user sees only their own data): in the Firebase console enable Email/Password sign-in, add your Web API key as the FIREBASE_API_KEY repository secret (the deploy inserts it), then set the Realtime Database rules to:'),
                                     e('pre', { className: 'text-xs rounded-lg p-3 overflow-x-auto', style: { background: 'var(--surface-container-lowest)', color: 'var(--primary-fixed-dim)' } }, rulesText),
                                     e('button', { onClick: () => { try { navigator.clipboard.writeText(rulesText); setToast('Rules copied'); } catch (e) { setToast('Copy failed'); } }, className: 'mt-3 w-full py-2.5 rounded-lg font-bold text-sm active:scale-95', style: { background: 'var(--surface-container-low)', color: 'var(--primary-fixed-dim)' } }, 'Copy rules')
                                 )
