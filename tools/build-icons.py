@@ -22,7 +22,7 @@ edit delete_sweep delete calendar_month arrow_upward arrow_drop_down chevron_lef
 local_fire_department speed flag monitor_weight photo_camera forum settings
 add remove search check arrow_back refresh info warning restaurant barcode_scanner nutrition egg
 water_drop history star more_vert schedule bolt flash_on flash_off tune content_copy play_arrow
-menu_book psychology
+menu_book psychology favorite bedtime directions_walk link download
 """.split()))
 
 src = sys.argv[1]

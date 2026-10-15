@@ -262,11 +262,12 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.20.0"></script>
-    <script src="js/coach.js?v=3.20.0"></script>
+    <script src="js/nutrition.js?v=3.21.0"></script>
+    <script src="js/coach.js?v=3.21.0"></script>
+    <script src="js/health.js?v=3.21.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.20.0';
+        const APP_VERSION = '3.21.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -533,13 +534,16 @@
             const res = await Promise.all([
                 ...USER_FIELDS.map(f => cloudRead(base + '/' + f, ms, '', a)),
                 cloudRead(base + '/foodLog', ms, foodRangeParams(since), a),
+                cloudRead(base + '/health', ms, foodRangeParams(since), a), // from the Android companion
             ]);
             if (res.some(r => !r.ok)) return { ok: false };
+            const health = res[USER_FIELDS.length + 1].data;
             const data = {};
             let any = false;
             USER_FIELDS.forEach((f, i) => { if (res[i].data != null) { data[f] = res[i].data; any = true; } });
             const log = res[USER_FIELDS.length].data;
             if (log && typeof log === 'object' && Object.keys(log).length) { data.foodLog = log; any = true; }
+            if (health && typeof health === 'object') data.health = health;
             if (!any) return { ok: true, data: null };
             data.foodLogSince = since;
             return { ok: true, data };
@@ -1087,7 +1091,7 @@
         // Icons render by codepoint from the self-hosted subset font (fonts/material-symbols.woff2),
         // so a missing font shows nothing instead of the icon's name as text. New icon? Add it to
         // tools/build-icons.py, rebuild, and paste the printed ICON_CP here.
-        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","bolt":"ea0b","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","content_copy":"e14d","delete":"e872","delete_sweep":"e16c","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","fitness_center":"eb43","flag":"e153","flash_off":"e3e6","flash_on":"e3e7","forum":"e0bf","history":"e28e","info":"e88e","local_fire_department":"ea05","menu_book":"ea19","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","play_arrow":"e037","psychology":"ea4a","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","tune":"e429","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
+        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","bedtime":"e1f9","bolt":"ea0b","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","content_copy":"e14d","delete":"e872","delete_sweep":"e16c","directions_walk":"e536","download":"e171","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","favorite":"e87d","fitness_center":"eb43","flag":"e153","flash_off":"e3e6","flash_on":"e3e7","forum":"e0bf","history":"e28e","info":"e88e","link":"e157","local_fire_department":"ea05","menu_book":"ea19","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","play_arrow":"e037","psychology":"ea4a","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","tune":"e429","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
         const MIcon = ({ icon, fill = false, className = '', style = {} }) => e('span', {
             className: `material-symbols-outlined ${className}`,
             'aria-hidden': true,
@@ -1481,7 +1485,7 @@
             const [expandedHistoryIdx, setExpandedHistoryIdx] = useState(null);
             // Progress-tracking state
             // proteinG..saltMaxG: daily nutrition targets; null = automatic (see CWANutrition.targetsFor).
-            const DEFAULT_PROFILE = { displayName: '', goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null, notes: '', proteinG: null, carbsG: null, fatG: null, fibreG: null, sugarMaxG: null, saltMaxG: null };
+            const DEFAULT_PROFILE = { displayName: '', goal: '', split: '', targetWeight: null, targetBodyFat: null, dailyKcal: null, heightCm: null, startWeight: null, notes: '', proteinG: null, carbsG: null, fatG: null, fibreG: null, sugarMaxG: null, saltMaxG: null, sex: '', birthYear: null };
             const PROFILE_NOTES_MAX = 800;
             const [profile, setProfile] = useState(DEFAULT_PROFILE);
             const [metrics, setMetrics] = useState([]); // [{ date, weight, kcal, sleep, steps, note }]
@@ -1498,6 +1502,10 @@
             const [foodLog, setFoodLog] = useState({});   // { 'YYYY-MM-DD': [entry] }
             const [foods, setFoods] = useState({});       // custom foods { id: food }
             const [foodDate, setFoodDate] = useState(() => dayKey(Date.now()));
+            // Health data from the Android companion (js/health.js): { 'YYYY-MM-DD': { hc, weighins } }. Read-only here.
+            const [healthLog, setHealthLog] = useState({});
+            const [healthLoading, setHealthLoading] = useState(false);
+            const healthReadAt = useRef(0);
             const foodRangesRef = useRef(new Set());      // older diary ranges already fetched
             const [progressSub, setProgressSub] = useState('hub'); // hub | goals | metrics | photos | chat | settings
             const [photos, setPhotos] = useState([]);   // loaded from IndexedDB (local only)
@@ -1699,6 +1707,7 @@
                 setAiUsage({ date: '', count: 0 });
                 setFoodLog({});
                 setFoods({});
+                setHealthLog({});
                 setPhotos([]);
                 setProgressSub('hub');
                 setView('login');
@@ -1777,6 +1786,8 @@
                 setCoachMemory(Array.isArray(mem) ? mem.filter(m => m && m.text) : []);
                 setAiUsage(pick('aiUsage', { date: '', count: 0 }) || { date: '', count: 0 });
                 setFoods(pick('foods', {}) || {});
+                setHealthLog((src && src.health) || pick('health', {}) || {});
+                healthReadAt.current = src && src.health ? Date.now() : 0;
                 // cloudReadUser marks how far back its diary read went (foodLogSince); a record
                 // without it (offline fallback, legacy full read) leaves the local days alone.
                 const cloudLog = src && src.foodLogSince ? (src.foodLog || {}) : (src ? src.foodLog : undefined);
@@ -1958,6 +1969,32 @@
             }, [chats]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('aiUsage', aiUsage); }, [aiUsage]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('coachMemory', coachMemory); }, [coachMemory]);
+            // Health data: kept on the device for offline starts (never written back from here).
+            useEffect(() => {
+                if (isLoading || !currentUser) return;
+                try { localStorage.setItem('cwa-health-' + currentUser.username, JSON.stringify(healthLog)); } catch (err) {}
+            }, [healthLog]);
+            // The phone syncs in the background: re-read health days when CWA comes back to the screen.
+            const refreshHealth = async (force) => {
+                if (!currentUser || !cloudEnabled()) return;
+                if (!force && Date.now() - healthReadAt.current < 120000) return;
+                healthReadAt.current = Date.now();
+                setHealthLoading(true);
+                const since = dayKey(Date.now() - FOOD_LOG_RECENT_DAYS * DAY_MS);
+                const r = await cloudRead('users/' + currentUser.username + '/health', 10000, foodRangeParams(since));
+                if (r.ok) setHealthLog((r.data && typeof r.data === 'object') ? r.data : {});
+                setHealthLoading(false);
+            };
+            useEffect(() => {
+                const onVis = () => { if (document.visibilityState === 'visible') refreshHealth(false); };
+                document.addEventListener('visibilitychange', onVis);
+                return () => document.removeEventListener('visibilitychange', onVis);
+            }, [currentUser]);
+            // Scale weigh-ins → the Daily Log (one entry per day; a weight typed by hand wins).
+            useEffect(() => {
+                if (isLoading || !currentUser || !window.CWAHealth) return;
+                setMetrics(prev => window.CWAHealth.mergeWeighIns(prev, healthLog, profile) || prev);
+            }, [healthLog, profile.sex, profile.birthYear, profile.heightCm, isLoading]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('foods', foods); }, [foods]);
             // Upload diary days that were changed without a connection last time.
             useEffect(() => {
@@ -2476,6 +2513,18 @@
 
             // Exercises with "proper history": appear in >=2 logged sessions. Used so the LLM
             // only reasons about lifts the user has actually stuck with.
+            // Opens the CWA Health app (Android) with this account's sign-in, so it can upload in the background.
+            const linkAndroidApp = () => {
+                const H = window.CWAHealth;
+                if (!H || !currentUser) return;
+                const a = fbAuthEnabled() ? fbInit() : null;
+                const fbUser = a && a.currentUser;
+                if (fbAuthEnabled() && currentUser.email && !(fbUser && fbUser.refreshToken)) { setToast('Sign in again, then link.'); return; }
+                const latestW = metrics.filter(m => m.weight != null).sort((x, y) => y.date - x.date)[0];
+                if (!H.isAndroid()) setToast('Open CWA on your Android phone to link the app.');
+                window.location.href = H.linkUrl({ dbUrl: FIREBASE_DB_URL, uid: currentUser.username, apiKey: FIREBASE_API_KEY, refreshToken: fbUser ? fbUser.refreshToken : '', email: currentUser.email || '', weight: latestW ? latestW.weight : '' });
+            };
+
             const aiUsedToday = () => (aiUsage.date === dayKey(Date.now()) ? aiUsage.count : 0);
 
             const sendChat = async (text) => {
@@ -2499,7 +2548,7 @@
                     const C = window.CWACoach;
                     // The topic of the last few questions decides which data gets the detailed version.
                     const focus = C.focusFrom(next.filter(m => m.role === 'user').slice(-3).map(m => m.content));
-                    const context = C.buildContext({ now: Date.now(), profile, workouts, history: workoutHistory, metrics, foodLog, memory: coachMemory, N: window.CWANutrition, focus });
+                    const context = C.buildContext({ now: Date.now(), profile, workouts, history: workoutHistory, metrics, foodLog, memory: coachMemory, N: window.CWANutrition, focus, health: healthLog, H: window.CWAHealth });
                     const system = C.SYSTEM + "\n\n--- The user's data (analysed by the app) ---\n" + context;
                     // Recent turns only; older answers are shortened (the memory carries what lasts).
                     const turns = next.slice(-COACH_CONTEXT_MESSAGES).map((m, i, arr) => ({ role: m.role, content: m.role === 'assistant' && i < arr.length - 2 && m.content.length > 1500 ? m.content.slice(0, 1500) + ' […]' : m.content }));
@@ -3913,8 +3962,15 @@
                                 e('div', { className: 'grid grid-cols-2 gap-3' },
                                     numField('Target Weight', profile.targetWeight, (v) => updateProfileField('targetWeight', v), '75', 'kg'),
                                     numField('Target Body Fat', profile.targetBodyFat, (v) => updateProfileField('targetBodyFat', v), '12', '%'),
-                                    numField('Height', profile.heightCm, (v) => updateProfileField('heightCm', v), '180', 'cm')
-                                )
+                                    numField('Height', profile.heightCm, (v) => updateProfileField('heightCm', v), '180', 'cm'),
+                                    numField('Birth year', profile.birthYear, (v) => updateProfileField('birthYear', v), '1995', '')
+                                ),
+                                e('div', { className: 'grid grid-cols-2 gap-2 mt-3' }, [['male', 'Male'], ['female', 'Female']].map(([id, lbl]) => e('button', {
+                                    key: id, onClick: () => updateProfileField('sex', profile.sex === id ? '' : id),
+                                    className: 'py-2 rounded-xl text-sm font-bold active:scale-95',
+                                    style: profile.sex === id ? { background: 'var(--primary-container)', color: 'var(--on-primary-container)' } : { background: 'var(--surface-container-highest)', color: 'var(--on-surface-variant)' }
+                                }, lbl))),
+                                e('div', { className: 'text-xs mt-2 px-1', style: { color: 'var(--outline)' } }, 'Sex, birth year and height let CWA estimate body fat and muscle from your scale\'s weigh-ins.')
                             ),
                             e('div', null,
                                 e('div', { className: 'text-xs uppercase tracking-widest mb-1', style: { color: 'var(--on-surface-variant)' } }, 'Training Split / Plan'),
@@ -3946,6 +4002,13 @@
                 }
 
                 // ---- DAILY METRICS ----
+                if (progressSub === 'health') {
+                    return shell('HEALTH', true, window.CWAHealth ? e(window.CWAHealth.HealthPanel, {
+                        log: healthLog, metrics, profile, refreshing: healthLoading,
+                        onLink: linkAndroidApp, onRefresh: () => refreshHealth(true), onGoals: () => setProgressSub('goals'),
+                    }) : e('div', null, 'Health module failed to load.'));
+                }
+
                 if (progressSub === 'metrics') {
                     const recent = metrics.slice().sort((a, b) => b.date - a.date).slice(0, 30);
                     return shell('DAILY LOG', true,
@@ -3957,7 +4020,8 @@
                                     recent.map((m) => {
                                         const d = new Date(m.date);
                                         const bits = [
-                                            m.weight != null ? `${fmtNum(m.weight)}kg` : null,
+                                            m.weight != null ? `${fmtNum(m.weight)}kg` + (m.scaleT ? ' (scale)' : '') : null,
+                                            m.bodyFat != null ? `${fmtNum(m.bodyFat)}% fat` : null,
                                             m.kcal != null ? `${fmtNum(m.kcal)}kcal` : null,
                                             m.sleep != null ? `${fmtNum(m.sleep)}h` : null,
                                             m.steps != null ? `${fmtNum(m.steps)} steps` : null,
@@ -4246,6 +4310,7 @@
                         ),
                         e('div', { className: 'grid grid-cols-2 gap-3' },
                             hubCard('flag', 'Goals', 'Targets & notes', 'goals'),
+                            hubCard('favorite', 'Health', 'Steps, sleep, heart, weigh-ins', 'health'),
                             hubCard('monitor_weight', 'Daily Log', 'Weight, kcal, sleep', 'metrics'),
                             hubCard('photo_camera', 'Photos', `${photos.length} saved`, 'photos'),
                             hubCard('forum', 'AI Coach', 'Chat & advice', 'chat'),

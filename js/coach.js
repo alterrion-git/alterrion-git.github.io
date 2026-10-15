@@ -320,8 +320,25 @@
     }
 
     // ---------- body ----------
-    function bodyLines({ now, metrics, profile }) {
+    function bodyLines({ now, metrics, profile, health, H }) {
         const out = [];
+        // From the phone (Health Connect via the CWA Health app): activity, sleep, heart.
+        if (health && H && H.summary) {
+            const s = H.summary(health, now), t = s.today || {}, hm = H.hm;
+            const parts = [];
+            if (t.steps || s.steps7) parts.push(`steps today ${r0(t.steps)}${s.steps7 ? ` (7-day avg ${r0(s.steps7)}${s.steps28 ? `, 4-week ${r0(s.steps28)}` : ''})` : ''}`);
+            if (t.activeKcal || s.activeKcal7) parts.push(`active kcal burned today ${r0(t.activeKcal)}${s.activeKcal7 ? ` (7-day avg ${r0(s.activeKcal7)})` : ''}`);
+            if (s.totalKcal7) parts.push(`total burn 7-day avg ${r0(s.totalKcal7)} kcal`);
+            if (parts.length) out.push(`Activity (phone/wearable): ${parts.join('; ')}.`);
+            const ln = s.lastNight;
+            if (ln || s.sleep7) out.push(`Sleep: ${ln ? `last night ${hm(ln.min)}${ln.deep || ln.rem ? ` (deep ${hm(ln.deep)}, REM ${hm(ln.rem)}, awake ${hm(ln.awake)})` : ''}` : 'last night not recorded'}${s.sleep7 ? `; 7-day avg ${hm(s.sleep7)}` : ''}${s.sleep28 ? `, 4-week ${hm(s.sleep28)}` : ''}.`);
+            const hr = [];
+            if (t.rhr || s.rhr7) hr.push(`resting HR ${t.rhr ? r0(t.rhr) + ' today' : ''}${s.rhr7 ? ` (7-day ${r0(s.rhr7)}${s.rhr28 ? `, 4-week ${r0(s.rhr28)}` : ''})` : ''}`);
+            if (s.hrv7) hr.push(`HRV 7-day avg ${r0(s.hrv7)} ms`);
+            if (s.spo27) hr.push(`SpO2 ${kg(s.spo27)} %`);
+            if (hr.length) out.push(`Heart: ${hr.join('; ')}.`);
+            if (s.workouts.length) out.push(`Activities recorded by other apps (7 days): ${s.workouts.slice(0, 8).map(w => `${w.day.slice(5)} ${w.title || w.type} ${r0(w.min)} min`).join('; ')}.`);
+        }
         const ms = (metrics || []).filter(m => m && m.date).sort((a, b) => a.date - b.date);
         const w = ms.filter(m => m.weight != null);
         if (w.length) {
@@ -333,6 +350,8 @@
             if (w12) parts.push(`${last.weight - w12.weight >= 0 ? '+' : ''}${kg(last.weight - w12.weight)} kg vs 12 weeks ago`);
             if (profile && profile.targetWeight) parts.push(`target ${kg(profile.targetWeight)} kg`);
             out.push(`Body weight: ${parts.join(', ')}.`);
+            const bc = w.slice().reverse().find(m => m.bodyFat != null);
+            if (bc) out.push(`  Body composition (scale estimate, ${dk(bc.date)}): body fat ${kg(bc.bodyFat)} %${bc.muscleKg != null ? `, muscle ${kg(bc.muscleKg)} kg` : ''}${bc.waterPct != null ? `, water ${kg(bc.waterPct)} %` : ''}.`);
             const months = {};
             w.forEach(m => { const k = dk(m.date).slice(0, 7); (months[k] = months[k] || []).push(m.weight); });
             const mk = Object.keys(months).sort().slice(-6);
@@ -365,7 +384,7 @@
         const sections = [
             ['NUTRITION', nutritionLines({ now, N: data.N, profile: p, metrics: data.metrics, foodLog: data.foodLog, detailed: focus.food })],
             ['TRAINING', trainingLines({ now, workouts: data.workouts || {}, history: data.history || [], detailed: focus.training })],
-            ['BODY', bodyLines({ now, metrics: data.metrics, profile: p })],
+            ['BODY & RECOVERY', bodyLines({ now, metrics: data.metrics, profile: p, health: data.health, H: data.H })],
         ];
         // The topic asked about goes first.
         if (focus.training && !focus.food) sections.unshift(sections.splice(1, 1)[0]);
