@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
@@ -163,24 +164,55 @@ object ScaleListener {
         return if (adapter.isEnabled) adapter.bluetoothLeScanner else null
     }
 
+    /**
+     * Starts listening. Returns null when it works, else what went wrong in words (also kept in
+     * [Store.scanProblem] for the Scale card), so a failure isn't mistaken for Bluetooth being off.
+     */
     @SuppressLint("MissingPermission")
-    fun start(context: Context): Boolean {
-        if (!hasPermission(context)) return false
-        val sc = scanner(context) ?: return false
+    fun start(context: Context): String? {
+        val store = Store(context)
+        val problem = startScan(context)
+        store.scanProblem = problem
+        return problem
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startScan(context: Context): String? {
+        if (!hasPermission(context)) return "CWA Health needs the Nearby devices permission (Settings › Apps › CWA Health › Permissions)."
+        val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter ?: return "This phone has no Bluetooth."
+        if (!adapter.isEnabled) return "Bluetooth is off, so the phone can't hear the scale."
+        val sc = adapter.bluetoothLeScanner ?: return "Bluetooth isn't ready yet. Try again in a moment."
+        // A scan from before (this app, an older version) is replaced; some phones throw here
+        // when there's nothing to stop, which must not count as a failure.
+        try { sc.stopScan(pendingIntent(context)) } catch (e: Exception) {}
         return try {
-            sc.stopScan(pendingIntent(context))
             // Low power: matching runs in the Bluetooth chip and the app only wakes when the scale
-            // is on; one packet of a weigh-in is enough to save it (see WeighIns).
+            // is on; one packet of a weigh-in is enough to save it (see WeighIns). No address in
+            // the filter: a scale whose address changes would stop matching.
             val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_POWER).build()
-            sc.startScan(MiScale.filters(Store(context).scaleAddress), settings, pendingIntent(context)) == 0
-        } catch (e: Exception) { false }
+            when (val code = sc.startScan(MiScale.filters(null), settings, pendingIntent(context))) {
+                0, ScanCallback.SCAN_FAILED_ALREADY_STARTED -> null
+                else -> "The phone refused the background scan (${scanError(code)})."
+            }
+        } catch (e: Exception) {
+            "The phone refused the background scan: ${e.javaClass.simpleName}${e.message?.let { ": $it" } ?: ""}"
+        }
+    }
+
+    private fun scanError(code: Int) = when (code) {
+        ScanCallback.SCAN_FAILED_APPLICATION_REGISTRATION_FAILED -> "registration failed, code 2"
+        ScanCallback.SCAN_FAILED_INTERNAL_ERROR -> "internal error, code 3"
+        ScanCallback.SCAN_FAILED_FEATURE_UNSUPPORTED -> "not supported on this phone, code 4"
+        ScanCallback.SCAN_FAILED_OUT_OF_HARDWARE_RESOURCES -> "out of Bluetooth resources, code 5"
+        6 -> "started too often; try again in 30 seconds, code 6"
+        else -> "code $code"
     }
 
     /** What's stopping the background listener, or null when it can listen. */
     fun problem(context: Context): String? = when {
         !hasPermission(context) -> "Needs the Nearby devices (Bluetooth) permission: turn the switch off and on again."
         scanner(context) == null -> "Bluetooth is off, so the phone can't hear the scale."
-        else -> null
+        else -> Store(context).scanProblem
     }
 
     @SuppressLint("MissingPermission")
