@@ -221,7 +221,7 @@ class MainActivity : AppCompatActivity() {
         val fmt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         val lines = mutableListOf<String>()
         lines += store.lastWeighIn?.let { "Last weigh-in: $it" + (store.lastWeighInState?.let { st -> "\n($st)" } ?: "") } ?: "No weigh-ins yet."
-        lines += if (!store.scaleAuto) "Background listening is off (saves battery)." else ScaleListener.problem(this)?.let { "⚠ $it" } ?: "Listening for the scale in the background."
+        lines += if (!store.scaleAuto) "Background listening is off (saves battery)." + (store.scanProblem?.let { "\n⚠ Last try: $it" } ?: "") else ScaleListener.problem(this)?.let { "⚠ $it" } ?: "Listening for the scale in the background."
         lines += if (store.lastHeardAt > 0) "Last heard the scale: ${fmt.format(Date(store.lastHeardAt))} (${store.lastHeard})" else "Haven't heard the scale yet."
         store.scaleAddress?.let { lines += "Scale: $it" }
         return lines.joinToString("\n")
@@ -284,12 +284,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setAuto(on: Boolean) {
-        if (!on) { store.scaleAuto = false; ScaleListener.stop(this); refresh(); return }
+        if (!on) { store.scaleAuto = false; store.scanProblem = null; ScaleListener.stop(this); refresh(); return }
         needBluetooth {
             store.scaleAuto = true
-            val ok = ScaleListener.start(this)
-            toast(if (ok) "Listening for the scale in the background." else "Turn on Bluetooth, then try again.")
-            if (!ok) store.scaleAuto = false
+            val problem = ScaleListener.start(this)
+            toast(problem ?: "Listening for the scale in the background.")
+            if (problem != null) store.scaleAuto = false
             refresh()
         }
         if (!ScaleListener.hasPermission(this)) autoSwitch.isChecked = false
@@ -343,7 +343,7 @@ class MainActivity : AppCompatActivity() {
         WeighInWorker.enqueue(this, w)
         weightText.text = "%.1f kg".format(w.kg)
         stopWeighIn(if (w.impedance != null) "Saved with body composition ✓" else "Saved ✓ (no body composition: stand barefoot)")
-        if (store.scaleAuto) ScaleListener.start(this) // now filtered to this scale's address
+        if (store.scaleAuto) ScaleListener.start(this)
     }
 
     @SuppressLint("MissingPermission")
