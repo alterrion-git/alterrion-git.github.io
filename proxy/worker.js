@@ -4,12 +4,15 @@
 // Runs the models ON Cloudflare (Workers AI), so there is no external API key
 // and no third-party regional free-tier limits.
 //
-// Two jobs:
+// Jobs:
 //  1. AI Coach chat / text: POST { system, prompt | messages, user, maxTokens }
 //     → { text, model, fallback? }  (fallback: why the models before `model` didn't answer)
 //  2. Food photos (nutrition labels / products / plates):
 //     POST { task: 'food-photo', image: 'data:image/jpeg;base64,...', user }
 //     → { food: { name, brand, barcode, unit, source, per100: {...}, servingGrams, confidence }, model }
+//  3. Open Food Facts, server side (the app's fallback when OFF doesn't answer the browser):
+//     POST { task: 'off-search', q } → { products: [...], source }
+//     POST { task: 'off-product', code } → OFF's product JSON ({ status, product })
 //
 // Setup (see proxy/README.md):
 //   - Add a Workers AI binding named  AI  (Worker > Settings > Bindings).
@@ -73,12 +76,14 @@ export default {
     const origin = request.headers.get('Origin');
     if (origin && origin !== allow) return json({ error: 'Forbidden origin' }, 403);
 
+    let body;
+    try { body = await request.json(); } catch (e) { return json({ error: 'Bad JSON' }, 400); }
+
+    if (body.task === 'off-search' || body.task === 'off-product') return offProxy(body, json);
+
     if (!env.AI || typeof env.AI.run !== 'function') {
       return json({ error: 'Worker is missing the "AI" binding (Workers AI). Add it in Settings > Bindings.' }, 500);
     }
-
-    let body;
-    try { body = await request.json(); } catch (e) { return json({ error: 'Bad JSON' }, 400); }
     const user = String(body.user || '').slice(0, 128);
 
     // Optional server-side daily caps per user. Only active if a KV namespace is
@@ -231,4 +236,63 @@ async function foodPhoto(env, image, json) {
     errors.push(`${LEGACY_VISION_MODEL}: ${e && e.message ? e.message : e}`);
   }
   return json({ error: 'Could not read the photo. ' + errors.join(' | ').slice(0, 600) }, 502);
+}
+
+// ---------- Open Food Facts proxy ----------
+// OFF asks API clients for a User-Agent naming the app (browsers can't set one), its legacy
+// search (cgi/search.pl) often answers 503, and its newer search service (Search-a-licious)
+// may not allow other sites' pages. Here: Search-a-licious first, the legacy search as a
+// fallback, product lookups by barcode; answers cached for a day where the Cache API works.
+const OFF_UA = 'CWA-Workout-App/1.0 (https://alterrion-git.github.io)';
+const OFF_FIELDS = 'code,product_name,product_name_cs,product_name_en,generic_name,brands,quantity,serving_size,serving_quantity,nutriments,countries_tags';
+
+async function offFetch(url, ms) {
+  const res = await fetch(url, { headers: { 'User-Agent': OFF_UA, Accept: 'application/json' }, signal: AbortSignal.timeout(ms) });
+  return res;
+}
+
+async function offProxy(body, json) {
+  const cache = typeof caches !== 'undefined' ? caches.default : null;
+  let cacheKey, out, status = 200;
+  if (body.task === 'off-product') {
+    const code = String(body.code || '').replace(/\D/g, '').slice(0, 14);
+    if (code.length < 8) return json({ error: 'Bad barcode' }, 400);
+    cacheKey = `https://cwa-cache.invalid/off-product/${code}`;
+  } else {
+    const q = String(body.q || '').trim().slice(0, 100);
+    if (q.length < 2) return json({ error: 'Empty search' }, 400);
+    cacheKey = `https://cwa-cache.invalid/off-search?q=${encodeURIComponent(q.toLowerCase())}`;
+  }
+  try { const hit = cache && await cache.match(cacheKey); if (hit) return json(await hit.json()); } catch (e) {}
+
+  if (body.task === 'off-product') {
+    const code = cacheKey.split('/').pop();
+    try {
+      const res = await offFetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${OFF_FIELDS}`, 9000);
+      if (res.status === 404) out = { status: 0, code };
+      else if (!res.ok) return json({ error: `Open Food Facts error (${res.status})` }, 502);
+      else out = await res.json();
+    } catch (e) { return json({ error: 'Open Food Facts did not answer' }, 504); }
+  } else {
+    const q = String(body.q || '').trim().slice(0, 100);
+    const errors = [];
+    try {
+      const res = await offFetch(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(q)}&langs=cs,en&page_size=30&fields=${OFF_FIELDS}`, 9000);
+      if (!res.ok) throw new Error('search-a-licious ' + res.status);
+      const data = await res.json();
+      if (!Array.isArray(data.hits)) throw new Error('search-a-licious: no hits');
+      out = { products: data.hits, source: 'search-a-licious' };
+    } catch (e) { errors.push(String(e.message || e)); }
+    if (!out || !out.products.length) {
+      try {
+        const res = await offFetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=30&fields=${OFF_FIELDS}`, 15000);
+        if (!res.ok) throw new Error('legacy search ' + res.status);
+        const data = await res.json();
+        out = { products: data.products || [], source: 'legacy' };
+      } catch (e) { errors.push(String(e.message || e)); }
+    }
+    if (!out) return json({ error: 'Open Food Facts search failed', errors }, 502);
+  }
+  try { if (cache) await cache.put(cacheKey, new Response(JSON.stringify(out), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' } })); } catch (e) {}
+  return json(out, status);
 }

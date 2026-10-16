@@ -84,3 +84,10 @@ past the limit. Without it, only the app's client-side limit applies.
   `{ task: "food-photo", image, user }` for food photos.
 - Food photos are sent to the Worker only when you use **Photo** in the Food
   tab. Progress photos never leave the device.
+- Open Food Facts fallback: when OFF doesn't answer the browser (its legacy
+  search often returns 503), the app asks the Worker instead:
+  `{ task: "off-search", q }` and `{ task: "off-product", code }`. The Worker
+  calls OFF server side with an app User-Agent (Search-a-licious first, the
+  legacy search second) and caches answers for a day. No binding or variable
+  is needed — just deploy the current `worker.js`. An older Worker answers
+  these with "Empty prompt" and the app falls back to OFF directly.
