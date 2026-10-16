@@ -14,9 +14,11 @@ data class ScaleReading(
     /** When the scale says it measured (its own clock), or null if it didn't send a valid date. */
     val measuredAt: Long?,
     val address: String,
+    /** When the phone heard this packet (its own clock, which is the one we trust for the time). */
+    val seenAt: Long = System.currentTimeMillis(),
 ) {
     /** Identifies one weigh-in across its repeated packets. */
-    val key: String get() = "$address@" + (measuredAt ?: (System.currentTimeMillis() / 60_000)) // no date: per minute
+    val key: String get() = "$address@" + (measuredAt ?: (seenAt / 60_000)) // no date: per minute
 }
 
 /**
@@ -50,7 +52,7 @@ object MiScale {
         else LocalDateTime.of(y, mo, d, h, mi, s).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     } catch (e: Exception) { null }
 
-    fun parseBodyComposition(data: ByteArray, address: String): ScaleReading? {
+    fun parseBodyComposition(data: ByteArray, address: String, seenAt: Long = System.currentTimeMillis()): ScaleReading? {
         if (data.size < 13) return null
         val c0 = u8(data, 0)
         val c1 = u8(data, 1)
@@ -65,10 +67,11 @@ object MiScale {
             removed = c1 and 0x80 != 0,
             measuredAt = time(u16(data, 2), u8(data, 4), u8(data, 5), u8(data, 6), u8(data, 7), u8(data, 8)),
             address = address,
+            seenAt = seenAt,
         )
     }
 
-    fun parseWeightScale(data: ByteArray, address: String): ScaleReading? {
+    fun parseWeightScale(data: ByteArray, address: String, seenAt: Long = System.currentTimeMillis()): ScaleReading? {
         if (data.size < 10) return null
         val c = u8(data, 0)
         val raw = u16(data, 1)
@@ -80,15 +83,15 @@ object MiScale {
         return ScaleReading(
             kg = kg, impedance = null, stable = c and 0x20 != 0, removed = c and 0x80 != 0,
             measuredAt = time(u16(data, 3), u8(data, 5), u8(data, 6), u8(data, 7), u8(data, 8), u8(data, 9)),
-            address = address,
+            address = address, seenAt = seenAt,
         )
     }
 
     /** Parses whichever format the advertisement carries. */
-    fun parse(serviceData: Map<ParcelUuid, ByteArray>?, address: String): ScaleReading? {
+    fun parse(serviceData: Map<ParcelUuid, ByteArray>?, address: String, seenAt: Long = System.currentTimeMillis()): ScaleReading? {
         if (serviceData == null) return null
-        serviceData[BODY_COMPOSITION]?.let { return parseBodyComposition(it, address) }
-        serviceData[WEIGHT_SCALE]?.let { return parseWeightScale(it, address) }
+        serviceData[BODY_COMPOSITION]?.let { return parseBodyComposition(it, address, seenAt) }
+        serviceData[WEIGHT_SCALE]?.let { return parseWeightScale(it, address, seenAt) }
         return null
     }
 }

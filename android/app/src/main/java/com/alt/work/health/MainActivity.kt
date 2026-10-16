@@ -14,6 +14,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
@@ -31,6 +33,7 @@ import com.google.android.material.materialswitch.MaterialSwitch
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
+import kotlin.math.abs
 
 /**
  * The companion's one screen: which CWA account it's linked to, Health Connect access + sync,
@@ -50,6 +53,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var weighButton: MaterialButton
     private lateinit var autoSwitch: MaterialSwitch
     private lateinit var mineSwitch: MaterialSwitch
+    private lateinit var batteryButton: MaterialButton
 
     private var scanCallback: ScanCallback? = null
     private var afterBtPermission: (() -> Unit)? = null
@@ -118,8 +122,10 @@ class MainActivity : AppCompatActivity() {
             text = "Only my weight (within 15% of my last)"; setTextColor(color(R.color.text))
             setOnCheckedChangeListener { _, on -> store.onlyMyWeight = on }
         }.also { scale.addView(it) }
+        batteryButton = button("Let it run in the background (battery)", false) { askBatteryExemption() }.also { scale.addView(it) }
         scale.addView(text(12f, R.color.muted).apply {
-            text = "Mi Body Composition Scale 2 / Mi Smart Scale 2. Stand barefoot until the weight blinks for body composition. Zepp Life keeps working alongside."
+            text = "Mi Body Composition Scale 2 / Mi Smart Scale 2. With automatic saving on, just step on the scale with the phone nearby (Bluetooth on); " +
+                "you get a notification when the weigh-in is saved. Barefoot until the weight blinks adds body composition. Zepp Life keeps working alongside."
         })
 
         root.addView(button("Privacy & data", false) { startActivity(Intent(this, PrivacyActivity::class.java)) })
@@ -184,9 +190,8 @@ class MainActivity : AppCompatActivity() {
         else "Not linked yet.\nOpen CWA → Profile → Health → “Link Android app”."
         autoSwitch.isChecked = store.scaleAuto
         mineSwitch.isChecked = store.onlyMyWeight
-        val last = store.lastWeighIn
-        if (scanCallback == null) scaleText.text = (if (last != null) "Last weigh-in: $last" else "No weigh-ins yet.") +
-            (if (store.scaleAddress != null) "\nScale: ${store.scaleAddress}" else "")
+        if (scanCallback == null) scaleText.text = scaleStatus()
+        batteryButton.visibility = if (store.scaleAuto && !ignoringBatteryOptimizations()) View.VISIBLE else View.GONE
         val sync = if (store.lastSync > 0) "Last sync: ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(store.lastSync))} (${store.lastSyncDays} days)" else "Not synced yet."
         syncText.text = sync + (store.lastError?.let { "\n⚠ $it" } ?: "") + "\nSyncs about every hour in the background."
 
@@ -205,6 +210,31 @@ class MainActivity : AppCompatActivity() {
             }
             else -> { hcText.text = "Health Connect isn't available on this phone."; hcButton.visibility = View.GONE; syncButton.isEnabled = false }
         }
+    }
+
+    private fun scaleStatus(): String {
+        val fmt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+        val lines = mutableListOf<String>()
+        lines += store.lastWeighIn?.let { "Last weigh-in: $it" + (store.lastWeighInState?.let { st -> "\n($st)" } ?: "") } ?: "No weigh-ins yet."
+        lines += if (!store.scaleAuto) "Automatic saving is off." else ScaleListener.problem(this)?.let { "⚠ $it" } ?: "Listening for the scale in the background."
+        lines += if (store.lastHeardAt > 0) "Last heard the scale: ${fmt.format(Date(store.lastHeardAt))} (${store.lastHeard})" else "Haven't heard the scale yet."
+        store.scaleAddress?.let { lines += "Scale: $it" }
+        return lines.joinToString("\n")
+    }
+
+    private fun ignoringBatteryOptimizations() =
+        (getSystemService(POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(packageName)
+
+    @SuppressLint("BatteryLife")
+    private fun askBatteryExemption() {
+        val intents = listOf(
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")),
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")),
+        )
+        for (i in intents) {
+            try { startActivity(i); return } catch (e: Exception) {}
+        }
+        toast("Open Settings › Apps › CWA Health › Battery and choose Unrestricted.")
     }
 
     // ---------- Health Connect ----------
@@ -272,6 +302,8 @@ class MainActivity : AppCompatActivity() {
                 override fun onBatchScanResults(results: MutableList<ScanResult>) { runOnUiThread { results.forEach { onScale(it) } } }
                 override fun onScanFailed(errorCode: Int) { runOnUiThread { stopWeighIn("Bluetooth scan failed ($errorCode).") } }
             }
+            // A weigh-in from earlier that's still waiting: save it before starting a new one.
+            WeighInWorker.saveIfDone(this, WeighIns.flushStale(this))
             scanCallback = cb
             scanner.startScan(MiScale.filters(null), ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), cb)
             weightText.text = "— kg"
@@ -285,15 +317,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun onScale(res: ScanResult) {
         if (scanCallback == null) return
-        val r = MiScale.parse(res.scanRecord?.serviceData, res.device.address) ?: return
-        when (val out = WeighIns.onPacket(this, r)) {
+        val r = MiScale.parse(res.scanRecord?.serviceData, res.device.address, ScaleListener.seenAt(res)) ?: return
+        store.heard(r)
+        when (val out = WeighIns.onPacket(store, r)) {
             is WeighIns.Result.Done -> saved(out.weighIn)
             is WeighIns.Result.Measuring -> {
                 weightText.text = "%.1f kg".format(out.kg)
                 scaleText.text = if (out.stable) "Hold still — measuring body composition…" else "Measuring…"
             }
             is WeighIns.Result.Skipped -> scaleText.text = out.reason
-            WeighIns.Result.Ignore -> {}
+            // Already saved (by the background listener, which hears the same packets).
+            WeighIns.Result.Ignore -> if (r.stable && store.doneAt > 0 && abs(r.seenAt - store.doneAt) < 120_000 && abs(r.kg - store.doneKg) < 1.0) {
+                weightText.text = "%.1f kg".format(store.doneKg)
+                stopWeighIn("Saved ✓")
+            }
         }
     }
 
@@ -312,7 +349,7 @@ class MainActivity : AppCompatActivity() {
         try { (getSystemService(BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter?.bluetoothLeScanner?.stopScan(cb) } catch (e: Exception) {}
         weighButton.text = "Weigh in now"
         // A stable weight without impedance (socks) that never saw the step-off packet.
-        val flushed = WeighIns.flushPending(this, store.scaleAddress ?: "", force = true)
+        val flushed = WeighIns.flushStale(this, force = true)
         if (flushed is WeighIns.Result.Done) { saved(flushed.weighIn); return }
         if (message.isNotEmpty()) scaleText.text = message
     }
