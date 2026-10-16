@@ -262,12 +262,13 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.21.0"></script>
-    <script src="js/coach.js?v=3.21.0"></script>
-    <script src="js/health.js?v=3.21.0"></script>
+    <script src="js/nutrition.js?v=3.22.0"></script>
+    <script src="js/coach.js?v=3.22.0"></script>
+    <script src="js/health.js?v=3.22.0"></script>
+    <script src="js/weight.js?v=3.22.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.21.0';
+        const APP_VERSION = '3.22.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -4009,8 +4010,14 @@
                 if (progressSub === 'health') {
                     return shell('HEALTH', true, window.CWAHealth ? e(window.CWAHealth.HealthPanel, {
                         log: healthLog, metrics, profile, refreshing: healthLoading,
-                        onLink: linkAndroidApp, onRefresh: () => refreshHealth(true), onGoals: () => setProgressSub('goals'),
+                        onLink: linkAndroidApp, onRefresh: () => refreshHealth(true), onGoals: () => setProgressSub('goals'), onWeight: () => setProgressSub('weight'),
                     }) : e('div', null, 'Health module failed to load.'));
+                }
+
+                if (progressSub === 'weight') {
+                    return shell('WEIGHT', true, window.CWAWeight
+                        ? e(window.CWAWeight.WeightPanel, { metrics, onLog: () => setProgressSub('metrics') })
+                        : e('div', null, 'Weight chart failed to load.'));
                 }
 
                 if (progressSub === 'metrics') {
@@ -4018,6 +4025,11 @@
                     return shell('DAILY LOG', true,
                         e('div', null,
                             e(MetricForm, { onSave: (entry) => { saveMetric(entry); setToast('Saved'); } }),
+                            metrics.some(m => m.weight != null) ? e('button', {
+                                onClick: () => setProgressSub('weight'),
+                                className: 'w-full mt-3 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 active:scale-95',
+                                style: { background: 'var(--surface-container-high)', color: 'var(--on-surface)' }
+                            }, e(MIcon, { icon: 'trending_up', style: { fontSize: '18px', color: 'var(--primary-container)' } }), 'Weight chart') : null,
                             recent.length > 0 ? e('div', { className: 'mt-6' },
                                 sectionTitle('Recent Entries'),
                                 e('div', { className: 'space-y-2' },
@@ -4305,9 +4317,9 @@
                             e('div', { className: 'rounded-xl p-3 text-center', style: card },
                                 e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } }, distinctWeeks()),
                                 e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'Weeks data')),
-                            e('div', { className: 'rounded-xl p-3 text-center', style: card },
+                            e('button', { onClick: () => setProgressSub('weight'), 'aria-label': 'Weight chart', className: 'rounded-xl p-3 text-center active:scale-95 transition-transform', style: card },
                                 e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } }, latestWeight ? fmtNum(latestWeight.weight) : '—'),
-                                e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'Weight kg')),
+                                e('div', { className: 'text-xs flex items-center justify-center gap-0.5', style: { color: 'var(--on-surface-variant)' } }, 'Weight kg', e(MIcon, { icon: 'chevron_right', style: { fontSize: '14px' } }))),
                             e('div', { className: 'rounded-xl p-3 text-center', style: card },
                                 e('div', { className: 'text-lg font-black', style: { color: 'var(--primary-fixed-dim)' } }, window.CWANutrition ? window.CWANutrition.targetsFor(profile, metrics).kcal.toLocaleString('en-US') : '—'),
                                 e('div', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, 'kcal / day'))

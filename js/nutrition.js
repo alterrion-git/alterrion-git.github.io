@@ -433,33 +433,38 @@
     }
 
     // compact: Flip cover screen — smaller ring, fibre/sugar/salt as one line, so the
-    // whole card fits the short screen.
-    function DaySummary({ totals, targets, onEditTargets, compact }) {
+    // whole card fits the short screen. Tap a nutrient for its split by food (onMacro);
+    // the tune button edits the targets.
+    function DaySummary({ totals, targets, onEditTargets, onMacro, compact }) {
         const left = targets.kcal - totals.kcal;
         const vpw = useViewport().w;
         const narrow = compact || vpw < 370;
-        return e('button', { onClick: onEditTargets, 'aria-label': 'Edit daily targets', className: 'w-full text-left rounded-3xl active:scale-[0.99] transition-transform ' + (compact ? 'p-3' : 'p-4'), style: card },
+        const tap = (k, child, extra) => e('button', { key: k, onClick: () => onMacro(k), 'aria-label': `${LABEL[k]} by food`, className: 'block text-left active:opacity-70 ' + (extra || '') }, child);
+        return e('div', { className: 'w-full rounded-3xl ' + (compact ? 'p-3' : 'p-4'), style: card },
             e('div', { className: 'flex items-center ' + (narrow ? 'gap-3' : 'gap-4') },
-                e(Ring, { size: compact ? 92 : narrow ? 104 : 128, stroke: narrow ? 9 : 11, value: totals.kcal, max: targets.kcal },
-                    e('div', { className: (narrow ? 'text-xl' : 'text-2xl') + ' font-black leading-none', style: { fontVariantNumeric: 'tabular-nums' } }, fmtK(totals.kcal)),
-                    e('div', { className: 'text-[11px] mt-1', style: { color: 'var(--on-surface-variant)' } }, `of ${fmtK(targets.kcal)} kcal`)
-                ),
+                e('button', { onClick: () => onMacro('kcal'), 'aria-label': 'Calories by food', className: 'rounded-full flex-shrink-0 active:scale-95 transition-transform' },
+                    e(Ring, { size: compact ? 92 : narrow ? 104 : 128, stroke: narrow ? 9 : 11, value: totals.kcal, max: targets.kcal },
+                        e('div', { className: (narrow ? 'text-xl' : 'text-2xl') + ' font-black leading-none', style: { fontVariantNumeric: 'tabular-nums' } }, fmtK(totals.kcal)),
+                        e('div', { className: 'text-[11px] mt-1', style: { color: 'var(--on-surface-variant)' } }, `of ${fmtK(targets.kcal)} kcal`)
+                    )),
                 e('div', { className: 'flex-1 min-w-0' },
-                    e('div', { className: 'flex items-baseline gap-1.5 mb-2' },
-                        e('span', { className: 'text-lg font-black', style: { color: left < 0 ? 'var(--error)' : 'var(--primary-container)', fontVariantNumeric: 'tabular-nums' } }, fmtK(Math.abs(left))),
-                        e('span', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, left < 0 ? 'kcal over' : 'kcal left')
+                    e('div', { className: 'flex items-center gap-1.5 mb-2' },
+                        e('span', { className: 'text-lg font-black leading-none', style: { color: left < 0 ? 'var(--error)' : 'var(--primary-container)', fontVariantNumeric: 'tabular-nums' } }, fmtK(Math.abs(left))),
+                        e('span', { className: 'text-xs flex-1 min-w-0 truncate', style: { color: 'var(--on-surface-variant)' } }, left < 0 ? 'kcal over' : 'kcal left'),
+                        e('button', { onClick: onEditTargets, 'aria-label': 'Edit daily targets', className: 'w-8 h-8 -my-1.5 -mr-1 rounded-full flex items-center justify-center flex-shrink-0 active:scale-90', style: { color: 'var(--on-surface-variant)' } },
+                            e(MIcon, { icon: 'tune', style: { fontSize: '19px' } }))
                     ),
-                    ['p', 'c', 'f'].map(k => e(Bar, { key: k, k, value: totals[k], max: targets[k] }))
+                    ['p', 'c', 'f'].map(k => tap(k, e(Bar, { k, value: totals[k], max: targets[k] }), 'w-full'))
                 )
             ),
             compact
                 ? e('div', { className: 'flex justify-between gap-2 mt-2 pt-2 text-[11px] whitespace-nowrap', style: { borderTop: '1px solid var(--surface-container-highest)', color: 'var(--on-surface-variant)', fontVariantNumeric: 'tabular-nums' } },
-                    ['fib', 'sug', 'salt'].map(k => e('span', { key: k, style: { color: k !== 'fib' && totals[k] > targets[k] ? 'var(--error)' : undefined } },
-                        `${LABEL[k]} `, e('b', { style: { color: k !== 'fib' && totals[k] > targets[k] ? 'var(--error)' : 'var(--on-surface)' } }, fmtVal(k, totals[k])), `/${fmtVal(k, targets[k])}`)))
+                    ['fib', 'sug', 'salt'].map(k => tap(k, e('span', { style: { color: k !== 'fib' && totals[k] > targets[k] ? 'var(--error)' : undefined } },
+                        `${LABEL[k]} `, e('b', { style: { color: k !== 'fib' && totals[k] > targets[k] ? 'var(--error)' : 'var(--on-surface)' } }, fmtVal(k, totals[k])), `/${fmtVal(k, targets[k])}`))))
                 : e('div', { className: 'grid grid-cols-3 gap-3 mt-3 pt-3', style: { borderTop: '1px solid var(--surface-container-highest)' } },
-                    e(Bar, { k: 'fib', value: totals.fib, max: targets.fib, small: true }),
-                    e(Bar, { k: 'sug', value: totals.sug, max: targets.sug, small: true, limit: true }),
-                    e(Bar, { k: 'salt', value: totals.salt, max: targets.salt, small: true, limit: true })
+                    tap('fib', e(Bar, { k: 'fib', value: totals.fib, max: targets.fib, small: true }), 'min-w-0'),
+                    tap('sug', e(Bar, { k: 'sug', value: totals.sug, max: targets.sug, small: true, limit: true }), 'min-w-0'),
+                    tap('salt', e(Bar, { k: 'salt', value: totals.salt, max: targets.salt, small: true, limit: true }), 'min-w-0')
                 )
         );
     }
@@ -1230,6 +1235,89 @@
         };
     }
 
+    // ---------- one nutrient, split by food (tap it in the day summary) ----------
+    const unitOf = (k) => (k === 'kcal' ? 'kcal' : 'g');
+    // The day's foods by how much of nutrient k each gave (the same food logged twice is one
+    // row), the foods with none of it, and the split by meal.
+    // "5× vejce · 275 g" when every entry counts the same piece, else "2× · 275 g".
+    function groupAmount(g) {
+        if (g.entries.length === 1) return amountText(g.entries[0]);
+        const sv = g.entries[0].serving;
+        const same = sv && g.entries.every(en => en.serving && en.serving.g === sv.g && en.serving.label === sv.label);
+        const c = same ? piecesOf(g.grams, sv) : null;
+        return c ? `${fmtCount(c)}× ${pieceName(sv)} · ${fmtG(g.grams)} g` : `${g.entries.length}× · ${fmtG(g.grams)} g`;
+    }
+    function macroSplit(entries, k) {
+        const tiny = k === 'kcal' ? 0.5 : k === 'salt' ? 0.005 : 0.05;
+        const groups = new Map();
+        (entries || []).forEach(en => {
+            const id = foodKey(en);
+            const g = groups.get(id) || { id, name: en.name || 'Food', brand: en.brand || '', value: 0, grams: 0, entries: [] };
+            g.value += entryTotals(en)[k] || 0;
+            g.grams += num(en.g) || 0;
+            g.entries.push(en);
+            groups.set(id, g);
+        });
+        const all = [...groups.values()];
+        const total = all.reduce((a, g) => a + g.value, 0);
+        const items = all.filter(g => g.value >= tiny).sort((a, b) => b.value - a.value)
+            .map(g => ({ ...g, share: total > 0 ? g.value / total : 0, amount: groupAmount(g) }));
+        const none = all.filter(g => g.value < tiny).map(g => g.name);
+        const meals = MEALS.map(m => ({ id: m.id, label: m.label, value: (entries || []).filter(en => en.meal === m.id).reduce((a, en) => a + (entryTotals(en)[k] || 0), 0) }))
+            .filter(m => m.value >= tiny);
+        return { total, items, none, meals };
+    }
+
+    function MacroSheet({ k, entries, totals, targets, dayLabel, onPick, onClose, onEditTargets }) {
+        const split = macroSplit(entries, k);
+        const unit = unitOf(k);
+        const target = targets[k];
+        const top = split.items.length ? split.items[0].value : 0;
+        const limit = k === 'sug' || k === 'salt';
+        const over = target > 0 && totals[k] > target;
+        const pct = (x) => (x > 0 && x < 0.005 ? '<1 %' : `${Math.round(x * 100)} %`);
+        const chip = (key) => e('button', {
+            key, onClick: () => onPick(key), 'aria-pressed': key === k,
+            className: 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold whitespace-nowrap active:scale-95 flex-shrink-0',
+            style: key === k ? { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' } : { color: 'var(--on-surface-variant)' },
+        }, e('span', { style: { width: 8, height: 8, borderRadius: 4, background: COLOR[key], flexShrink: 0 } }), LABEL[key]);
+
+        return e(Sheet, {
+            title: LABEL[k].toUpperCase(), onClose,
+            footer: e('button', { onClick: onEditTargets, className: 'w-full py-3.5 rounded-2xl text-base font-bold flex items-center justify-center gap-2 active:scale-95', style: ghostBtn },
+                e(MIcon, { icon: 'tune', style: { fontSize: '20px' } }), 'Edit daily targets'),
+        },
+            e('div', { className: 'flex gap-1 overflow-x-auto -mx-4 px-4 pb-1 mb-4', role: 'group', 'aria-label': 'Nutrient' }, KEYS.map(chip)),
+            e('div', { className: 'rounded-2xl p-4 mb-3', style: card },
+                e('div', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, dayLabel),
+                e('div', { className: 'flex items-baseline gap-1.5 mt-1' },
+                    e('span', { className: 'font-black', style: { fontSize: 36, lineHeight: 1, color: over && limit ? 'var(--error)' : 'var(--on-surface)' } }, fmtVal(k, totals[k])),
+                    e('span', { className: 'text-sm', style: { color: 'var(--on-surface-variant)' } }, `${unit} of ${fmtVal(k, target)} ${unit}` + (target > 0 ? ` · ${pct(totals[k] / target)}` : ''))),
+                split.meals.length > 1 ? e('div', { className: 'text-xs mt-2 leading-relaxed', style: { color: 'var(--on-surface-variant)' } },
+                    split.meals.map((m, i) => e('span', { key: m.id, className: 'whitespace-nowrap' }, (i ? ' · ' : '') + `${m.label} `, e('b', { style: { color: 'var(--on-surface)' } }, fmtVal(k, m.value)), ` ${unit}`))) : null
+            ),
+            split.items.length
+                ? e('div', { className: 'rounded-2xl px-4 py-1', style: card },
+                    e('div', { className: 'flex justify-between text-[11px] uppercase tracking-widest pt-2 pb-1', style: { color: 'var(--on-surface-variant)' } },
+                        e('span', null, 'Food'), e('span', null, `${k === 'kcal' ? 'kcal' : 'grams'} · share`)),
+                    split.items.map((it, i) => e('div', { key: it.id, className: 'py-2.5', style: { borderTop: i ? '1px solid var(--surface-container-highest)' : 'none' } },
+                        e('div', { className: 'flex items-baseline justify-between gap-3' },
+                            e('div', { className: 'min-w-0' },
+                                e('div', { className: 'text-sm font-bold truncate' }, it.name),
+                                e('div', { className: 'text-[11px] truncate', style: { color: 'var(--on-surface-variant)' } }, [it.brand, it.amount].filter(Boolean).join(' · '))),
+                            e('div', { className: 'text-right flex-shrink-0 whitespace-nowrap', style: { fontVariantNumeric: 'tabular-nums' } },
+                                e('span', { className: 'text-sm font-black' }, fmtVal(k, it.value)),
+                                e('span', { className: 'text-xs', style: { color: 'var(--on-surface-variant)' } }, ` ${unit} · ${pct(it.share)}`))),
+                        // Ranked bars: the biggest source is full width, the rest relative to it.
+                        e('div', { className: 'mt-1.5', style: { height: 8, width: `${Math.max(2, (it.value / top) * 100)}%`, background: COLOR[k], borderRadius: '0 4px 4px 0' } })
+                    )))
+                : e('div', { className: 'text-center text-sm py-10', style: { color: 'var(--on-surface-variant)' } },
+                    entries.length ? `Nothing logged on this day has any ${LABEL[k].toLowerCase()}.` : 'Nothing logged on this day yet.'),
+            split.none.length && split.items.length ? e('div', { className: 'text-xs mt-3 px-1 leading-snug', style: { color: 'var(--outline)' } },
+                `No ${LABEL[k].toLowerCase()}: ${split.none.join(', ')}.`) : null
+        );
+    }
+
     // ---------- the screen ----------
     function FoodScreen({ app }) {
         const date = app.date;
@@ -1370,6 +1458,8 @@
                 });
             } else if (sheet.type === 'quick') {
                 sheetEl = e(QuickAdd, { date, onClose: close, onSave: (v) => addEntry({ name: v.name, src: 'quick', unit: 'g', n: v.n }, { g: 100, meal: v.meal, t: v.t }) });
+            } else if (sheet.type === 'macro') {
+                sheetEl = e(MacroSheet, { k: sheet.k, entries, totals, targets, dayLabel: dateLabel, onPick: (k) => setSheet({ type: 'macro', k }), onClose: close, onEditTargets: () => setSheet({ type: 'targets' }) });
             } else if (sheet.type === 'targets') {
                 sheetEl = e(TargetsSheet, { profile: app.profile, metrics: app.metrics, onClose: close, onSave: (vals) => { app.setProfileFields(vals); setSheet(null); app.toast('Targets saved'); } });
             } else if (sheet.type === 'scan') {
@@ -1415,7 +1505,7 @@
                             e('button', { onClick: () => app.setDate(today), className: 'text-lg font-black active:opacity-70 px-3' }, dateLabel),
                             iconBtn('chevron_right', () => shiftDay(1), 'Next day')
                         ),
-                    e(DaySummary, { totals, targets, compact: cover, onEditTargets: () => setSheet({ type: 'targets' }) }),
+                    e(DaySummary, { totals, targets, compact: cover, onEditTargets: () => setSheet({ type: 'targets' }), onMacro: (k) => setSheet({ type: 'macro', k }) }),
                     cover ? null : e('div', { className: 'grid grid-cols-3 gap-2 mt-3' },
                         e('button', { onClick: () => setSheet({ type: 'add' }), className: 'py-3.5 rounded-2xl text-base font-black flex items-center justify-center gap-1.5 active:scale-95', style: primaryBtn }, e(MIcon, { icon: 'add', style: { fontSize: '20px' } }), 'Add'),
                         e('button', { onClick: () => setSheet({ type: 'scan' }), className: 'py-3.5 rounded-2xl text-base font-bold flex items-center justify-center gap-1.5 active:scale-95', style: ghostBtn }, e(MIcon, { icon: 'barcode_scanner', style: { fontSize: '20px' } }), 'Scan'),
@@ -1468,5 +1558,5 @@
         );
     }
 
-    window.CWANutrition = { usualFoods, pendingUsual, FoodScreen, dayTotals, entryTotals, targetsFor, weekRating, weekStartOf, ratingColor, WeekRatingDialog, KEYS, LABEL, BASIC_FOODS, offToFood };
+    window.CWANutrition = { macroSplit, usualFoods, pendingUsual, FoodScreen, dayTotals, entryTotals, targetsFor, weekRating, weekStartOf, ratingColor, WeekRatingDialog, KEYS, LABEL, BASIC_FOODS, offToFood };
 })();

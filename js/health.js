@@ -153,8 +153,8 @@
     const label = (t) => e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, t);
     const btn = (primary) => ({ background: primary ? 'var(--primary-container)' : 'var(--surface-container-highest)', color: primary ? 'var(--on-primary-container)' : 'var(--on-surface)' });
 
-    function Tile({ icon, title, value, unit, sub }) {
-        return e('div', { className: 'rounded-2xl p-3 min-w-0', style: card },
+    function Tile({ icon, title, value, unit, sub, onClick }) {
+        return e(onClick ? 'button' : 'div', { onClick, className: 'rounded-2xl p-3 min-w-0 text-left' + (onClick ? ' active:scale-95 transition-transform' : ''), style: card },
             e('div', { className: 'flex items-center gap-1.5 text-[11px] uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } },
                 e(MIcon, { icon, style: { fontSize: '16px', color: 'var(--primary-fixed-dim)' } }), title),
             e('div', { className: 'mt-1 flex items-baseline gap-1' },
@@ -163,7 +163,7 @@
             sub ? e('div', { className: 'text-[11px] mt-0.5 truncate', style: { color: 'var(--outline)' } }, sub) : null);
     }
 
-    function HealthPanel({ log, metrics, profile, onLink, onRefresh, refreshing, onGoals, now }) {
+    function HealthPanel({ log, metrics, profile, onLink, onRefresh, refreshing, onGoals, onWeight, now }) {
         now = now || Date.now();
         const s = summary(log, now);
         const android = isAndroid();
@@ -213,7 +213,7 @@
                 e(Tile, { icon: 'directions_walk', title: 'Steps', value: t.steps ? fmtN(t.steps) : '—', sub: vsAvg(t.steps, s.steps7) }),
                 e(Tile, { icon: 'bedtime', title: 'Sleep', value: ln ? hm(ln.min) : '—', sub: ln && (ln.deep || ln.rem) ? `deep ${hm(ln.deep)} · REM ${hm(ln.rem)}` : (s.sleep7 ? `7-day avg ${hm(s.sleep7)}` : '') }),
                 e(Tile, { icon: 'favorite', title: 'Resting HR', value: t.rhr ? r0(t.rhr) : '—', unit: t.rhr ? 'bpm' : '', sub: s.rhr28 ? `4-week avg ${r0(s.rhr28)}` : '' }),
-                e(Tile, { icon: 'monitor_weight', title: 'Weight', value: latest ? String(latest.weight) : '—', unit: latest ? 'kg' : '', sub: latest && latest.bodyFat != null ? `body fat ${latest.bodyFat} % · muscle ${latest.muscleKg != null ? latest.muscleKg + ' kg' : '—'}` : latest ? new Date(latest.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '' })),
+                e(Tile, { icon: 'monitor_weight', title: 'Weight', onClick: onWeight, value: latest ? String(latest.weight) : '—', unit: latest ? 'kg' : '', sub: latest && latest.bodyFat != null ? `body fat ${latest.bodyFat} % · muscle ${latest.muscleKg != null ? latest.muscleKg + ' kg' : '—'}` : latest ? new Date(latest.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '' })),
             t.activeKcal || t.totalKcal ? e('div', { className: 'text-xs mt-2 px-1', style: { color: 'var(--on-surface-variant)' } },
                 `Burned today: ${t.activeKcal ? fmtN(t.activeKcal) + ' kcal active' : ''}${t.activeKcal && t.totalKcal ? ' · ' : ''}${t.totalKcal ? fmtN(t.totalKcal) + ' kcal total' : ''}`) : null,
             needsProfile ? e('button', { onClick: onGoals, className: 'w-full mt-3 rounded-xl px-3 py-2 text-xs text-left', style: { background: 'rgba(209,252,0,0.08)', color: 'var(--on-surface)' } },
