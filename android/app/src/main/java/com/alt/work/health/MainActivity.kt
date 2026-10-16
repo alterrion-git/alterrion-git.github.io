@@ -115,7 +115,7 @@ class MainActivity : AppCompatActivity() {
         scaleText = text(14f, R.color.muted).apply { gravity = Gravity.CENTER }.also { scale.addView(it) }
         weighButton = button("Weigh in now", true) { if (scanCallback == null) startWeighIn() else stopWeighIn("Stopped.") }.also { scale.addView(it) }
         autoSwitch = MaterialSwitch(this).apply {
-            text = "Save weigh-ins automatically in the background"; setTextColor(color(R.color.text))
+            text = "Also listen for the scale in the background (uses more battery)"; setTextColor(color(R.color.text))
             setOnCheckedChangeListener { _, on -> if (on != store.scaleAuto) setAuto(on) }
         }.also { scale.addView(it) }
         mineSwitch = MaterialSwitch(this).apply {
@@ -124,8 +124,8 @@ class MainActivity : AppCompatActivity() {
         }.also { scale.addView(it) }
         batteryButton = button("Let it run in the background (battery)", false) { askBatteryExemption() }.also { scale.addView(it) }
         scale.addView(text(12f, R.color.muted).apply {
-            text = "Mi Body Composition Scale 2 / Mi Smart Scale 2. With automatic saving on, just step on the scale with the phone nearby (Bluetooth on); " +
-                "you get a notification when the weigh-in is saved. Barefoot until the weight blinks adds body composition. Zepp Life keeps working alongside."
+            text = "Mi Body Composition Scale 2 / Mi Smart Scale 2. Tap “Weigh in now” (or Weigh in in CWA › Health), then step on the scale. " +
+                "Barefoot until the weight blinks adds body composition. Zepp Life keeps working alongside."
         })
 
         root.addView(button("Privacy & data", false) { startActivity(Intent(this, PrivacyActivity::class.java)) })
@@ -142,7 +142,12 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         if (store.linked) {
             SyncWorker.schedule(this)
-            if (store.scaleAuto) ScaleListener.start(this)
+            if (store.scaleAuto) ScaleListener.start(this) else ScaleListener.stop(this)
+            // Opening the app syncs when the last sync is over an hour old (the background one
+            // runs only twice a day).
+            if (System.currentTimeMillis() - store.lastSync > 3_600_000L && HealthSync.available(this)) lifecycleScope.launch {
+                if (HealthSync.granted(this@MainActivity).isNotEmpty()) syncNow(quiet = true)
+            }
         }
         refresh()
     }
@@ -193,7 +198,7 @@ class MainActivity : AppCompatActivity() {
         if (scanCallback == null) scaleText.text = scaleStatus()
         batteryButton.visibility = if (store.scaleAuto && !ignoringBatteryOptimizations()) View.VISIBLE else View.GONE
         val sync = if (store.lastSync > 0) "Last sync: ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(store.lastSync))} (${store.lastSyncDays} days)" else "Not synced yet."
-        syncText.text = sync + (store.lastError?.let { "\n⚠ $it" } ?: "") + "\nSyncs about every hour in the background."
+        syncText.text = sync + (store.lastError?.let { "\n⚠ $it" } ?: "") + "\nSyncs twice a day in the background, and when you open this app."
 
         when (HealthSync.sdkStatus(this)) {
             HealthConnectClient.SDK_AVAILABLE -> lifecycleScope.launch {
@@ -216,7 +221,7 @@ class MainActivity : AppCompatActivity() {
         val fmt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         val lines = mutableListOf<String>()
         lines += store.lastWeighIn?.let { "Last weigh-in: $it" + (store.lastWeighInState?.let { st -> "\n($st)" } ?: "") } ?: "No weigh-ins yet."
-        lines += if (!store.scaleAuto) "Automatic saving is off." else ScaleListener.problem(this)?.let { "⚠ $it" } ?: "Listening for the scale in the background."
+        lines += if (!store.scaleAuto) "Background listening is off (saves battery)." else ScaleListener.problem(this)?.let { "⚠ $it" } ?: "Listening for the scale in the background."
         lines += if (store.lastHeardAt > 0) "Last heard the scale: ${fmt.format(Date(store.lastHeardAt))} (${store.lastHeard})" else "Haven't heard the scale yet."
         store.scaleAddress?.let { lines += "Scale: $it" }
         return lines.joinToString("\n")
@@ -254,14 +259,14 @@ class MainActivity : AppCompatActivity() {
         toast("Couldn't open Health Connect.")
     }
 
-    private fun syncNow() {
-        if (!store.linked) { toast("Link the app from CWA first."); return }
+    private fun syncNow(quiet: Boolean = false) {
+        if (!store.linked) { if (!quiet) toast("Link the app from CWA first."); return }
         syncButton.isEnabled = false
         syncText.text = "Syncing…"
         lifecycleScope.launch {
             try {
                 val n = HealthSync.syncToCloud(this@MainActivity, if (store.firstSyncDone) 7 else 30)
-                toast("Synced $n days to CWA")
+                if (!quiet) toast("Synced $n days to CWA")
             } catch (e: Exception) {
                 store.lastError = e.message ?: e.toString()
             }
@@ -283,7 +288,7 @@ class MainActivity : AppCompatActivity() {
         needBluetooth {
             store.scaleAuto = true
             val ok = ScaleListener.start(this)
-            toast(if (ok) "Weigh-ins will be saved automatically." else "Turn on Bluetooth, then try again.")
+            toast(if (ok) "Listening for the scale in the background." else "Turn on Bluetooth, then try again.")
             if (!ok) store.scaleAuto = false
             refresh()
         }

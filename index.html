@@ -262,13 +262,13 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.22.0"></script>
-    <script src="js/coach.js?v=3.22.0"></script>
-    <script src="js/health.js?v=3.22.0"></script>
-    <script src="js/weight.js?v=3.22.0"></script>
+    <script src="js/nutrition.js?v=3.23.0"></script>
+    <script src="js/coach.js?v=3.23.0"></script>
+    <script src="js/health.js?v=3.23.0"></script>
+    <script src="js/weight.js?v=3.23.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.22.0';
+        const APP_VERSION = '3.23.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -523,7 +523,7 @@
         // of one GET of users/<id> (which would download all of it on every launch) the known
         // fields are read in parallel and the log only for the last FOOD_LOG_RECENT_DAYS.
         // Older days come from this device's copy or loadFoodRange (calendar / date browsing).
-        const USER_FIELDS = ['email', 'createdAt', 'passwordHash', 'workouts', 'history', 'profile', 'metrics', 'recaps', 'chat', 'chats', 'coachMemory', 'aiUsage', 'foods'];
+        const USER_FIELDS = ['email', 'createdAt', 'passwordHash', 'workouts', 'history', 'profile', 'metrics', 'recaps', 'chat', 'chats', 'coachMemory', 'aiUsage', 'foods', 'scaleSkips'];
         const FOOD_LOG_RECENT_DAYS = 62;
         function foodRangeParams(startKey, endKey) {
             return 'orderBy=' + encodeURIComponent('"$key"')
@@ -877,7 +877,7 @@
                     note: note.trim(),
                 };
                 if (entry.weight == null && entry.kcal == null && entry.sleep == null && entry.steps == null && !entry.note) return;
-                onSave(entry);
+                onSave(entry, { edit: !!initial });
                 if (!fixedDate) { setWeight(''); setKcal(''); setSleep(''); setSteps(''); setNote(''); }
             };
             const labeled = (label, node) => e('div', null,
@@ -1506,6 +1506,7 @@
             // Nutrition (js/nutrition.js): diary per day, custom foods, the day shown in the Food tab.
             const [foodLog, setFoodLog] = useState({});   // { 'YYYY-MM-DD': [entry] }
             const [foods, setFoods] = useState({});       // custom foods { id: food }
+            const [scaleSkips, setScaleSkips] = useState({}); // weigh-ins deleted from the Daily Log: { 'YYYY-MM-DD': latest deleted weigh-in time }
             const [foodDate, setFoodDate] = useState(() => dayKey(Date.now()));
             // Health data from the Android companion (js/health.js): { 'YYYY-MM-DD': { hc, weighins } }. Read-only here.
             const [healthLog, setHealthLog] = useState({});
@@ -1712,6 +1713,7 @@
                 setAiUsage({ date: '', count: 0 });
                 setFoodLog({});
                 setFoods({});
+                setScaleSkips({});
                 setHealthLog({});
                 setPhotos([]);
                 setProgressSub('hub');
@@ -1791,6 +1793,8 @@
                 setCoachMemory(Array.isArray(mem) ? mem.filter(m => m && m.text) : []);
                 setAiUsage(pick('aiUsage', { date: '', count: 0 }) || { date: '', count: 0 });
                 setFoods(pick('foods', {}) || {});
+                const skips = pick('scaleSkips', {});
+                setScaleSkips(skips && typeof skips === 'object' && !Array.isArray(skips) ? skips : {});
                 setHealthLog((src && src.health) || pick('health', {}) || {});
                 healthReadAt.current = src && src.health ? Date.now() : 0;
                 // cloudReadUser marks how far back its diary read went (foodLogSince); a record
@@ -1995,11 +1999,13 @@
                 document.addEventListener('visibilitychange', onVis);
                 return () => document.removeEventListener('visibilitychange', onVis);
             }, [currentUser]);
-            // Scale weigh-ins → the Daily Log (one entry per day; a weight typed by hand wins).
+            // Scale weigh-ins → the Daily Log (one entry per day; a weight typed by hand wins, and a
+            // weigh-in deleted from the log stays deleted).
             useEffect(() => {
                 if (isLoading || !currentUser || !window.CWAHealth) return;
-                setMetrics(prev => window.CWAHealth.mergeWeighIns(prev, healthLog, profile) || prev);
-            }, [healthLog, profile.sex, profile.birthYear, profile.heightCm, isLoading]);
+                setMetrics(prev => window.CWAHealth.mergeWeighIns(prev, healthLog, profile, scaleSkips) || prev);
+            }, [healthLog, scaleSkips, profile.sex, profile.birthYear, profile.heightCm, isLoading]);
+            useEffect(() => { if (!isLoading && currentUser) cloudSaveField('scaleSkips', scaleSkips); }, [scaleSkips]);
             useEffect(() => { if (!isLoading && currentUser) cloudSaveField('foods', foods); }, [foods]);
             // Upload diary days that were changed without a connection last time.
             useEffect(() => {
@@ -2483,15 +2489,41 @@
             // ======================
             const updateProfileField = (field, value) => setProfile(prev => ({ ...prev, [field]: value }));
 
-            // Upsert one metrics entry per calendar day.
-            const saveMetric = (entry) => {
-                setMetrics(prev => {
-                    const k = dayKey(entry.date);
-                    const rest = prev.filter(m => dayKey(m.date) !== k);
-                    return [...rest, entry].sort((a, b) => a.date - b.date);
-                });
+            // One metrics entry per calendar day. opts.edit (the day sheet, prefilled with the day's
+            // entry) replaces it; the Daily Log's quick form fills in only the fields it was given.
+            // A weight equal to the scale's stays the scale's (its time and body composition); a
+            // weight cleared in an edit keeps that day's weigh-ins out, like deleting the day.
+            const SCALE_FIELDS = ['scaleT', 'src', 'imp', 'bodyFat', 'muscleKg', 'waterPct', 'boneKg'];
+            const saveMetric = (entry, opts) => {
+                const k = dayKey(entry.date);
+                const old = metrics.find(m => dayKey(m.date) === k);
+                const edit = !!(opts && opts.edit);
+                let next;
+                if (edit || !old) next = { ...entry };
+                else {
+                    next = { ...old, date: entry.date };
+                    Object.keys(entry).forEach(f => { if (entry[f] != null && entry[f] !== '') next[f] = entry[f]; });
+                }
+                if (old && old.scaleT) {
+                    if (next.weight === old.weight) SCALE_FIELDS.forEach(f => { if (old[f] != null) next[f] = old[f]; });
+                    else SCALE_FIELDS.forEach(f => { delete next[f]; });
+                }
+                if (edit && next.weight == null && old && old.weight != null && window.CWAHealth) {
+                    const w = window.CWAHealth.weighInsByDay(healthLog, scaleSkips)[k];
+                    if (w) setScaleSkips(prev => window.CWAHealth.addSkip(prev, k, w.t, Date.now()));
+                }
+                setMetrics(prev => [...prev.filter(m => dayKey(m.date) !== k), next].sort((a, b) => a.date - b.date));
             };
-            const deleteMetric = (date) => setMetrics(prev => prev.filter(m => dayKey(m.date) !== dayKey(date)));
+            // Deleting a day also keeps its scale weigh-ins (so far) from being merged back in; a
+            // later weigh-in that day still comes in.
+            const deleteMetric = (date) => {
+                const k = dayKey(date);
+                const entry = metrics.find(m => dayKey(m.date) === k);
+                const w = window.CWAHealth ? window.CWAHealth.weighInsByDay(healthLog)[k] : null;
+                const t = Math.max((entry && entry.scaleT) || 0, (w && w.t) || 0);
+                if (t) setScaleSkips(prev => window.CWAHealth.addSkip(prev, k, t, Date.now()));
+                setMetrics(prev => prev.filter(m => dayKey(m.date) !== k));
+            };
 
             const addPhotoFromFile = async (file, dateTs) => {
                 if (!file || !currentUser) return;
@@ -3802,7 +3834,7 @@
                                 })(),
                                 e('div', null,
                                     e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, existing ? 'Edit Metrics' : 'Add Metrics'),
-                                    e(MetricForm, { key: dk, fixedDate: fixed, initial: existing, onSave: (entry) => { saveMetric(entry); setToast('Saved'); } })
+                                    e(MetricForm, { key: dk, fixedDate: fixed, initial: existing, onSave: (entry, o) => { saveMetric(entry, o); setToast('Saved'); } })
                                 ),
                                 e('div', null,
                                     e('div', { className: 'flex items-center justify-between mb-2' },
@@ -4024,7 +4056,7 @@
                     const recent = metrics.slice().sort((a, b) => b.date - a.date).slice(0, 30);
                     return shell('DAILY LOG', true,
                         e('div', null,
-                            e(MetricForm, { onSave: (entry) => { saveMetric(entry); setToast('Saved'); } }),
+                            e(MetricForm, { onSave: (entry, o) => { saveMetric(entry, o); setToast('Saved'); } }),
                             metrics.some(m => m.weight != null) ? e('button', {
                                 onClick: () => setProgressSub('weight'),
                                 className: 'w-full mt-3 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 active:scale-95',
@@ -4053,6 +4085,7 @@
                                             ),
                                             e('button', {
                                                 onClick: () => setConfirmState({ title: 'Delete entry?', message: `Metrics for ${d.toLocaleDateString('en-GB')} will be removed.`, confirmLabel: 'Delete', onConfirm: () => { deleteMetric(m.date); setConfirmState(null); } }),
+                                                'aria-label': `Delete entry for ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`,
                                                 className: 'p-2 rounded-lg flex-shrink-0', style: { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)' }
                                             }, e(MIcon, { icon: 'delete', style: { fontSize: '18px' } }))
                                         );

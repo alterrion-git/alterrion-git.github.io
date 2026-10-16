@@ -268,6 +268,9 @@
 
     // ---------- Open Food Facts ----------
     const OFF_FIELDS = 'code,product_name,product_name_cs,product_name_en,generic_name,brands,quantity,serving_size,serving_quantity,nutriments';
+    // Text that may come as a string, a list, or per language ({ cs, en, main… }).
+    const textOf = (v) => (typeof v === 'string' ? v : Array.isArray(v) ? v.filter(x => typeof x === 'string').join(', ')
+        : v && typeof v === 'object' ? (v.cs || v.main || v.en || Object.values(v).find(x => typeof x === 'string') || '') : '');
     function offToFood(p) {
         if (!p) return null;
         const nm = p.nutriments || {};
@@ -277,11 +280,11 @@
         let salt = g('salt');
         if (salt == null && g('sodium') != null) salt = g('sodium') * 2.5;
         const n = roundN({ kcal, p: g('proteins'), c: g('carbohydrates'), f: g('fat'), fib: g('fiber'), sug: g('sugars'), salt });
-        const name = String(p.product_name_cs || p.product_name || p.product_name_en || p.generic_name || '').trim();
+        const name = String(textOf(p.product_name_cs) || textOf(p.product_name) || textOf(p.product_name_en) || textOf(p.generic_name) || '').trim();
         const unit = /\d\s*(ml|cl|l)\b/i.test(String(p.quantity || '')) ? 'ml' : 'g';
         const sq = num(p.serving_quantity);
         return {
-            name: name || 'Unnamed product', brand: String(p.brands || '').split(',')[0].trim(), code: String(p.code || ''),
+            name: name || 'Unnamed product', brand: String(textOf(p.brands) || '').split(',')[0].trim(), code: String(p.code || ''),
             src: 'off', unit, n, serving: sq > 0 ? { g: sq, label: String(p.serving_size || `${sq} ${unit}`) } : null,
             hasNutrition: n.kcal != null,
         };
@@ -298,47 +301,134 @@
             localStorage.setItem(OFF_CACHE, JSON.stringify(c));
         } catch (e) {}
     }
+    // Products from earlier lookups, for the Add sheet's local search (no network needed).
+    const cachedProducts = () => { try { return Object.values(JSON.parse(localStorage.getItem(OFF_CACHE) || '{}')).map(c => c.food).filter(Boolean); } catch (e) { return []; } };
+
+    // Open Food Facts is often slow or failing (its legacy search answers 503 a lot), so every
+    // call has fallbacks: the browser asks OFF directly, then the CWA worker asks for it (server
+    // side, cached a day; see proxy/worker.js), then the browser tries again.
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    async function viaWorker(body, ms) {
+        const url = typeof LLM_PROXY_URL !== 'undefined' ? LLM_PROXY_URL : '';
+        if (!url) throw new Error('no worker');
+        const res = await fetchWithTimeout(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, ms || 15000);
+        if (!res.ok) throw new Error('worker ' + res.status);
+        return res.json();
+    }
+
     // → { found: true, food } | { found: false } ; throws when OFF can't be reached.
     async function offLookup(code) {
         const cached = cacheGet(code);
         if (cached) return { found: true, food: cached };
-        const res = await fetchWithTimeout(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`, {}, 12000);
-        if (res.status === 404) return { found: false };
-        if (!res.ok) throw new Error(`Open Food Facts error (${res.status})`);
-        const data = await res.json();
-        if (!data || !data.product || (data.status !== 1 && data.status !== 'success')) return { found: false };
-        const food = offToFood({ code, ...data.product });
-        if (food.hasNutrition) cachePut(food);
-        return { found: true, food };
+        const fromData = (data) => {
+            if (!data || !data.product || (data.status !== 1 && data.status !== 'success')) return { found: false };
+            const food = offToFood({ code, ...data.product });
+            if (food.hasNutrition) cachePut(food);
+            return { found: true, food };
+        };
+        const direct = async (host) => {
+            const res = await fetchWithTimeout(`https://${host}.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`, {}, 8000);
+            if (res.status === 404) return { found: false };
+            if (!res.ok) throw new Error(`Open Food Facts error (${res.status})`);
+            return fromData(await res.json());
+        };
+        let lastErr = null;
+        const attempts = [
+            () => direct('world'),
+            () => viaWorker({ task: 'off-product', code }, 12000).then(fromData),
+            () => sleep(800).then(() => direct('cz')),
+        ];
+        for (const attempt of attempts) {
+            try { return await attempt(); }
+            catch (err) { lastErr = err; if (navigator.onLine === false) break; }
+        }
+        throw lastErr;
     }
-    // Open Food Facts search. OFF allows ~10 searches/min per IP and asks apps not to search
-    // as you type, so this runs only on an explicit search: one request for products sold in
-    // Czechia (cz. host), or worldwide when asked. A dropped/slow request is retried once.
+
+    // Search: Open Food Facts' newer search service (Search-a-licious: fast, every country; we
+    // list products sold in Czechia first), else the worker, else the legacy search (one
+    // request for Czechia, or worldwide when asked). OFF allows ~10 searches/min per IP and asks
+    // apps not to search as you type, so this runs only on an explicit search. Answers are
+    // remembered on the phone for two weeks. A returned list has .global = true when it
+    // already covers every country (no "search worldwide" step needed).
+    const SEARCH_STORE = 'cwa-offsearch', SEARCH_TTL = 14 * 86400000;
     const searchCache = {};
-    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-    async function offSearch(query, worldwide) {
-        const q = query.trim();
-        const key = (worldwide ? 'w:' : 'cz:') + q.toLowerCase();
-        if (searchCache[key]) return searchCache[key];
+    const storeGet = (key) => { try { const c = JSON.parse(localStorage.getItem(SEARCH_STORE) || '{}')[key]; return c && Date.now() - c.t < SEARCH_TTL ? c : null; } catch (e) { return null; } };
+    function storePut(key, items, global) {
+        try {
+            const c = JSON.parse(localStorage.getItem(SEARCH_STORE) || '{}');
+            c[key] = { items, global, t: Date.now() };
+            const keys = Object.keys(c);
+            if (keys.length > 40) keys.sort((a, b) => c[a].t - c[b].t).slice(0, keys.length - 40).forEach(k => delete c[k]);
+            localStorage.setItem(SEARCH_STORE, JSON.stringify(c));
+        } catch (e) {}
+    }
+    const soldInCz = (p) => Array.isArray(p.countries_tags) && p.countries_tags.includes('en:czech-republic');
+    async function salSearch(q) {
+        const res = await fetchWithTimeout(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(q)}&langs=cs,en&page_size=30&fields=${OFF_FIELDS},countries_tags`, {}, 9000);
+        if (!res.ok) throw new Error('Open Food Facts search error (' + res.status + ')');
+        const data = await res.json();
+        if (!data || !Array.isArray(data.hits)) throw new Error('Open Food Facts search: unexpected answer');
+        return data.hits;
+    }
+    async function legacySearch(q, worldwide, tries, ms) {
         const host = worldwide ? 'world.openfoodfacts.org' : 'cz.openfoodfacts.org';
         const url = `https://${host}/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=30&fields=${OFF_FIELDS}`;
         let lastErr = null;
-        for (let attempt = 0; attempt < 2; attempt++) {
+        for (let attempt = 0; attempt < tries; attempt++) {
             if (attempt) await sleep(1500);
             try {
-                const res = await fetchWithTimeout(url, {}, 20000);
+                const res = await fetchWithTimeout(url, {}, ms);
                 if (res.status === 429) { const err = new Error('rate'); err.rate = true; throw err; }
                 if (!res.ok) throw new Error(`Open Food Facts search error (${res.status})`);
-                const data = await res.json();
-                const out = (data.products || []).map(offToFood).filter(f => f && f.hasNutrition);
-                searchCache[key] = out;
-                return out;
+                return (await res.json()).products || [];
             } catch (err) {
                 lastErr = err;
                 if (err.rate || navigator.onLine === false) break; // retrying won't help
             }
         }
         throw lastErr;
+    }
+    async function offSearch(query, worldwide) {
+        const q = query.trim(), lq = q.toLowerCase();
+        const key = (worldwide ? 'w:' : 'cz:') + lq;
+        const known = searchCache[key] || searchCache['all:' + lq];
+        if (known) return known;
+        const stored = storeGet('all:' + lq) || storeGet(key);
+        const finish = (items, global, save) => {
+            const out = items.slice();
+            out.global = global;
+            searchCache[global ? 'all:' + lq : key] = out;
+            if (save) storePut(global ? 'all:' + lq : key, items, global);
+            return out;
+        };
+        if (stored) return finish(stored.items, stored.global, false);
+        const toFoods = (products, global) => (global ? products.filter(soldInCz).concat(products.filter(p => !soldInCz(p))) : products)
+            .map(offToFood).filter(f => f && f.hasNutrition);
+
+        let answered = false; // the newer search answered (maybe with nothing)
+        try {
+            const hits = await salSearch(q);
+            answered = true;
+            const foods = toFoods(hits, true);
+            if (foods.length) return finish(foods, true, true);
+        } catch (err) {}
+        if (!answered) {
+            try {
+                const r = await viaWorker({ task: 'off-search', q });
+                if (r && Array.isArray(r.products)) {
+                    const foods = toFoods(r.products, true);
+                    if (foods.length || r.source === 'search-a-licious') return finish(foods, true, foods.length > 0);
+                }
+            } catch (err) {}
+        }
+        try {
+            const foods = toFoods(await legacySearch(q, worldwide, answered ? 1 : 2, answered ? 12000 : 20000), false);
+            return finish(foods, false, foods.length > 0);
+        } catch (err) {
+            if (answered) return finish([], true, false); // the newer search found nothing; trust it
+            throw err;
+        }
     }
     const searchErrorText = (err) => navigator.onLine === false ? 'You are offline.'
         : err && err.rate ? 'Open Food Facts allows about 10 searches a minute. Wait a moment and search again.'
@@ -1119,7 +1209,7 @@
         const fq = fold(q.trim());
         const tokens = fq.split(/\s+/).filter(Boolean);
         const matches = (f) => { const h = fold([f.name, f.brand, f.alt, f.code].join(' ')); return tokens.every(t => h.includes(t)); };
-        const local = fq ? [...custom, ...recent.filter(r => r.src !== 'custom'), ...BASIC_FOODS].filter(matches).filter((f, i, a) => a.findIndex(x => (x.code && x.code === f.code) || (x.name === f.name && x.brand === f.brand)) === i).slice(0, 25) : [];
+        const local = fq ? [...custom, ...recent.filter(r => r.src !== 'custom'), ...cachedProducts(), ...BASIC_FOODS].filter(matches).filter((f, i, a) => a.findIndex(x => (x.code && x.code === f.code) || (x.name === f.name && x.brand === f.brand)) === i).slice(0, 25) : [];
         const runSearch = async (world) => {
             const query = q.trim();
             if (query.length < 2 || /^\d{8,14}$/.test(query)) return;
@@ -1163,14 +1253,14 @@
                 online.q !== q.trim() || online.state === 'idle'
                     ? e('button', { onClick: () => runSearch(false), disabled: q.trim().length < 2, className: 'w-full py-3 rounded-2xl text-base font-bold flex items-center justify-center gap-2 active:scale-95', style: Object.assign({}, ghostBtn, { opacity: q.trim().length < 2 ? 0.5 : 1 }) },
                         e(MIcon, { icon: 'search', style: { fontSize: '20px' } }), `Search products for “${q.trim()}”`)
-                    : online.state === 'loading' ? e('div', { className: 'text-sm py-3 text-center', style: { color: 'var(--on-surface-variant)' } }, online.world ? 'Searching worldwide…' : 'Searching products sold in Czechia…')
+                    : online.state === 'loading' ? e('div', { className: 'text-sm py-3 text-center', style: { color: 'var(--on-surface-variant)' } }, online.world ? 'Searching worldwide…' : 'Searching Open Food Facts…')
                         : online.state === 'error' ? e('div', null,
                             e('div', { className: 'text-sm', style: { color: 'var(--error)' } }, online.error),
                             e('button', { onClick: () => runSearch(online.world), className: 'mt-2 px-4 py-2 rounded-xl text-sm font-bold active:scale-95', style: ghostBtn }, 'Try again'))
                             : e('div', null,
                                 online.items.length ? e('div', { className: 'rounded-2xl px-3', style: card }, online.items.map((f, i) => e('div', { key: f.code + i, style: { borderBottom: i < online.items.length - 1 ? '1px solid var(--surface-container-highest)' : 'none' } }, e(FoodRow, { food: f, onClick: () => onPick(f) }))))
-                                    : e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, online.world ? 'No products found. Try fewer words, or add it as a new food.' : 'Nothing found among products sold in Czechia.'),
-                                online.world ? null : e('button', { onClick: () => runSearch(true), className: 'mt-2 w-full py-2.5 rounded-xl text-sm font-bold active:scale-95', style: ghostBtn }, 'Search worldwide too')
+                                    : e('div', { className: 'text-sm', style: { color: 'var(--outline)' } }, online.world || online.items.global ? 'No products found. Try fewer words, or add it as a new food.' : 'Nothing found among products sold in Czechia.'),
+                                online.world || online.items.global ? null : e('button', { onClick: () => runSearch(true), className: 'mt-2 w-full py-2.5 rounded-xl text-sm font-bold active:scale-95', style: ghostBtn }, 'Search worldwide too')
                             )
             ) : null,
             !fq && !recent.length && !custom.length ? e('div', { className: 'text-sm mt-6 text-center', style: { color: 'var(--outline)' } }, pickIng ? 'Search above — basic foods like eggs, oats or rice are built in.' : 'Search above — your recent foods will show up here.') : null,
@@ -1408,7 +1498,7 @@
                 let matches = [];
                 if (q.length >= 3) {
                     try { matches = await offSearch(q, false); } catch (err) {}
-                    if (matches.length < 3) { try { const w = await offSearch(q, true); const seen = new Set(matches.map(f => f.code)); matches = matches.concat(w.filter(f => !seen.has(f.code))); } catch (err) {} }
+                    if (matches.length < 3 && !matches.global) { try { const w = await offSearch(q, true); const seen = new Set(matches.map(f => f.code)); matches = matches.concat(w.filter(f => !seen.has(f.code))); } catch (err) {} }
                 }
                 setSheet(s => (s && s.type === 'photo' && s.result === r ? { ...s, matches: matches.slice(0, 8), searching: false } : s));
             } catch (err) {

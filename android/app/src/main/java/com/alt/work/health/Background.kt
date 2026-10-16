@@ -35,12 +35,15 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.concurrent.TimeUnit
 
-/** Hourly Health Connect upload (while linked), and a re-arm of the scale listener. */
+/**
+ * Health Connect upload twice a day (while linked) — light on the battery; the app also syncs
+ * when opened and on "Sync now". Keeps the optional always-on scale listener armed, or stopped.
+ */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val store = Store(applicationContext)
         if (!store.linked) return Result.success()
-        if (store.scaleAuto) ScaleListener.start(applicationContext)
+        if (store.scaleAuto) ScaleListener.start(applicationContext) else ScaleListener.stop(applicationContext)
         WeighInWorker.saveIfDone(applicationContext, WeighIns.flushStale(applicationContext))
         if (!HealthSync.available(applicationContext)) return Result.success()
         return try {
@@ -57,10 +60,11 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
     companion object {
         fun schedule(context: Context) {
-            val req = PeriodicWorkRequestBuilder<SyncWorker>(1, TimeUnit.HOURS)
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            val req = PeriodicWorkRequestBuilder<SyncWorker>(12, TimeUnit.HOURS)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresBatteryNotLow(true).build())
                 .build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork("hc-sync", ExistingPeriodicWorkPolicy.KEEP, req)
+            // UPDATE: replaces the hourly schedule of earlier versions (KEEP would keep it).
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork("hc-sync", ExistingPeriodicWorkPolicy.UPDATE, req)
         }
     }
 }
@@ -165,10 +169,9 @@ object ScaleListener {
         val sc = scanner(context) ?: return false
         return try {
             sc.stopScan(pendingIntent(context))
-            // Balanced, not low power: the scale talks for only ~15 s per weigh-in. (With the screen
-            // off Android lowers background scans further on its own.) Matching runs in the
-            // Bluetooth chip, so the app only wakes when the scale is on.
-            val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build()
+            // Low power: matching runs in the Bluetooth chip and the app only wakes when the scale
+            // is on; one packet of a weigh-in is enough to save it (see WeighIns).
+            val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_POWER).build()
             sc.startScan(MiScale.filters(Store(context).scaleAddress), settings, pendingIntent(context)) == 0
         } catch (e: Exception) { false }
     }
@@ -213,7 +216,7 @@ class BootReceiver : BroadcastReceiver() {
         val store = Store(context)
         if (!store.linked) return
         SyncWorker.schedule(context)
-        if (store.scaleAuto) ScaleListener.start(context)
+        if (store.scaleAuto) ScaleListener.start(context) else ScaleListener.stop(context)
     }
 }
 

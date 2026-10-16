@@ -97,24 +97,39 @@
     }
 
     // The day's last weigh-in from the scale; Health Connect's weight when there was none.
-    function weighInsByDay(log) {
+    // With skips, weigh-ins at or before a day's skip time are left out.
+    function weighInsByDay(log, skips) {
         const out = {};
         Object.keys(log || {}).forEach(k => {
             const d = log[k] || {};
+            const skip = (skips && skips[k]) || 0;
             const list = Object.values(d.weighins || {}).filter(w => w && w.kg > 0 && w.t);
-            if (list.length) out[k] = list.sort((a, b) => b.t - a.t)[0];
+            let w = null;
+            if (list.length) w = list.sort((a, b) => b.t - a.t)[0];
             else if (d.hc && d.hc.weight > 0) {
                 const [y, m, dd] = k.split('-').map(Number);
-                out[k] = { t: new Date(y, m - 1, dd, 8, 0, 0).getTime(), kg: d.hc.weight, src: 'hc', fat: d.hc.fat };
+                w = { t: new Date(y, m - 1, dd, 8, 0, 0).getTime(), kg: d.hc.weight, src: 'hc', fat: d.hc.fat };
             }
+            if (w && w.t > skip) out[k] = w;
         });
         return out;
     }
 
+    // Weigh-ins deleted from the Daily Log: { day: time of the latest deleted weigh-in }. Days
+    // older than a year are dropped (their weigh-ins are out of the health read range anyway).
+    function addSkip(skips, day, t, now) {
+        const out = {};
+        const cutoff = dayKey((now || Date.now()) - 366 * DAY);
+        Object.keys(skips || {}).forEach(k => { if (k >= cutoff) out[k] = skips[k]; });
+        out[day] = Math.max(out[day] || 0, t);
+        return out;
+    }
+
     // Weigh-ins → Daily Log (metrics, one entry per day). A weight typed in by hand wins; a day's
-    // later weigh-in replaces an earlier one. Returns the new list, or null when nothing changed.
-    function mergeWeighIns(metrics, log, profile) {
-        const ins = weighInsByDay(log);
+    // later weigh-in replaces an earlier one; a weigh-in deleted from the log (skips) stays out.
+    // Returns the new list, or null when nothing changed.
+    function mergeWeighIns(metrics, log, profile, skips) {
+        const ins = weighInsByDay(log, skips);
         const days = Object.keys(ins);
         if (!days.length) return null;
         const p = profile || {};
@@ -234,5 +249,5 @@
             connect);
     }
 
-    window.CWAHealth = { summary, bodyComposition, weighInsByDay, mergeWeighIns, linkUrl, actionUrl, isAndroid, sourceName, hm, HealthPanel, APK_URL };
+    window.CWAHealth = { summary, bodyComposition, weighInsByDay, mergeWeighIns, addSkip, linkUrl, actionUrl, isAndroid, sourceName, hm, HealthPanel, APK_URL };
 })();

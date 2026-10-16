@@ -38,7 +38,9 @@ class Store(context: Context) : ScaleState {
     var firstSyncDone: Boolean get() = p.getBoolean("firstSync", false); set(v) = p.edit().putBoolean("firstSync", v).apply()
 
     // Scale.
-    var scaleAuto: Boolean get() = p.getBoolean("scaleAuto", false); set(v) = p.edit().putBoolean("scaleAuto", v).apply()
+    /** Optional always-on background listening for the scale (off by default: battery). A new
+     *  key, so earlier versions' "on" doesn't carry over. */
+    var scaleAuto: Boolean get() = p.getBoolean("scaleListen", false); set(v) = p.edit().putBoolean("scaleListen", v).apply()
     override var scaleAddress: String? get() = str("scaleAddr"); set(v) = putStr("scaleAddr", v)
     /** Last weight we know (from CWA or the scale), to skip other people's weigh-ins. 0 = unknown. */
     override var lastWeight: Float get() = p.getFloat("lastWeight", 0f); set(v) = p.edit().putFloat("lastWeight", v).apply()
