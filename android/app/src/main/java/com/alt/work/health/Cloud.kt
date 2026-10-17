@@ -55,7 +55,7 @@ class Cloud(context: Context) {
             "application/x-www-form-urlencoded",
         )
         if (code !in 200..299) {
-            throw IOException(if (code == 400) "Sign-in expired — link the app again from CWA (Profile › Health)." else "Sign-in failed ($code)")
+            throw IOException(if (code == 400) "Sign-in expired — link the app again from CWA (Health tab)." else "Sign-in failed ($code)")
         }
         val j = JSONObject(text)
         val token = j.getString("id_token")

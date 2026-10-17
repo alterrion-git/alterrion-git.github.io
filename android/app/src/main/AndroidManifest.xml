@@ -54,7 +54,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- cwahealth://link?... (from CWA: Profile › Health › Link), cwahealth://weigh, cwahealth://sync -->
+            <!-- cwahealth://link?... (from CWA: Health tab › Link app), cwahealth://weigh, cwahealth://sync -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

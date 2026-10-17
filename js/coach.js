@@ -333,11 +333,12 @@
             const ln = s.lastNight;
             if (ln || s.sleep7) out.push(`Sleep: ${ln ? `last night ${hm(ln.min)}${ln.deep || ln.rem ? ` (deep ${hm(ln.deep)}, REM ${hm(ln.rem)}, awake ${hm(ln.awake)})` : ''}` : 'last night not recorded'}${s.sleep7 ? `; 7-day avg ${hm(s.sleep7)}` : ''}${s.sleep28 ? `, 4-week ${hm(s.sleep28)}` : ''}.`);
             const hr = [];
-            if (t.rhr || s.rhr7) hr.push(`resting HR ${t.rhr ? r0(t.rhr) + ' today' : ''}${s.rhr7 ? ` (7-day ${r0(s.rhr7)}${s.rhr28 ? `, 4-week ${r0(s.rhr28)}` : ''})` : ''}`);
+            const rest = t.rhr || t.rhrEst;
+            if (rest || s.rhr7) hr.push(`resting HR${s.rhrEst ? ' (estimated from the wearable\'s readings)' : ''} ${rest ? r0(rest) + ' today' : ''}${s.rhr7 ? ` (7-day ${r0(s.rhr7)}${s.rhr28 ? `, 4-week ${r0(s.rhr28)}` : ''})` : ''}`);
+            if (t.hr && t.hr.avg) hr.push(`average HR today ${r0(t.hr.avg)} (${r0(t.hr.min)}–${r0(t.hr.max)})${s.hrAvg7 ? `, 7-day avg ${r0(s.hrAvg7)}` : ''}`);
             if (s.hrv7) hr.push(`HRV 7-day avg ${r0(s.hrv7)} ms`);
             if (s.spo27) hr.push(`SpO2 ${kg(s.spo27)} %`);
             if (hr.length) out.push(`Heart: ${hr.join('; ')}.`);
-            if (s.workouts.length) out.push(`Activities recorded by other apps (7 days): ${s.workouts.slice(0, 8).map(w => `${w.day.slice(5)} ${w.title || w.type} ${r0(w.min)} min`).join('; ')}.`);
         }
         const ms = (metrics || []).filter(m => m && m.date).sort((a, b) => a.date - b.date);
         const w = ms.filter(m => m.weight != null);

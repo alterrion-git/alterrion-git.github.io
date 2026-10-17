@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 
 /**
  * Everything the app remembers, in its private storage:
- *  - the CWA account it uploads to (set by the link from CWA: Profile › Health › Link Android app),
+ *  - the CWA account it uploads to (set by the link from CWA: Health tab › Link app),
  *  - the Firebase sign-in (refresh token → short-lived ID tokens),
  *  - sync and scale state.
  */

@@ -191,8 +191,8 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- status ----------
     private fun refresh() {
-        accountText.text = if (store.linked) "Linked to CWA" + (store.email?.let { ": $it" } ?: "") + "\nData goes to your CWA account (Profile › Health)."
-        else "Not linked yet.\nOpen CWA → Profile → Health → “Link Android app”."
+        accountText.text = if (store.linked) "Linked to CWA" + (store.email?.let { ": $it" } ?: "") + "\nData goes to your CWA account (Health tab)."
+        else "Not linked yet.\nOpen CWA → Health tab → “Link app”."
         autoSwitch.isChecked = store.scaleAuto
         mineSwitch.isChecked = store.onlyMyWeight
         if (scanCallback == null) scaleText.text = scaleStatus()

@@ -4,8 +4,11 @@
 // The companion app (android/) uploads to users/<id>/health/<YYYY-MM-DD>:
 //   hc:       one daily summary read from Health Connect (whatever writes there: a ring,
 //             a watch, Samsung Health, Zepp…): { steps, distM, activeKcal, totalKcal, floors,
-//             hr: {avg,min,max}, rhr, hrv, spo2, sleep: {min,start,end,deep,light,rem,awake},
-//             weight, fat, ex: [{type,title,start,end,min}], sources: [package], updated }
+//             hr: {avg,min,max}, rhr, rhrEst, hrv, spo2, sleep: {min,start,end,deep,light,rem,awake},
+//             weight, fat, ex: [...], sources: [package], updated }
+//             rhr is a resting heart rate the wearable reported; rhrEst the app's estimate from
+//             the day's heart-rate readings (lowest 30-min average) for wearables that report
+//             none. ex (other apps' activities) is synced but not shown: too unreliable.
 //   weighins: { <ms>: { t, kg, imp?, src } } — from a Xiaomi scale, heard over Bluetooth.
 //
 // This file: the daily summary maths, scale weigh-ins → Daily Log entries (with a body-
@@ -34,6 +37,10 @@
     const sourceName = (pkg) => SOURCES[pkg] || String(pkg || '').split('.').slice(-2).join('.');
 
     const hcOf = (log, key) => (log && log[key] && log[key].hc) || null;
+    // Resting heart rate: the wearable's own, else the estimate from its readings.
+    const restingOf = (h) => (h && (h.rhr || h.rhrEst)) || null;
+    const restingIsEst = (h) => !!(h && !h.rhr && h.rhrEst);
+    const hrAvgOf = (h) => (h && h.hr && h.hr.avg) || null;
 
     // ---------- summaries ----------
     // Today, last night and 7/28-day averages (days before today), for the screen and the coach.
@@ -45,8 +52,6 @@
         const pick = (list, f) => list.map(f).filter(v => v != null && v > 0);
         const p7 = prev(7), p28 = prev(28);
         const sleepOf = (h) => (h && h.sleep ? h.sleep.min : null);
-        const workouts = [];
-        keys.slice(0, 7).forEach(k => { const h = hcOf(log, k); (h && h.ex || []).forEach(x => workouts.push({ day: k, ...x })); });
         const sources = new Set();
         let lastSync = 0, days = 0;
         Object.keys(log || {}).forEach(k => {
@@ -61,9 +66,10 @@
             steps7: avg(pick(p7, h => h.steps)), steps28: avg(pick(p28, h => h.steps)),
             activeKcal7: avg(pick(p7, h => h.activeKcal)), totalKcal7: avg(pick(p7, h => h.totalKcal)),
             sleep7: avg(pick(p7, sleepOf)), sleep28: avg(pick(p28, sleepOf)),
-            rhr7: avg(pick(p7, h => h.rhr)), rhr28: avg(pick(p28, h => h.rhr)),
+            rhr7: avg(pick(p7, restingOf)), rhr28: avg(pick(p28, restingOf)), rhrEst: restingIsEst(today) || (!restingOf(today) && p7.some(restingIsEst)),
+            hrAvg7: avg(pick(p7, hrAvgOf)),
             hrv7: avg(pick(p7, h => h.hrv)), spo27: avg(pick(p7, h => h.spo2)),
-            workouts, sources: [...sources], lastSync, days,
+            sources: [...sources], lastSync, days,
         };
     }
 
@@ -178,6 +184,19 @@
             sub ? e('div', { className: 'text-[11px] mt-0.5 truncate', style: { color: 'var(--outline)' } }, sub) : null);
     }
 
+    // Resting heart rate when the wearable reports it (or we could estimate it), else the day's
+    // average; the day's range and the 4-week resting average underneath.
+    function heartTile(t, s) {
+        const rest = restingOf(t), hr = t.hr || null;
+        const range = hr && hr.min && hr.max ? `${r0(hr.min)}–${r0(hr.max)} bpm today` : '';
+        if (rest) {
+            const sub = [hr && hr.avg ? `avg ${r0(hr.avg)}` : '', range && !hr.avg ? range : '', s.rhr28 ? `4-wk ${r0(s.rhr28)}` : ''].filter(Boolean).join(' · ');
+            return e(Tile, { icon: 'favorite', title: restingIsEst(t) ? 'Resting HR (est.)' : 'Resting HR', value: r0(rest), unit: 'bpm', sub });
+        }
+        if (hr && hr.avg) return e(Tile, { icon: 'favorite', title: 'Heart rate', value: r0(hr.avg), unit: 'bpm avg', sub: range });
+        return e(Tile, { icon: 'favorite', title: 'Heart rate', value: '—', sub: s.rhr7 ? `resting 7-day ${r0(s.rhr7)}` : s.hrAvg7 ? `7-day avg ${r0(s.hrAvg7)}` : '' });
+    }
+
     function HealthPanel({ log, metrics, profile, onLink, onRefresh, refreshing, onGoals, onWeight, now }) {
         now = now || Date.now();
         const s = summary(log, now);
@@ -217,7 +236,9 @@
             const h = hcOf(log, k) || {};
             const m = (metrics || []).find(x => dayKey(x.date) === k);
             return { k, h, m };
-        }).filter(r => r.h.steps || (r.h.sleep && r.h.sleep.min) || r.h.rhr || (r.m && r.m.weight != null));
+        }).filter(r => r.h.steps || (r.h.sleep && r.h.sleep.min) || restingOf(r.h) || hrAvgOf(r.h) || (r.m && r.m.weight != null));
+        // Heart column: resting (the wearable's, or estimated), else the day's average (ø).
+        const hrCell = (h) => (restingOf(h) ? String(r0(restingOf(h))) : hrAvgOf(h) ? `ø ${r0(hrAvgOf(h))}` : '—');
 
         return e('div', null,
             e('div', { className: 'flex items-center justify-between mb-2' },
@@ -227,25 +248,24 @@
             e('div', { className: 'grid grid-cols-2 gap-2' },
                 e(Tile, { icon: 'directions_walk', title: 'Steps', value: t.steps ? fmtN(t.steps) : '—', sub: vsAvg(t.steps, s.steps7) }),
                 e(Tile, { icon: 'bedtime', title: 'Sleep', value: ln ? hm(ln.min) : '—', sub: ln && (ln.deep || ln.rem) ? `deep ${hm(ln.deep)} · REM ${hm(ln.rem)}` : (s.sleep7 ? `7-day avg ${hm(s.sleep7)}` : '') }),
-                e(Tile, { icon: 'favorite', title: 'Resting HR', value: t.rhr ? r0(t.rhr) : '—', unit: t.rhr ? 'bpm' : '', sub: s.rhr28 ? `4-week avg ${r0(s.rhr28)}` : '' }),
+                heartTile(t, s),
                 e(Tile, { icon: 'monitor_weight', title: 'Weight', onClick: onWeight, value: latest ? String(latest.weight) : '—', unit: latest ? 'kg' : '', sub: latest && latest.bodyFat != null ? `body fat ${latest.bodyFat} % · muscle ${latest.muscleKg != null ? latest.muscleKg + ' kg' : '—'}` : latest ? new Date(latest.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '' })),
             t.activeKcal || t.totalKcal ? e('div', { className: 'text-xs mt-2 px-1', style: { color: 'var(--on-surface-variant)' } },
                 `Burned today: ${t.activeKcal ? fmtN(t.activeKcal) + ' kcal active' : ''}${t.activeKcal && t.totalKcal ? ' · ' : ''}${t.totalKcal ? fmtN(t.totalKcal) + ' kcal total' : ''}`) : null,
             needsProfile ? e('button', { onClick: onGoals, className: 'w-full mt-3 rounded-xl px-3 py-2 text-xs text-left', style: { background: 'rgba(209,252,0,0.08)', color: 'var(--on-surface)' } },
                 'Your scale measures body composition. Add sex and birth year in Goals to see body fat and muscle →') : null,
-            s.workouts.length ? e('div', { className: 'mt-4' }, label('Activities (7 days, from other apps)'),
-                e('div', { className: 'rounded-2xl px-3', style: card }, s.workouts.map((w, i) => e('div', { key: i, className: 'flex justify-between py-2 text-sm', style: { borderTop: i ? '1px solid var(--surface-container-highest)' : 'none' } },
-                    e('span', null, `${w.title || w.type}`), e('span', { style: { color: 'var(--on-surface-variant)' } }, `${new Date(w.start).toLocaleDateString('en-GB', { weekday: 'short' })} · ${hm(w.min)}`))))) : null,
             rows.length ? e('div', { className: 'mt-4' }, label('Last 14 days'),
                 e('div', { className: 'rounded-2xl px-3 overflow-x-auto', style: card },
                     e('table', { className: 'w-full text-sm', style: { fontVariantNumeric: 'tabular-nums' } },
-                        e('thead', null, e('tr', { style: { color: 'var(--on-surface-variant)' } }, ['', 'Steps', 'Sleep', 'RHR', 'kg'].map((hd, i) => e('th', { key: i, className: 'text-xs font-normal py-2 ' + (i ? 'text-right' : 'text-left') }, hd)))),
+                        e('thead', null, e('tr', { style: { color: 'var(--on-surface-variant)' } }, ['', 'Steps', 'Sleep', 'Rest HR', 'kg'].map((hd, i) => e('th', { key: i, className: 'text-xs font-normal py-2 ' + (i ? 'text-right' : 'text-left') }, hd)))),
                         e('tbody', null, rows.map(({ k, h, m }) => e('tr', { key: k, style: { borderTop: '1px solid var(--surface-container-highest)' } },
                             e('td', { className: 'py-2 text-xs', style: { color: 'var(--on-surface-variant)' } }, new Date(k + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })),
                             e('td', { className: 'text-right' }, h.steps ? fmtN(h.steps) : '—'),
                             e('td', { className: 'text-right' }, h.sleep && h.sleep.min ? hm(h.sleep.min) : '—'),
-                            e('td', { className: 'text-right' }, h.rhr ? r0(h.rhr) : '—'),
-                            e('td', { className: 'text-right' }, m && m.weight != null ? m.weight : '—'))))))) : null,
+                            e('td', { className: 'text-right' }, hrCell(h)),
+                            e('td', { className: 'text-right' }, m && m.weight != null ? m.weight : '—')))))),
+                e('div', { className: 'text-[11px] mt-1.5 px-1 leading-snug', style: { color: 'var(--outline)' } },
+                    'Rest HR: from your wearable, or estimated from its readings (lowest 30-minute average) when it reports none; ø = the day\u2019s average heart rate.')) : null,
             connect);
     }
 
