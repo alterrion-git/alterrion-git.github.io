@@ -146,6 +146,21 @@ object HealthSync {
             }
         }
 
+        // Resting heart rate estimate from the day's readings, for wearables that write heart
+        // rate but no resting value (rings): the lowest 30-minute average (see HeartRate).
+        if (has(HeartRateRecord::class)) {
+            val samples = mutableListOf<Pair<Instant, Long>>()
+            var token: String? = null
+            do {
+                val page = client.readRecords(ReadRecordsRequest(HeartRateRecord::class, range, pageToken = token))
+                page.records.forEach { r -> r.samples.forEach { samples += it.time to it.beatsPerMinute } }
+                token = page.pageToken
+            } while (token != null)
+            samples.groupBy { localDay(it.first) }.forEach { (d, list) ->
+                HeartRate.restingEstimate(list)?.let { day(d).put("rhrEst", it) }
+            }
+        }
+
         // Daily averages of spot readings.
         if (has(HeartRateVariabilityRmssdRecord::class)) {
             client.readRecords(ReadRecordsRequest(HeartRateVariabilityRmssdRecord::class, range)).records

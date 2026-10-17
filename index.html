@@ -262,14 +262,14 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.25.0"></script>
-    <script src="js/coach.js?v=3.25.0"></script>
-    <script src="js/health.js?v=3.25.0"></script>
-    <script src="js/weight.js?v=3.25.0"></script>
-    <script src="js/watch.js?v=3.25.0"></script>
+    <script src="js/nutrition.js?v=3.26.0"></script>
+    <script src="js/coach.js?v=3.26.0"></script>
+    <script src="js/health.js?v=3.26.0"></script>
+    <script src="js/weight.js?v=3.26.0"></script>
+    <script src="js/watch.js?v=3.26.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.25.0';
+        const APP_VERSION = '3.26.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -1176,7 +1176,7 @@
                 { id: 'workout', icon: 'fitness_center', label: 'Workout' },
                 { id: 'food', icon: 'restaurant', label: 'Food' },
                 { id: 'month', icon: 'calendar_month', label: 'Calendar' },
-                { id: 'stats', icon: 'bar_chart', label: 'Stats' },
+                { id: 'health', icon: 'favorite', label: 'Health' },
             ];
 
             // Detect narrow cover screen (flip phones: nearly square or landscape aspect)
@@ -1895,11 +1895,16 @@
                     setProgressSub('hub');
                     setAiError('');
                     setView('progress');
-                } else if (tabId === 'stats') {
-                    setActiveTab('stats');
+                } else if (tabId === 'health') {
+                    setActiveTab('health');
+                    setView('health');
+                } else if (tabId === 'stats') { // from Profile (Stats used to be a tab)
+                    setActiveTab('progress');
                     setView('stats');
                 }
             };
+            // A Profile page from elsewhere (e.g. Goals or the weight chart from the Health tab).
+            const openProfile = (sub) => { setActiveTab('progress'); setAiError(''); setProgressSub(sub || 'hub'); setView('progress'); };
 
             // --- Auto-login on mount ---
             useEffect(() => {
@@ -3199,6 +3204,24 @@
                 } });
             }
 
+            // ======================
+            // HEALTH TAB (js/health.js: data from the CWA Health Android app)
+            // ======================
+            if (view === 'health') {
+                return e('div', { className: 'min-h-screen flex flex-col', style: { background: 'var(--void)', color: 'var(--on-surface)' } },
+                    e(TopAppBar, { title: 'HEALTH', rightAction: profileBtn }),
+                    e('div', { className: 'flex-1 pt-20 pb-28 px-4 overflow-y-auto' },
+                        e('div', { className: 'max-w-lg mx-auto' },
+                            window.CWAHealth ? e(window.CWAHealth.HealthPanel, {
+                                log: healthLog, metrics, profile, refreshing: healthLoading,
+                                onLink: linkAndroidApp, onRefresh: () => refreshHealth(true),
+                                onGoals: () => openProfile('goals'), onWeight: () => openProfile('weight'),
+                            }) : e('div', null, 'Health module failed to load.'))),
+                    confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null,
+                    e(BottomNavBar, { activeTab: 'health', onTabChange: handleTabChange })
+                );
+            }
+
             if (view === 'stats') {
                 // Compute stats from history
                 const totalWorkouts = workoutHistory.length;
@@ -3290,7 +3313,12 @@
                     className: 'min-h-screen flex flex-col',
                     style: { background: 'var(--void)', color: 'var(--on-surface)' }
                 },
-                    e(TopAppBar, { title: 'STATS', rightAction: profileBtn }),
+                    e(TopAppBar, {
+                        title: 'STATS',
+                        // Stats lives in Profile now: back to it.
+                        leftAction: e('button', { onClick: () => openProfile('hub'), className: 'flex items-center gap-1 transition-opacity active:opacity-60', style: { color: 'var(--on-surface-variant)' } },
+                            e(ArrowLeft, { size: 20 }), e('span', { className: 'text-sm' }, 'Back')),
+                    }),
                     e('div', { className: 'flex-1 pt-20 pb-28 px-4 overflow-y-auto' },
                         weeklyCard,
                         totalWorkouts === 0 ?
@@ -3409,7 +3437,7 @@
                     ),
                     confirmState ? e(ConfirmDialog, { ...confirmState, onCancel: () => setConfirmState(null) }) : null,
                     weekInfo && NR ? e(NR.WeekRatingDialog, { rating: weekInfo, onClose: () => setWeekInfo(null) }) : null,
-                    e(BottomNavBar, { activeTab: 'stats', onTabChange: handleTabChange })
+                    e(BottomNavBar, { activeTab: 'progress', onTabChange: handleTabChange })
                 );
             }
 
@@ -4103,13 +4131,6 @@
                 }
 
                 // ---- DAILY METRICS ----
-                if (progressSub === 'health') {
-                    return shell('HEALTH', true, window.CWAHealth ? e(window.CWAHealth.HealthPanel, {
-                        log: healthLog, metrics, profile, refreshing: healthLoading,
-                        onLink: linkAndroidApp, onRefresh: () => refreshHealth(true), onGoals: () => setProgressSub('goals'), onWeight: () => setProgressSub('weight'),
-                    }) : e('div', null, 'Health module failed to load.'));
-                }
-
                 if (progressSub === 'weight') {
                     return shell('WEIGHT', true, window.CWAWeight
                         ? e(window.CWAWeight.WeightPanel, { metrics, onLog: () => setProgressSub('metrics') })
@@ -4406,7 +4427,7 @@
                 // ---- HUB ----
                 const latestWeight = metrics.filter(m => m.weight != null).sort((a, b) => b.date - a.date)[0];
                 const hubCard = (icon, title, sub, target) => e('button', {
-                    onClick: () => setProgressSub(target),
+                    onClick: () => (typeof target === 'function' ? target() : setProgressSub(target)),
                     className: 'rounded-2xl p-4 flex flex-col items-start text-left transition-all active:scale-95',
                     style: card
                 },
@@ -4458,7 +4479,7 @@
                         ),
                         e('div', { className: 'grid grid-cols-2 gap-3' },
                             hubCard('flag', 'Goals', 'Targets & notes', 'goals'),
-                            hubCard('favorite', 'Health', 'Steps, sleep, heart, weigh-ins', 'health'),
+                            hubCard('bar_chart', 'Stats', 'Records, history, week ratings', () => handleTabChange('stats')),
                             hubCard('monitor_weight', 'Daily Log', 'Weight, kcal, sleep', 'metrics'),
                             hubCard('photo_camera', 'Photos', `${photos.length} saved`, 'photos'),
                             hubCard('forum', 'AI Coach', 'Chat & advice', 'chat'),
