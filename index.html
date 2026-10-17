@@ -262,14 +262,14 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.24.0"></script>
-    <script src="js/coach.js?v=3.24.0"></script>
-    <script src="js/health.js?v=3.24.0"></script>
-    <script src="js/weight.js?v=3.24.0"></script>
-    <script src="js/watch.js?v=3.24.0"></script>
+    <script src="js/nutrition.js?v=3.25.0"></script>
+    <script src="js/coach.js?v=3.25.0"></script>
+    <script src="js/health.js?v=3.25.0"></script>
+    <script src="js/weight.js?v=3.25.0"></script>
+    <script src="js/watch.js?v=3.25.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.24.0';
+        const APP_VERSION = '3.25.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -634,7 +634,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ task: 'food-photo', image, user: user || '' })
-            }, 45000);
+            }, 90000); // two models in a row: the vision model reads it, gpt-oss works out the numbers
             let data = {};
             try { data = await res.json(); } catch (err) {}
             // An AI worker deployed before food photos existed answers "Empty prompt".
@@ -2153,21 +2153,20 @@
                 return () => clearInterval(interval);
             }, [setStartTime, view]);
 
-            // Watch controls: on for a live workout when switched on, off everywhere else.
+            // Watch controls: taken on in a workout only when the watch button is tapped (it pauses
+            // Spotify & co. while on), released by tapping it again or when the workout ends.
+            const disconnectWatch = () => { if (window.CWAWatch) window.CWAWatch.stop(); setWatchStatus('off'); };
             const connectWatch = () => {
                 const W = window.CWAWatch;
                 if (!W) return;
                 W.start({
                     next: () => watchRef.current.next(), prev: () => watchRef.current.prev(),
                     // Rest started/ended, or the session was stopped from the phone's media controls.
-                    change: () => { setWatchTick(t => t + 1); if (!W.active()) setWatchStatus(st => (st === 'on' ? 'blocked' : st)); },
+                    change: () => { setWatchTick(t => t + 1); if (!W.active()) setWatchStatus(st => (st === 'on' ? 'off' : st)); },
                 }).then(setWatchStatus);
             };
             useEffect(() => {
-                const W = window.CWAWatch;
-                if (!W) return;
-                if (view === 'live' && watchPref) connectWatch();
-                else { W.stop(); setWatchStatus('off'); }
+                if (view !== 'live' || !watchPref) disconnectWatch();
             }, [view, watchPref]);
             // What the watch shows: exercise, set, weight × reps.
             useEffect(() => {
@@ -3512,13 +3511,13 @@
                             e('div', { className: 'flex items-center gap-3' },
                                 e('span', { className: 'text-xs uppercase tracking-widest font-bold', style: { color: 'var(--on-surface-variant)' } }, liveWorkout.day),
                                 e('span', { className: 'text-sm font-bold', style: { color: 'var(--primary-fixed-dim)' } }, formatTime(totalElapsedTime)),
-                                watchPref ? (watchStatus === 'on'
-                                    ? e('span', { role: 'img', 'aria-label': 'Watch controls on', title: 'Watch controls on', className: 'flex items-center', style: { color: 'var(--primary-fixed-dim)' } }, e(MIcon, { icon: 'watch', style: { fontSize: '20px' } }))
-                                    : e('button', {
-                                        onClick: connectWatch, disabled: watchStatus === 'unsupported',
-                                        className: 'flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold active:scale-95',
-                                        style: { background: 'var(--surface-container-high)', color: 'var(--on-surface-variant)' }
-                                    }, e(MIcon, { icon: 'watch', style: { fontSize: '14px' } }), watchStatus === 'unsupported' ? 'Not supported' : 'Connect watch')) : null
+                                watchPref ? e('button', {
+                                    onClick: watchStatus === 'on' ? disconnectWatch : connectWatch, disabled: watchStatus === 'unsupported',
+                                    'aria-pressed': watchStatus === 'on',
+                                    'aria-label': watchStatus === 'on' ? 'Watch controls on, tap to give the music back' : 'Use watch controls (pauses music)',
+                                    className: 'flex items-center gap-1 px-2 py-0.5 -my-0.5 rounded-lg text-xs font-bold active:scale-95',
+                                    style: watchStatus === 'on' ? { background: 'var(--primary-container)', color: 'var(--on-primary-container)' } : { background: 'var(--surface-container-high)', color: 'var(--on-surface-variant)' }
+                                }, e(MIcon, { icon: 'watch', style: { fontSize: '16px' } }), watchStatus === 'unsupported' ? 'Not supported' : 'Watch') : null
                             ),
                             watchRestLeft > 0
                                 ? e('button', { onClick: () => window.CWAWatch.stopRest(), 'aria-label': 'Stop rest timer', className: 'flex items-center gap-2 px-2 py-0.5 -my-0.5 rounded-lg active:scale-95', style: { background: 'var(--secondary-container)' } },
@@ -4345,12 +4344,12 @@
                                     return e('div', { className: 'rounded-2xl p-4', style: card },
                                         e('button', {
                                             role: 'switch', 'aria-checked': watchPref, disabled: !ok,
-                                            onClick: () => { const on = !watchPref; W.setEnabled(on); setWatchPref(on); setToast(on ? 'Watch controls on for workouts' : 'Watch controls off'); },
+                                            onClick: () => { const on = !watchPref; W.setEnabled(on); setWatchPref(on); setToast(on ? 'Watch button added to workouts' : 'Watch button removed'); },
                                             className: 'w-full flex items-center justify-between gap-3 text-left', style: { opacity: ok ? 1 : 0.5 }
                                         },
                                             e('span', { className: 'flex items-center gap-2 text-sm font-bold' },
                                                 e(MIcon, { icon: 'watch', style: { fontSize: '24px', color: watchPref ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }),
-                                                'Control workouts from the watch\u2019s music controls'),
+                                                'Watch button in workouts'),
                                             e('span', { 'aria-hidden': true, className: 'relative flex-shrink-0 rounded-full transition-colors', style: { width: 44, height: 26, background: watchPref ? 'var(--primary-container)' : 'var(--surface-container-highest)' } },
                                                 e('span', { className: 'absolute rounded-full transition-all', style: { top: 3, left: watchPref ? 21 : 3, width: 20, height: 20, background: watchPref ? 'var(--on-primary-container)' : 'var(--outline)' } }))),
                                         e('div', { className: 'space-y-1.5 mt-3' },
@@ -4366,7 +4365,7 @@
                                                 style: watchRest === sec ? { background: 'var(--primary-container)', color: 'var(--on-primary-container)' } : { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)' }
                                             }, formatTime(sec))))) : null,
                                         e('div', { className: 'text-xs mt-3 leading-snug', style: { color: ok ? 'var(--outline)' : 'var(--error)' } },
-                                            ok ? 'For watches that control the phone\u2019s music (Huawei, Galaxy, Garmin, Amazfit\u2026). During a workout CWA plays silent audio so the watch\u2019s music screen shows the exercise, set and weight, and the rest end beeps on the phone. While a workout runs, Spotify and other music pause. This phone only.'
+                                            ok ? 'Adds a Watch button next to the workout timer. Tap it when you want your watch\u2019s music buttons (Huawei, Galaxy, Garmin, Amazfit\u2026) to drive the workout: the watch\u2019s music screen shows the exercise, set and weight, and the rest end beeps. The watch can control only one player, so Spotify pauses while it\u2019s on; tap Watch again (or finish) to give it back, then resume Spotify. This phone only.'
                                                 : 'This browser doesn\u2019t support media controls (use Chrome on Android).'));
                                 })()
                             ),
