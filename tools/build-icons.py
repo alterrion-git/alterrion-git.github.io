@@ -23,6 +23,7 @@ local_fire_department speed flag monitor_weight photo_camera forum settings
 add remove search check arrow_back refresh info warning restaurant barcode_scanner nutrition egg
 water_drop history star more_vert schedule bolt flash_on flash_off tune content_copy play_arrow
 menu_book psychology favorite bedtime directions_walk link download
+watch skip_next skip_previous pause
 """.split()))
 
 src = sys.argv[1]
