@@ -9,8 +9,10 @@
 //   ⏯ play/pause → start / stop the rest timer
 //   ⏮ previous  → back one set
 // The rest end beeps (scheduled on the audio clock, so it's on time even with the screen
-// off). Catch: while it's on, CWA holds the phone's audio focus, so Spotify and other music
-// pause. Off by default; Settings › Watch controls. Settings are per device (localStorage).
+// off). Catch: the watch controls only one player, so while it's on CWA holds the phone's
+// audio and Spotify & co. pause. So it's only taken on when the Watch button in the workout is
+// tapped, and given back by tapping it again or finishing. The button is added in Settings ›
+// Watch controls (off by default). Settings are per device (localStorage).
 // Loaded before the main script.
 (function () {
     'use strict';

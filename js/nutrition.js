@@ -1466,7 +1466,7 @@
         };
         const onPhotoFile = async (file) => {
             if (!file) return;
-            setBusy('Reading photo…'); setError('');
+            setBusy('Reading photo… (up to a minute)'); setError('');
             try {
                 const image = await compressImage(file, 1280, 0.85);
                 const r = await callFoodVision(image, app.user);

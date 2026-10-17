@@ -7,9 +7,9 @@
 // Jobs:
 //  1. AI Coach chat / text: POST { system, prompt | messages, user, maxTokens }
 //     → { text, model, fallback? }  (fallback: why the models before `model` didn't answer)
-//  2. Food photos (nutrition labels / products / plates):
-//     POST { task: 'food-photo', image: 'data:image/jpeg;base64,...', user }
-//     → { food: { name, brand, barcode, unit, source, per100: {...}, servingGrams, confidence }, model }
+//  2. Food photos (nutrition labels / products / plates), read in two steps (vision model
+//     → gpt-oss, see VISION_MODELS): POST { task: 'food-photo', image: 'data:image/jpeg;base64,...', user }
+//     → { food: { name, brand, barcode, unit, source, per100: {...}, servingGrams, confidence }, model, fallback? }
 //  3. Open Food Facts, server side (the app's fallback when OFF doesn't answer the browser):
 //     POST { task: 'off-search', q } → { products: [...], source }
 //     POST { task: 'off-product', code } → OFF's product JSON ({ status, product })
@@ -17,7 +17,8 @@
 // Setup (see proxy/README.md):
 //   - Add a Workers AI binding named  AI  (Worker > Settings > Bindings).
 //   - Optional plain var  AI_MODEL      (chat model; tried before the defaults).
-//   - Optional plain var  VISION_MODEL  (food-photo model; tried first).
+//   - Optional plain var  VISION_MODEL  (food-photo model that reads the photo; tried first).
+//   - Optional plain var  NUTRITION_MODEL (works out a photo's numbers; default gpt-oss-120b).
 //   - Optional plain var  ALLOW_ORIGIN  (defaults to the GitHub Pages origin).
 
 const DEFAULT_ALLOW = 'https://alterrion-git.github.io';
@@ -30,9 +31,13 @@ const CHAT_MODELS = [
   '@cf/openai/gpt-oss-120b',
   '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
 ];
-// Vision models that take OpenAI-style image_url content parts, tried in order
-// until one answers (the catalog changes; VISION_MODEL lets you pin one).
+// Vision models that take OpenAI-style image_url content parts, tried in order until one
+// answers (the catalog changes; VISION_MODEL lets you pin one). Gemma 4 (Apr 2026) reads
+// labels (OCR) much better than the older ones. gpt-oss can't see images, so a photo is read
+// in two steps: a vision model writes down what it sees (the nutrition table verbatim, or the
+// plate's items and weights), then the chat model (gpt-oss) works out the numbers from that.
 const VISION_MODELS = [
+  '@cf/google/gemma-4-26b-a4b-it',
   '@cf/meta/llama-4-scout-17b-16e-instruct',
   '@cf/mistralai/mistral-small-3.1-24b-instruct',
   '@cf/google/gemma-3-12b-it',
@@ -40,22 +45,41 @@ const VISION_MODELS = [
 // Last resort: older vision model with a separate `image` field.
 const LEGACY_VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
 
-const FOOD_PHOTO_PROMPT = `You read food photos for a nutrition tracker. First decide what the photo shows:
+// Step 1 (vision model): what the photo shows, copied down rather than worked out, plus the
+// model's own rough numbers (used only if step 2 fails).
+const FOOD_PHOTO_PROMPT = `You look at food photos for a nutrition tracker and write down exactly what you see. First decide what the photo shows:
 "label" = a nutrition facts table is visible (often Czech: "Výživové údaje", "Energetická hodnota", "Tuky", "z toho nasycené mastné kyseliny", "Sacharidy", "z toho cukry", "Vláknina", "Bílkoviny", "Sůl"),
 "package" = a packaged product without a readable nutrition table,
 "meal" = a plate or prepared dish, "food" = an unpackaged food (fruit, bread, meat...).
 Return ONLY one JSON object, no other text:
 {"kind": "label"|"package"|"meal"|"food", "name": string, "brand": string|null, "searchText": string,
- "barcode": string|null, "unit": "g"|"ml", "source": "label"|"estimate",
+ "barcode": string|null, "unit": "g"|"ml",
+ "labelText": string|null, "servingText": string|null,
+ "items": [{"food": string, "grams": number}], "notes": string,
+ "source": "label"|"estimate",
  "per100": {"kcal": number, "protein": number, "carbs": number, "sugar": number, "fat": number, "fibre": number, "salt": number},
  "servingGrams": number|null, "confidence": "high"|"medium"|"low"}
 Rules:
+- labelText: the whole nutrition table copied exactly as printed, one row per line, every column with its header (e.g. "na 100 g | na porci 30 g"), numbers and units exactly as printed (keep decimal commas). null if no table is visible.
+- servingText: the portion / package size as printed, else null.
+- items (meals and food): each component you can see with its estimated weight in grams (look at the plate size, cutlery, hands). notes: cooking method, oil, sauces, anything that changes calories.
 - searchText: the brand and product name exactly as printed on the package (e.g. "Olma Florian jogurt bílý"), used to look the product up in a database. Copy the printed words; never invent a brand you cannot read. For meals/food: the food's common name.
-- per100 is per 100 g (or 100 ml for drinks). If the table shows only per portion, convert using the portion size. If only kJ is shown, kcal = kJ / 4.184. If only sodium is shown, salt = sodium * 2.5.
-- source = "label" only when the numbers come from a visible nutrition table. Otherwise give typical values for that kind of food, source = "estimate", confidence "low" for packages.
-- For a meal, estimate per100 for the whole dish and the total portion weight in servingGrams.
+- per100: your own rough values per 100 g (or 100 ml for drinks); servingGrams: the portion weight. source = "label" only when the numbers come from a visible table.
 - barcode = the digits printed under a visible barcode, else null. Use null for anything unknown.
 - Keep names in the language printed on the package (Czech is fine).`;
+
+// Step 2 (chat model, gpt-oss): the numbers, worked out from step 1's notes.
+const FOOD_NUTRITION_PROMPT = `You turn what a vision model saw in a food photo into nutrition values for a tracker. You get its notes as JSON: kind, name, brand, labelText (the nutrition table as printed), servingText, items (components with estimated grams), notes, and its own rough per100 guess.
+Work it out carefully, then return ONLY one JSON object, no other text:
+{"kind": "label"|"package"|"meal"|"food", "name": string, "brand": string|null, "searchText": string, "barcode": string|null, "unit": "g"|"ml",
+ "source": "label"|"estimate",
+ "per100": {"kcal": number, "protein": number, "carbs": number, "sugar": number, "fat": number, "fibre": number, "salt": number},
+ "servingGrams": number|null, "confidence": "high"|"medium"|"low"}
+Rules:
+- With labelText: use the per 100 g (or 100 ml) column. If there is only a per-portion column, convert with the portion size (servingText). kJ only → kcal = kJ / 4.184. Sodium only → salt = sodium × 2.5. Decimal commas are decimal points. Check kcal ≈ 4×protein + 4×carbs + 9×fat (+ 2×fibre); if a value is clearly misread (e.g. a lost decimal comma: 25 instead of 2,5), correct it. source = "label", confidence "high" unless the table was incomplete.
+- Meal or food: estimate per 100 g of the whole portion from the items and their grams, with typical values for each component (include oil and sauces from the notes); servingGrams = total grams. source = "estimate".
+- Package without a table: typical values for that kind of product; source "estimate", confidence "low".
+- Keep name, brand, searchText and barcode from the notes unless clearly wrong. per100 values are plain numbers (no units); null when unknown.`;
 
 export default {
   async fetch(request, env) {
@@ -187,14 +211,60 @@ function responseText(out) {
   return typeof c === 'string' ? c.trim() : '';
 }
 
+// The last complete {...} in a reply that looks like our object (a model may think out loud,
+// or wrap it in ``` fences, before it).
 function parseFoodJson(text) {
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start < 0 || end <= start) return null;
-  try { return JSON.parse(text.slice(start, end + 1)); } catch (e) { return null; }
+  if (!text) return null;
+  const t = String(text);
+  let best = null;
+  for (let start = t.indexOf('{'); start >= 0; start = t.indexOf('{', start + 1)) {
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < t.length; i++) {
+      const ch = t[i];
+      if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+      if (ch === '"') inStr = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}' && --depth === 0) {
+        try { const o = JSON.parse(t.slice(start, i + 1)); if (o && typeof o === 'object' && ('per100' in o || 'kind' in o)) best = o; } catch (e) {}
+        break;
+      }
+    }
+  }
+  return best;
 }
 
+const shortModel = (m) => String(m || '').split('/').pop();
+
 async function foodPhoto(env, image, json) {
+  // Step 1: a vision model reads the photo.
+  const look = await readPhoto(env, image);
+  if (!look.food) return json({ error: 'Could not read the photo. ' + look.errors.join(' | ').slice(0, 600) }, 502);
+  // Step 2: the chat model works out the numbers. If it can't, the vision model's own ones.
+  const seen = look.food;
+  const notes = JSON.stringify({
+    kind: seen.kind, name: seen.name, brand: seen.brand, searchText: seen.searchText, barcode: seen.barcode, unit: seen.unit,
+    labelText: seen.labelText, servingText: seen.servingText, items: seen.items, notes: seen.notes,
+    roughGuess: { per100: seen.per100, servingGrams: seen.servingGrams },
+  });
+  const chatModel = env.NUTRITION_MODEL || CHAT_MODELS[0];
+  let detail = '';
+  try {
+    const text = await chat(env, chatModel, FOOD_NUTRITION_PROMPT, [{ role: 'user', content: notes.slice(0, 8000) }], 1200);
+    const worked = parseFoodJson(text);
+    if (worked && worked.per100 && worked.per100.kcal != null) {
+      const food = { ...seen, ...worked, name: worked.name || seen.name, brand: worked.brand ?? seen.brand, searchText: worked.searchText || seen.searchText, barcode: worked.barcode ?? seen.barcode };
+      return json({ food, model: `${shortModel(look.model)} + ${shortModel(chatModel)}` });
+    }
+    detail = `${shortModel(chatModel)}: no usable JSON`;
+  } catch (e) {
+    detail = `${shortModel(chatModel)}: ${e && e.message ? e.message : e}`;
+  }
+  console.log('food-photo step 2 failed:', detail);
+  return json({ food: seen, model: shortModel(look.model), fallback: detail });
+}
+
+// → { food, model } from the first vision model that answers, or { errors }.
+async function readPhoto(env, image) {
   const models = [env.VISION_MODEL, ...VISION_MODELS].filter((m, i, a) => m && a.indexOf(m) === i);
   const errors = [];
   for (const model of models) {
@@ -204,15 +274,16 @@ async function foodPhoto(env, image, json) {
           { type: 'text', text: FOOD_PHOTO_PROMPT },
           { type: 'image_url', image_url: { url: image } },
         ] }],
-        max_tokens: 600,
+        max_tokens: 1500,
         temperature: 0.1,
       });
       const food = parseFoodJson(responseText(out));
-      if (food) return json({ food, model });
-      errors.push(`${model}: no JSON in reply`);
+      if (food) return { food, model };
+      errors.push(`${shortModel(model)}: no JSON in reply`);
     } catch (e) {
-      errors.push(`${model}: ${e && e.message ? e.message : e}`);
+      errors.push(`${shortModel(model)}: ${e && e.message ? e.message : e}`);
     }
+    console.log('vision model failed:', errors[errors.length - 1]);
   }
   // Older model: image passed separately as bytes; needs a one-time license "agree".
   try {
@@ -220,7 +291,7 @@ async function foodPhoto(env, image, json) {
     const run = () => env.AI.run(LEGACY_VISION_MODEL, {
       messages: [{ role: 'user', content: FOOD_PHOTO_PROMPT }],
       image: [...bytes],
-      max_tokens: 600,
+      max_tokens: 1500,
       temperature: 0.1,
     });
     let out;
@@ -230,12 +301,12 @@ async function foodPhoto(env, image, json) {
       out = await run();
     }
     const food = parseFoodJson(responseText(out));
-    if (food) return json({ food, model: LEGACY_VISION_MODEL });
-    errors.push(`${LEGACY_VISION_MODEL}: no JSON in reply`);
+    if (food) return { food, model: LEGACY_VISION_MODEL };
+    errors.push(`${shortModel(LEGACY_VISION_MODEL)}: no JSON in reply`);
   } catch (e) {
-    errors.push(`${LEGACY_VISION_MODEL}: ${e && e.message ? e.message : e}`);
+    errors.push(`${shortModel(LEGACY_VISION_MODEL)}: ${e && e.message ? e.message : e}`);
   }
-  return json({ error: 'Could not read the photo. ' + errors.join(' | ').slice(0, 600) }, 502);
+  return { errors };
 }
 
 // ---------- Open Food Facts proxy ----------
