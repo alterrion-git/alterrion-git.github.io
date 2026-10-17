@@ -262,13 +262,14 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.23.0"></script>
-    <script src="js/coach.js?v=3.23.0"></script>
-    <script src="js/health.js?v=3.23.0"></script>
-    <script src="js/weight.js?v=3.23.0"></script>
+    <script src="js/nutrition.js?v=3.24.0"></script>
+    <script src="js/coach.js?v=3.24.0"></script>
+    <script src="js/health.js?v=3.24.0"></script>
+    <script src="js/weight.js?v=3.24.0"></script>
+    <script src="js/watch.js?v=3.24.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.23.0';
+        const APP_VERSION = '3.24.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -1096,7 +1097,7 @@
         // Icons render by codepoint from the self-hosted subset font (fonts/material-symbols.woff2),
         // so a missing font shows nothing instead of the icon's name as text. New icon? Add it to
         // tools/build-icons.py, rebuild, and paste the printed ICON_CP here.
-        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","bedtime":"e1f9","bolt":"ea0b","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","content_copy":"e14d","delete":"e872","delete_sweep":"e16c","directions_walk":"e536","download":"e171","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","favorite":"e87d","fitness_center":"eb43","flag":"e153","flash_off":"e3e6","flash_on":"e3e7","forum":"e0bf","history":"e28e","info":"e88e","link":"e157","local_fire_department":"ea05","menu_book":"ea19","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","person":"e7fd","photo_camera":"e3b0","play_arrow":"e037","psychology":"ea4a","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","tune":"e429","verified_user":"e8e8","warning":"e002","water_drop":"e798"};
+        const ICON_CP = {"add":"e145","add_a_photo":"e439","arrow_back":"e5c4","arrow_drop_down":"e5c5","arrow_upward":"e5d8","auto_awesome":"e65f","bar_chart":"e26b","barcode_scanner":"e70c","bedtime":"e1f9","bolt":"ea0b","calendar_month":"ebcc","check":"e5ca","chevron_left":"e408","chevron_right":"e409","close":"e14c","cloud_done":"e2bf","cloud_off":"e2c1","content_copy":"e14d","delete":"e872","delete_sweep":"e16c","directions_walk":"e536","download":"e171","edit":"e150","egg":"eacc","emoji_events":"e71a","event_repeat":"eb7b","expand_less":"e5ce","expand_more":"e5cf","favorite":"e87d","fitness_center":"eb43","flag":"e153","flash_off":"e3e6","flash_on":"e3e7","forum":"e0bf","history":"e28e","info":"e88e","link":"e157","local_fire_department":"ea05","menu_book":"ea19","monitor_weight":"f039","more_vert":"e5d4","nutrition":"e110","pause":"e034","person":"e7fd","photo_camera":"e3b0","play_arrow":"e037","psychology":"ea4a","refresh":"e5d5","remove":"e15b","repeat":"e040","restaurant":"e56c","schedule":"e192","search":"e8b6","settings":"e8b8","skip_next":"e044","skip_previous":"e045","speed":"e9e4","sports_gymnastics":"ebc4","star":"e838","sync":"e627","timer":"e425","trending_up":"e8e5","tune":"e429","verified_user":"e8e8","warning":"e002","watch":"e334","water_drop":"e798"};
         const MIcon = ({ icon, fill = false, className = '', style = {} }) => e('span', {
             className: `material-symbols-outlined ${className}`,
             'aria-hidden': true,
@@ -1468,6 +1469,12 @@
             const [editingDay, setEditingDay] = useState(null);
             const [editingWorkout, setEditingWorkout] = useState(null);
             const [liveWorkout, setLiveWorkout] = useState(null);
+            // Watch music controls (experiment, js/watch.js; switched on in Settings, per device).
+            const [watchPref, setWatchPref] = useState(() => !!(window.CWAWatch && window.CWAWatch.enabled()));
+            const [watchRest, setWatchRest] = useState(() => (window.CWAWatch ? window.CWAWatch.restSeconds() : 90));
+            const [watchStatus, setWatchStatus] = useState('off'); // off | on | blocked (needs a tap) | unsupported
+            const [, setWatchTick] = useState(0);
+            const watchRef = useRef({});
             const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
             const [currentSetIndex, setCurrentSetIndex] = useState(0);
             const [workoutStartTime, setWorkoutStartTime] = useState(null);
@@ -2146,6 +2153,35 @@
                 return () => clearInterval(interval);
             }, [setStartTime, view]);
 
+            // Watch controls: on for a live workout when switched on, off everywhere else.
+            const connectWatch = () => {
+                const W = window.CWAWatch;
+                if (!W) return;
+                W.start({
+                    next: () => watchRef.current.next(), prev: () => watchRef.current.prev(),
+                    // Rest started/ended, or the session was stopped from the phone's media controls.
+                    change: () => { setWatchTick(t => t + 1); if (!W.active()) setWatchStatus(st => (st === 'on' ? 'blocked' : st)); },
+                }).then(setWatchStatus);
+            };
+            useEffect(() => {
+                const W = window.CWAWatch;
+                if (!W) return;
+                if (view === 'live' && watchPref) connectWatch();
+                else { W.stop(); setWatchStatus('off'); }
+            }, [view, watchPref]);
+            // What the watch shows: exercise, set, weight × reps.
+            useEffect(() => {
+                const W = window.CWAWatch;
+                if (!W || watchStatus !== 'on' || view !== 'live' || !liveWorkout) return;
+                const ex = liveWorkout.exercises[currentExerciseIndex];
+                const st = ex && ex.sets[currentSetIndex];
+                if (!st) return;
+                W.update({
+                    exercise: ex.name, workout: liveWorkout.name, set: `set ${currentSetIndex + 1}/${ex.sets.length}`,
+                    load: st.weight ? `${fmtNum(st.weight)} kg × ${fmtNum(st.reps)}` : `${fmtNum(st.reps)} reps`,
+                });
+            }, [watchStatus, view, liveWorkout, currentExerciseIndex, currentSetIndex]);
+
             const formatTime = (seconds) => {
                 const mins = Math.floor(seconds / 60);
                 const secs = seconds % 60;
@@ -2385,6 +2421,22 @@
 
             const canGoPrev = () => {
                 return currentSetIndex > 0 || currentExerciseIndex > 0;
+            };
+
+            // The watch's ⏭ / ⏮ (fresh closures every render; js/watch.js calls through the ref).
+            watchRef.current = {
+                next: () => {
+                    if (view !== 'live' || !liveWorkout) return;
+                    const ex = liveWorkout.exercises[currentExerciseIndex];
+                    const finishing = currentSetIndex >= ex.sets.length - 1 && currentExerciseIndex >= liveWorkout.exercises.length - 1;
+                    nextSet();
+                    if (!finishing && window.CWAWatch) window.CWAWatch.startRest();
+                },
+                prev: () => {
+                    if (view !== 'live') return;
+                    if (canGoPrev()) prevSet();
+                    if (window.CWAWatch) window.CWAWatch.stopRest();
+                },
             };
 
             const getNextExerciseName = () => {
@@ -3369,6 +3421,7 @@
                 const currentExercise = liveWorkout.exercises[currentExerciseIndex];
                 const currentSet = currentExercise.sets[currentSetIndex];
                 const nextExName = getNextExerciseName();
+                const watchRestLeft = watchStatus === 'on' && window.CWAWatch ? window.CWAWatch.restLeft() : 0;
 
                 // Size the reps/weight boxes to actually fit the current screen.
                 // Cover layout packs [arrow][reps][weight][arrow] in one row, so the two
@@ -3453,16 +3506,28 @@
                                 )
                             )
                         ),
-                        // Timers row: day + total time | set time
+                        // Timers row: day + total time (+ watch controls) | set time, or the rest
+                        // countdown while the watch's rest timer runs (tap to stop it).
                         e('div', { className: 'flex items-center justify-between px-2 ' + (isCoverScreen ? 'mb-1 mt-1' : 'mb-4 mt-2') },
                             e('div', { className: 'flex items-center gap-3' },
                                 e('span', { className: 'text-xs uppercase tracking-widest font-bold', style: { color: 'var(--on-surface-variant)' } }, liveWorkout.day),
-                                e('span', { className: 'text-sm font-bold', style: { color: 'var(--primary-fixed-dim)' } }, formatTime(totalElapsedTime))
+                                e('span', { className: 'text-sm font-bold', style: { color: 'var(--primary-fixed-dim)' } }, formatTime(totalElapsedTime)),
+                                watchPref ? (watchStatus === 'on'
+                                    ? e('span', { role: 'img', 'aria-label': 'Watch controls on', title: 'Watch controls on', className: 'flex items-center', style: { color: 'var(--primary-fixed-dim)' } }, e(MIcon, { icon: 'watch', style: { fontSize: '20px' } }))
+                                    : e('button', {
+                                        onClick: connectWatch, disabled: watchStatus === 'unsupported',
+                                        className: 'flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold active:scale-95',
+                                        style: { background: 'var(--surface-container-high)', color: 'var(--on-surface-variant)' }
+                                    }, e(MIcon, { icon: 'watch', style: { fontSize: '14px' } }), watchStatus === 'unsupported' ? 'Not supported' : 'Connect watch')) : null
                             ),
-                            e('div', { className: 'flex items-center gap-2' },
-                                e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Set'),
-                                e('span', { className: 'text-sm font-bold', style: { color: 'var(--primary-fixed-dim)' } }, formatTime(currentSetTime))
-                            )
+                            watchRestLeft > 0
+                                ? e('button', { onClick: () => window.CWAWatch.stopRest(), 'aria-label': 'Stop rest timer', className: 'flex items-center gap-2 px-2 py-0.5 -my-0.5 rounded-lg active:scale-95', style: { background: 'var(--secondary-container)' } },
+                                    e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-secondary-container)' } }, 'Rest'),
+                                    e('span', { className: 'text-sm font-bold', style: { color: 'var(--on-secondary-container)' } }, formatTime(watchRestLeft)))
+                                : e('div', { className: 'flex items-center gap-2' },
+                                    e('span', { className: 'text-xs uppercase tracking-widest', style: { color: 'var(--on-surface-variant)' } }, 'Set'),
+                                    e('span', { className: 'text-sm font-bold', style: { color: 'var(--primary-fixed-dim)' } }, formatTime(currentSetTime))
+                                )
                         ),
                         // Cover screen: arrows inline with counters
                         // Full screen: counters, notes, then arrows below
@@ -4269,6 +4334,41 @@
                                     }, aiBusy ? 'Testing…' : 'Test connection') : null,
                                     aiError ? e('div', { className: 'text-sm mt-3 leading-snug', style: { color: 'var(--error)' } }, aiError) : null
                                 )
+                            ),
+                            e('div', null,
+                                sectionTitle('Watch controls (experiment)'),
+                                (() => {
+                                    const W = window.CWAWatch;
+                                    const ok = !!(W && W.supported());
+                                    const legend = (icon, text) => e('div', { className: 'flex items-center gap-2 text-sm' },
+                                        e(MIcon, { icon, style: { fontSize: '22px', color: 'var(--on-surface)' } }), e('span', null, text));
+                                    return e('div', { className: 'rounded-2xl p-4', style: card },
+                                        e('button', {
+                                            role: 'switch', 'aria-checked': watchPref, disabled: !ok,
+                                            onClick: () => { const on = !watchPref; W.setEnabled(on); setWatchPref(on); setToast(on ? 'Watch controls on for workouts' : 'Watch controls off'); },
+                                            className: 'w-full flex items-center justify-between gap-3 text-left', style: { opacity: ok ? 1 : 0.5 }
+                                        },
+                                            e('span', { className: 'flex items-center gap-2 text-sm font-bold' },
+                                                e(MIcon, { icon: 'watch', style: { fontSize: '24px', color: watchPref ? 'var(--primary-fixed-dim)' : 'var(--outline)' } }),
+                                                'Control workouts from the watch\u2019s music controls'),
+                                            e('span', { 'aria-hidden': true, className: 'relative flex-shrink-0 rounded-full transition-colors', style: { width: 44, height: 26, background: watchPref ? 'var(--primary-container)' : 'var(--surface-container-highest)' } },
+                                                e('span', { className: 'absolute rounded-full transition-all', style: { top: 3, left: watchPref ? 21 : 3, width: 20, height: 20, background: watchPref ? 'var(--on-primary-container)' : 'var(--outline)' } }))),
+                                        e('div', { className: 'space-y-1.5 mt-3' },
+                                            legend('skip_next', 'Next: set done, rest timer starts'),
+                                            legend('play_arrow', 'Play / pause: start or stop the rest timer'),
+                                            legend('skip_previous', 'Previous: back one set')),
+                                        watchPref ? e('div', { className: 'mt-3' },
+                                            e('div', { className: 'text-xs uppercase tracking-widest mb-1.5', style: { color: 'var(--on-surface-variant)' } }, 'Rest timer'),
+                                            e('div', { className: 'flex gap-1.5', role: 'group', 'aria-label': 'Rest timer length' }, W.REST_OPTIONS.map(sec => e('button', {
+                                                key: sec, 'aria-pressed': watchRest === sec,
+                                                onClick: () => { W.setRestSeconds(sec); setWatchRest(sec); },
+                                                className: 'flex-1 py-2 rounded-lg text-sm font-bold active:scale-95',
+                                                style: watchRest === sec ? { background: 'var(--primary-container)', color: 'var(--on-primary-container)' } : { background: 'var(--surface-container-low)', color: 'var(--on-surface-variant)' }
+                                            }, formatTime(sec))))) : null,
+                                        e('div', { className: 'text-xs mt-3 leading-snug', style: { color: ok ? 'var(--outline)' : 'var(--error)' } },
+                                            ok ? 'For watches that control the phone\u2019s music (Huawei, Galaxy, Garmin, Amazfit\u2026). During a workout CWA plays silent audio so the watch\u2019s music screen shows the exercise, set and weight, and the rest end beeps on the phone. While a workout runs, Spotify and other music pause. This phone only.'
+                                                : 'This browser doesn\u2019t support media controls (use Chrome on Android).'));
+                                })()
                             ),
                             e('div', null,
                                 sectionTitle('Backup & Restore'),
