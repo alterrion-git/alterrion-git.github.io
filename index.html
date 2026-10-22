@@ -262,14 +262,14 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.26.0"></script>
-    <script src="js/coach.js?v=3.26.0"></script>
-    <script src="js/health.js?v=3.26.0"></script>
-    <script src="js/weight.js?v=3.26.0"></script>
-    <script src="js/watch.js?v=3.26.0"></script>
+    <script src="js/nutrition.js?v=3.27.0"></script>
+    <script src="js/coach.js?v=3.27.0"></script>
+    <script src="js/health.js?v=3.27.0"></script>
+    <script src="js/weight.js?v=3.27.0"></script>
+    <script src="js/watch.js?v=3.27.0"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.26.0';
+        const APP_VERSION = '3.27.0';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -634,7 +634,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ task: 'food-photo', image, user: user || '' })
-            }, 90000); // two models in a row: the vision model reads it, gpt-oss works out the numbers
+            }, 45000); // one vision model call; a meal adds a gpt-oss check capped at 12 s
             let data = {};
             try { data = await res.json(); } catch (err) {}
             // An AI worker deployed before food photos existed answers "Empty prompt".

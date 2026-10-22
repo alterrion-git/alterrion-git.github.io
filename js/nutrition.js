@@ -1466,27 +1466,34 @@
         };
         const onPhotoFile = async (file) => {
             if (!file) return;
-            setBusy('Reading photo… (up to a minute)'); setError('');
+            setBusy('Reading photo…'); setError('');
             try {
                 const image = await compressImage(file, 1280, 0.85);
                 const r = await callFoodVision(image, app.user);
                 try { localStorage.setItem('cwa-photoai-' + today, String(photoCount() + 1)); } catch (err) {}
                 const food = aiToFood(r);
-                // 1) A readable barcode in the photo → the real product data.
-                if (food.code.length >= 8) {
-                    try {
-                        const mine = Object.values(app.foods || {}).find(f => f.code === food.code);
-                        if (mine) { setSheet({ type: 'amount', food: mine }); return; }
-                        const hit = await offLookup(food.code);
-                        if (hit.found && hit.food.hasNutrition) { setSheet({ type: 'amount', food: hit.food }); return; }
-                    } catch (err) {}
+                const hasCode = food.code.length >= 8;
+                // 1) A product you already have (your foods, or one looked up before) → that.
+                if (hasCode) {
+                    const mine = Object.values(app.foods || {}).find(f => f.code === food.code);
+                    const cached = mine ? null : cacheGet(food.code);
+                    if (mine || (cached && cached.hasNutrition)) { setSheet({ type: 'amount', food: mine || cached }); return; }
                 }
-                // 2) A nutrition table → check the numbers, save as your food.
+                // 2) A nutrition table → its numbers right away (no waiting on Open Food Facts);
+                //    check them, save as your food.
                 if (r.source === 'label' && food.n.kcal != null) {
                     setSheet({ type: 'editor', food, note: 'Read by AI from the label — check the numbers, then save. It becomes one of your foods.', thenAdd: true });
                     return;
                 }
-                // 3) No table: a package → look the product up by the name printed on it;
+                // 3) No table but a readable barcode → the real product data.
+                if (hasCode) {
+                    setBusy('Looking up ' + food.code + '…');
+                    try {
+                        const hit = await offLookup(food.code);
+                        if (hit.found && hit.food.hasNutrition) { setSheet({ type: 'amount', food: hit.food }); return; }
+                    } catch (err) {}
+                }
+                // 4) No table: a package → look the product up by the name printed on it;
                 //    unpackaged food / a meal → your and basic foods. The AI's estimate is the fallback.
                 const kind = r.kind === 'meal' || r.kind === 'food' || r.kind === 'package' ? r.kind : 'package';
                 const q = String(r.searchText || [food.brand, food.name].filter(Boolean).join(' ')).trim();
