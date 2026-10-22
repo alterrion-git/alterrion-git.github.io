@@ -34,20 +34,21 @@ allocation (10,000 neurons/day) is far more than gated recaps use.
   and falls back to `@cf/meta/llama-3.3-70b-instruct-fp8-fast` if that model
   is unavailable or returns nothing. The app shows which model answered under
   the chat box.
-- Food photos are read in two steps, because gpt-oss can't see images:
-  1. A vision model writes down what it sees (the nutrition table copied as
-     printed, or the plate's items with estimated grams). It tries
-     `@cf/google/gemma-4-26b-a4b-it`, then
-     `@cf/meta/llama-4-scout-17b-16e-instruct`,
-     `@cf/mistralai/mistral-small-3.1-24b-instruct`, `@cf/google/gemma-3-12b-it`
-     and finally `@cf/meta/llama-3.2-11b-vision-instruct`, using the first that
-     answers. Plain variable `VISION_MODEL` puts another one first.
-  2. `@cf/openai/gpt-oss-120b` works out the nutrition values from those notes
-     (unit conversions, sanity checks, meal estimates). Plain variable
-     `NUTRITION_MODEL` swaps it. If this step fails, the vision model's own
-     numbers are used.
-  The app shows "Read by …" with both models under the photo result. If photos
-  fail, the error message lists why each model failed.
+- Food photos are read by one vision model, which gives the final numbers (a
+  label's per-100 column as printed; a plate's items, their weights and an
+  estimate). It tries `@cf/google/gemma-4-26b-a4b-it`, then
+  `@cf/meta/llama-4-scout-17b-16e-instruct`,
+  `@cf/mistralai/mistral-small-3.1-24b-instruct`, `@cf/google/gemma-3-12b-it`
+  and finally `@cf/meta/llama-3.2-11b-vision-instruct`, using the first that
+  answers. Plain variable `VISION_MODEL` puts another one first. The Worker
+  fixes units in code (kJ → kcal, sodium → salt, decimal commas, kJ read as
+  kcal) and marks a label whose energy doesn't match its macros as less sure.
+  Only a meal (or unpackaged food) gets a second look: `@cf/openai/gpt-oss-120b`
+  on low reasoning checks the estimate from its components, if it answers
+  within 12 s; otherwise the vision model's numbers stand. Plain variable
+  `NUTRITION_MODEL` swaps that model. A label or a package takes one model
+  call (it used to take two). The app shows "Read by …" with the model(s) under the result;
+  if photos fail, the error message lists why each model failed.
 - Plain variable `ALLOW_ORIGIN` if the app isn't on
   `https://alterrion-git.github.io`.
 

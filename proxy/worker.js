@@ -7,8 +7,9 @@
 // Jobs:
 //  1. AI Coach chat / text: POST { system, prompt | messages, user, maxTokens }
 //     → { text, model, fallback? }  (fallback: why the models before `model` didn't answer)
-//  2. Food photos (nutrition labels / products / plates), read in two steps (vision model
-//     → gpt-oss, see VISION_MODELS): POST { task: 'food-photo', image: 'data:image/jpeg;base64,...', user }
+//  2. Food photos (nutrition labels / products / plates), read by a vision model (see
+//     VISION_MODELS; a meal's estimate is checked by gpt-oss if it answers within
+//     MEAL_CHECK_MS): POST { task: 'food-photo', image: 'data:image/jpeg;base64,...', user }
 //     → { food: { name, brand, barcode, unit, source, per100: {...}, servingGrams, confidence }, model, fallback? }
 //  3. Open Food Facts, server side (the app's fallback when OFF doesn't answer the browser):
 //     POST { task: 'off-search', q } → { products: [...], source }
@@ -18,7 +19,7 @@
 //   - Add a Workers AI binding named  AI  (Worker > Settings > Bindings).
 //   - Optional plain var  AI_MODEL      (chat model; tried before the defaults).
 //   - Optional plain var  VISION_MODEL  (food-photo model that reads the photo; tried first).
-//   - Optional plain var  NUTRITION_MODEL (works out a photo's numbers; default gpt-oss-120b).
+//   - Optional plain var  NUTRITION_MODEL (checks a meal photo's estimate; default gpt-oss-120b).
 //   - Optional plain var  ALLOW_ORIGIN  (defaults to the GitHub Pages origin).
 
 const DEFAULT_ALLOW = 'https://alterrion-git.github.io';
@@ -33,9 +34,8 @@ const CHAT_MODELS = [
 ];
 // Vision models that take OpenAI-style image_url content parts, tried in order until one
 // answers (the catalog changes; VISION_MODEL lets you pin one). Gemma 4 (Apr 2026) reads
-// labels (OCR) much better than the older ones. gpt-oss can't see images, so a photo is read
-// in two steps: a vision model writes down what it sees (the nutrition table verbatim, or the
-// plate's items and weights), then the chat model (gpt-oss) works out the numbers from that.
+// labels (OCR) much better than the older ones. gpt-oss can't see images; it only checks a
+// meal's estimate (see foodPhoto).
 const VISION_MODELS = [
   '@cf/google/gemma-4-26b-a4b-it',
   '@cf/meta/llama-4-scout-17b-16e-instruct',
@@ -45,41 +45,35 @@ const VISION_MODELS = [
 // Last resort: older vision model with a separate `image` field.
 const LEGACY_VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
 
-// Step 1 (vision model): what the photo shows, copied down rather than worked out, plus the
-// model's own rough numbers (used only if step 2 fails).
-const FOOD_PHOTO_PROMPT = `You look at food photos for a nutrition tracker and write down exactly what you see. First decide what the photo shows:
+// The vision model reads the photo and gives the final numbers in one go (a label's per-100
+// column as printed; a plate's items and their weights, then an estimate). Unit fixes (kJ,
+// sodium, decimal commas) and sanity checks happen in code (tidyFood), so a label needs no
+// second model.
+const FOOD_PHOTO_PROMPT = `You read food photos for a nutrition tracker. First decide what the photo shows:
 "label" = a nutrition facts table is visible (often Czech: "Výživové údaje", "Energetická hodnota", "Tuky", "z toho nasycené mastné kyseliny", "Sacharidy", "z toho cukry", "Vláknina", "Bílkoviny", "Sůl"),
 "package" = a packaged product without a readable nutrition table,
 "meal" = a plate or prepared dish, "food" = an unpackaged food (fruit, bread, meat...).
 Return ONLY one JSON object, no other text:
 {"kind": "label"|"package"|"meal"|"food", "name": string, "brand": string|null, "searchText": string,
- "barcode": string|null, "unit": "g"|"ml",
- "labelText": string|null, "servingText": string|null,
- "items": [{"food": string, "grams": number}], "notes": string,
- "source": "label"|"estimate",
- "per100": {"kcal": number, "protein": number, "carbs": number, "sugar": number, "fat": number, "fibre": number, "salt": number},
- "servingGrams": number|null, "confidence": "high"|"medium"|"low"}
+ "barcode": string|null, "unit": "g"|"ml", "source": "label"|"estimate",
+ "per100": {"kcal": number, "kj": number|null, "protein": number, "carbs": number, "sugar": number, "fat": number, "fibre": number, "salt": number, "sodium": number|null},
+ "servingGrams": number|null, "items": [{"food": string, "grams": number}], "confidence": "high"|"medium"|"low"}
 Rules:
-- labelText: the whole nutrition table copied exactly as printed, one row per line, every column with its header (e.g. "na 100 g | na porci 30 g"), numbers and units exactly as printed (keep decimal commas). null if no table is visible.
-- servingText: the portion / package size as printed, else null.
-- items (meals and food): each component you can see with its estimated weight in grams (look at the plate size, cutlery, hands). notes: cooking method, oil, sauces, anything that changes calories.
-- searchText: the brand and product name exactly as printed on the package (e.g. "Olma Florian jogurt bílý"), used to look the product up in a database. Copy the printed words; never invent a brand you cannot read. For meals/food: the food's common name.
-- per100: your own rough values per 100 g (or 100 ml for drinks); servingGrams: the portion weight. source = "label" only when the numbers come from a visible table.
-- barcode = the digits printed under a visible barcode, else null. Use null for anything unknown.
+- Label: copy the per 100 g (or 100 ml) column exactly as printed; decimal commas become points (2,5 → 2.5). If there is only a per-portion column, divide by the portion weight and multiply by 100. kj = the kJ value if printed; sodium only if the table gives sodium instead of salt. source = "label"; confidence "high" unless the table is hard to read. items = [].
+- Meal or food: list each component you can see with its estimated weight in grams (judge by the plate size, cutlery, hands), then per100 for the whole portion from typical values (count oil, butter and sauces); servingGrams = the total grams. source = "estimate".
+- Package without a table: typical values for that kind of product; source "estimate", confidence "low".
+- searchText: the brand and product name exactly as printed on the package (e.g. "Olma Florian jogurt bílý"), used to look the product up in a database; never invent a brand you cannot read. For meals and food: the food's common name.
+- barcode = the digits printed under a visible barcode, else null. servingGrams for packages: the portion or package size as printed, else null. Use null for anything unknown.
 - Keep names in the language printed on the package (Czech is fine).`;
 
-// Step 2 (chat model, gpt-oss): the numbers, worked out from step 1's notes.
-const FOOD_NUTRITION_PROMPT = `You turn what a vision model saw in a food photo into nutrition values for a tracker. You get its notes as JSON: kind, name, brand, labelText (the nutrition table as printed), servingText, items (components with estimated grams), notes, and its own rough per100 guess.
-Work it out carefully, then return ONLY one JSON object, no other text:
-{"kind": "label"|"package"|"meal"|"food", "name": string, "brand": string|null, "searchText": string, "barcode": string|null, "unit": "g"|"ml",
- "source": "label"|"estimate",
- "per100": {"kcal": number, "protein": number, "carbs": number, "sugar": number, "fat": number, "fibre": number, "salt": number},
- "servingGrams": number|null, "confidence": "high"|"medium"|"low"}
-Rules:
-- With labelText: use the per 100 g (or 100 ml) column. If there is only a per-portion column, convert with the portion size (servingText). kJ only → kcal = kJ / 4.184. Sodium only → salt = sodium × 2.5. Decimal commas are decimal points. Check kcal ≈ 4×protein + 4×carbs + 9×fat (+ 2×fibre); if a value is clearly misread (e.g. a lost decimal comma: 25 instead of 2,5), correct it. source = "label", confidence "high" unless the table was incomplete.
-- Meal or food: estimate per 100 g of the whole portion from the items and their grams, with typical values for each component (include oil and sauces from the notes); servingGrams = total grams. source = "estimate".
-- Package without a table: typical values for that kind of product; source "estimate", confidence "low".
-- Keep name, brand, searchText and barcode from the notes unless clearly wrong. per100 values are plain numbers (no units); null when unknown.`;
+// Meals and unpackaged food only: the chat model (gpt-oss, low reasoning) checks the vision
+// model's estimate from its list of components. Capped at MEAL_CHECK_MS; past that, or if it
+// fails, the vision model's own numbers stand.
+const MEAL_CHECK_MS = 12000;
+const FOOD_NUTRITION_PROMPT = `You check a nutrition estimate for a photographed meal. You get JSON: name, items (components with estimated grams), servingGrams and the first estimate per 100 g.
+Return ONLY one JSON object, no other text:
+{"per100": {"kcal": number, "protein": number, "carbs": number, "sugar": number, "fat": number, "fibre": number, "salt": number}, "servingGrams": number|null, "confidence": "high"|"medium"|"low"}
+Rules: per 100 g of the whole portion, from typical values for each component and its grams (count oil, butter and sauces); servingGrams = the total grams of the items. kcal ≈ 4×protein + 4×carbs + 9×fat + 2×fibre. Plain numbers only.`;
 
 export default {
   async fetch(request, env) {
@@ -172,8 +166,15 @@ export default {
 };
 
 // One chat turn on one model → reply text ('' if it said nothing).
-async function chat(env, model, system, msgs, maxTokens) {
+// `effort` (gpt-oss only): its reasoning effort ('low' answers several times faster).
+async function chat(env, model, system, msgs, maxTokens, effort = null) {
   const messages = system ? [{ role: 'system', content: system }, ...msgs] : msgs;
+  if (/gpt-oss/.test(model) && effort) {
+    try {
+      const text = responseText(await env.AI.run(model, { input: messages, reasoning: { effort } }));
+      if (text) return text;
+    } catch (e) {}
+  }
   if (/gpt-oss/.test(model)) {
     // gpt-oss always reasons first, and max_tokens covers the reasoning too, so it gets far
     // more room than the visible answer needs (a small cap leaves the answer empty).
@@ -236,31 +237,68 @@ function parseFoodJson(text) {
 const shortModel = (m) => String(m || '').split('/').pop();
 
 async function foodPhoto(env, image, json) {
-  // Step 1: a vision model reads the photo.
   const look = await readPhoto(env, image);
   if (!look.food) return json({ error: 'Could not read the photo. ' + look.errors.join(' | ').slice(0, 600) }, 502);
-  // Step 2: the chat model works out the numbers. If it can't, the vision model's own ones.
-  const seen = look.food;
-  const notes = JSON.stringify({
-    kind: seen.kind, name: seen.name, brand: seen.brand, searchText: seen.searchText, barcode: seen.barcode, unit: seen.unit,
-    labelText: seen.labelText, servingText: seen.servingText, items: seen.items, notes: seen.notes,
-    roughGuess: { per100: seen.per100, servingGrams: seen.servingGrams },
-  });
+  const seen = tidyFood(look.food);
+  const vision = shortModel(look.model);
+  // A label or a package: done, one model call.
+  if (seen.kind !== 'meal' && seen.kind !== 'food') return json({ food: seen, model: vision });
+  // A meal: the chat model checks the estimate, if it can within MEAL_CHECK_MS.
   const chatModel = env.NUTRITION_MODEL || CHAT_MODELS[0];
+  const notes = JSON.stringify({ name: seen.name, items: seen.items, servingGrams: seen.servingGrams, firstEstimate: seen.per100 });
   let detail = '';
   try {
-    const text = await chat(env, chatModel, FOOD_NUTRITION_PROMPT, [{ role: 'user', content: notes.slice(0, 8000) }], 1200);
+    const text = await withTimeout(chat(env, chatModel, FOOD_NUTRITION_PROMPT, [{ role: 'user', content: notes.slice(0, 4000) }], 800, 'low'), MEAL_CHECK_MS);
     const worked = parseFoodJson(text);
-    if (worked && worked.per100 && worked.per100.kcal != null) {
-      const food = { ...seen, ...worked, name: worked.name || seen.name, brand: worked.brand ?? seen.brand, searchText: worked.searchText || seen.searchText, barcode: worked.barcode ?? seen.barcode };
-      return json({ food, model: `${shortModel(look.model)} + ${shortModel(chatModel)}` });
+    if (worked && worked.per100 && num(worked.per100.kcal) != null) {
+      const food = tidyFood({ ...seen, per100: { ...seen.per100, ...worked.per100 }, servingGrams: num(worked.servingGrams) ?? seen.servingGrams, confidence: worked.confidence || seen.confidence });
+      return json({ food, model: `${vision} + ${shortModel(chatModel)}` });
     }
     detail = `${shortModel(chatModel)}: no usable JSON`;
   } catch (e) {
     detail = `${shortModel(chatModel)}: ${e && e.message ? e.message : e}`;
   }
-  console.log('food-photo step 2 failed:', detail);
-  return json({ food: seen, model: shortModel(look.model), fallback: detail });
+  console.log('food-photo meal check skipped:', detail);
+  return json({ food: seen, model: vision, fallback: detail });
+}
+
+// `promise`, or an error after `ms` (the late answer is dropped, its error too).
+function withTimeout(promise, ms) {
+  promise.catch(() => {});
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer in ${ms / 1000}s`)), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+// "2,5" → 2.5; anything not a number → null.
+function num(v) {
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.').replace(/[^\d.\-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+// The numbers a model gave, made consistent: kJ → kcal, sodium → salt, kcal from the macros when
+// missing, and kJ read as kcal (a common slip: the kcal is ~4.2× the macros' energy) fixed. A
+// label whose energy still doesn't match its macros is marked as less sure, so you check it.
+function tidyFood(food) {
+  const p = { ...(food.per100 || {}) };
+  for (const k of ['kcal', 'kj', 'protein', 'carbs', 'sugar', 'fat', 'fibre', 'salt', 'sodium']) p[k] = num(p[k]);
+  if (p.fibre == null && food.per100 && food.per100.fiber != null) p.fibre = num(food.per100.fiber);
+  if (p.kj != null && (p.kcal == null || Math.abs(p.kcal - p.kj) < 0.5)) p.kcal = p.kj / 4.184; // kJ copied as kcal too
+  if (p.salt == null && p.sodium != null) p.salt = p.sodium * 2.5;
+  const macros = p.protein != null && p.carbs != null && p.fat != null
+    ? 4 * p.protein + 4 * p.carbs + 9 * p.fat + 2 * (p.fibre || 0) : null;
+  if (p.kcal == null && macros != null) p.kcal = macros;
+  let confidence = food.confidence;
+  if (p.kcal != null && macros != null && macros > 20) {
+    if (p.kj == null && Math.abs(p.kcal / 4.184 - macros) <= macros * 0.15 && Math.abs(p.kcal - macros) > macros * 0.5) p.kcal /= 4.184;
+    else if (Math.abs(p.kcal - macros) > Math.max(25, macros * 0.3) && confidence === 'high') confidence = 'medium';
+  }
+  if (p.kcal != null) p.kcal = Math.round(p.kcal);
+  delete p.kj; delete p.sodium;
+  return { ...food, per100: p, servingGrams: num(food.servingGrams), items: Array.isArray(food.items) ? food.items : [], confidence };
 }
 
 // → { food, model } from the first vision model that answers, or { errors }.
@@ -274,7 +312,7 @@ async function readPhoto(env, image) {
           { type: 'text', text: FOOD_PHOTO_PROMPT },
           { type: 'image_url', image_url: { url: image } },
         ] }],
-        max_tokens: 1500,
+        max_tokens: 900,
         temperature: 0.1,
       });
       const food = parseFoodJson(responseText(out));
@@ -291,7 +329,7 @@ async function readPhoto(env, image) {
     const run = () => env.AI.run(LEGACY_VISION_MODEL, {
       messages: [{ role: 'user', content: FOOD_PHOTO_PROMPT }],
       image: [...bytes],
-      max_tokens: 1500,
+      max_tokens: 900,
       temperature: 0.1,
     });
     let out;
