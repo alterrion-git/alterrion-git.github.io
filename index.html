@@ -204,6 +204,12 @@
             color: var(--primary-container);
         }
 
+        /* Some browsers (Samsung Internet) look for a dark theme of the site's own before they
+           force their dark mode on it; this is that signal (the app only has its dark theme). */
+        @media (prefers-color-scheme: dark) {
+            :root { color-scheme: dark; }
+        }
+
         /* Kinetic gradient for primary CTAs */
         .kinetic-gradient {
             background: linear-gradient(45deg, #d1fc00, #c4ec00);
@@ -267,14 +273,14 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.27.1"></script>
-    <script src="js/coach.js?v=3.27.1"></script>
-    <script src="js/health.js?v=3.27.1"></script>
-    <script src="js/weight.js?v=3.27.1"></script>
-    <script src="js/watch.js?v=3.27.1"></script>
+    <script src="js/nutrition.js?v=3.27.2"></script>
+    <script src="js/coach.js?v=3.27.2"></script>
+    <script src="js/health.js?v=3.27.2"></script>
+    <script src="js/weight.js?v=3.27.2"></script>
+    <script src="js/watch.js?v=3.27.2"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.27.1';
+        const APP_VERSION = '3.27.2';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
@@ -4463,7 +4469,7 @@
                                     e(MIcon, { icon: 'edit', style: { fontSize: '15px', color: 'var(--outline)', flexShrink: 0 } })
                                 ),
                                 e('div', { className: 'text-xs truncate', style: { color: 'var(--on-surface-variant)' } },
-                                    [workoutHistory.length + ' workouts', joined ? 'since ' + joined : null].filter(Boolean).join(' · '))
+                                    [workoutHistory.length + ' workouts', joined ? 'since ' + joined : null, 'v' + APP_VERSION].filter(Boolean).join(' · '))
                             ),
                             e('button', {
                                 onClick: () => setConfirmState({ title: 'Log out?', message: 'You can sign back in any time.', confirmLabel: 'Log Out', danger: false, onConfirm: () => { setConfirmState(null); doLogout(); } }),
