@@ -172,7 +172,10 @@
     // ---------- the Health screen (content; the caller wraps it in its page shell) ----------
     const card = { background: 'var(--surface-container-high)' };
     const label = (t) => e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, t);
-    const btn = (primary) => ({ background: primary ? 'var(--primary-container)' : 'var(--surface-container-highest)', color: primary ? 'var(--on-primary-container)' : 'var(--on-surface)' });
+    // primary: dark lime-tinted fill, lime text, lime ring (see --fill in index.html)
+    const btn = (primary) => (primary
+        ? { background: 'var(--fill)', color: 'var(--on-fill)', boxShadow: 'inset 0 0 0 1.5px var(--fill-ring)' }
+        : { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' });
 
     function Tile({ icon, title, value, unit, sub, onClick }) {
         return e(onClick ? 'button' : 'div', { onClick, className: 'rounded-2xl p-3 min-w-0 text-left' + (onClick ? ' active:scale-95 transition-transform' : ''), style: card },

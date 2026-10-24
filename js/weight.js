@@ -209,7 +209,7 @@
         const segBtn = (r) => e('button', {
             key: r.id, onClick: () => pick(r.id), 'aria-pressed': r.id === view.range.id, 'aria-label': 'Last ' + r.name,
             className: 'flex-1 py-2 rounded-lg text-sm font-black active:scale-95',
-            style: r.id === view.range.id ? { background: 'var(--primary-container)', color: 'var(--on-primary-container)' } : { color: 'var(--on-surface-variant)' },
+            style: r.id === view.range.id ? { background: 'var(--fill)', color: 'var(--on-fill)', boxShadow: 'inset 0 0 0 1.5px var(--fill-ring)' } : { color: 'var(--on-surface-variant)' },
         }, r.id);
         const latest = series[series.length - 1];
         const rows = pts.slice().reverse();
