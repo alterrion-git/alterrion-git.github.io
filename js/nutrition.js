@@ -467,7 +467,9 @@
     const card = { background: 'var(--surface-container-high)' };
     const label = (t) => e('div', { className: 'text-xs uppercase tracking-widest mb-2', style: { color: 'var(--on-surface-variant)' } }, t);
     const inputStyle = { background: 'var(--surface-container-low)', color: 'var(--on-surface)', border: 'none', caretColor: 'var(--primary-container)' };
-    const primaryBtn = { background: 'var(--primary-container)', color: 'var(--on-primary-container)' };
+    // Selected options and primary buttons: dark lime-tinted fill, lime text, lime ring (see
+    // --fill in index.html: a phone's forced dark mode leaves it alone; a lime fill went dark).
+    const primaryBtn = { background: 'var(--fill)', color: 'var(--on-fill)', boxShadow: 'inset 0 0 0 1.5px var(--fill-ring)' };
     const ghostBtn = { background: 'var(--surface-container-highest)', color: 'var(--on-surface)' };
     const iconBtn = (icon, onClick, aria, extra) => e('button', {
         onClick, 'aria-label': aria,
@@ -1595,7 +1597,7 @@
                             iconBtn('chevron_right', () => shiftDay(1), 'Next day', { width: 36, height: 36 }),
                             iconBtn('barcode_scanner', () => setSheet({ type: 'scan' }), 'Scan barcode', { width: 40, height: 40 }),
                             iconBtn('photo_camera', takePhoto, 'Photo', { width: 40, height: 40 }),
-                            iconBtn('add', () => setSheet({ type: 'add' }), 'Add food', { width: 40, height: 40, background: 'var(--primary-container)', color: 'var(--on-primary-container)' })
+                            iconBtn('add', () => setSheet({ type: 'add' }), 'Add food', { width: 40, height: 40, ...primaryBtn })
                         )
                         : e('div', { className: 'flex items-center justify-between mb-3' },
                             iconBtn('chevron_left', () => shiftDay(-1), 'Previous day'),
@@ -1623,7 +1625,7 @@
             e('input', { ref: photoInput, type: 'file', accept: 'image/*', capture: 'environment', className: 'hidden', onChange: (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; onPhotoFile(f); } }),
             sheetEl,
             busy ? busyOverlay(busy) : null,
-            app.toastText ? e('div', { className: 'fixed left-1/2 -translate-x-1/2 z-[190] px-4 py-2 rounded-xl text-sm font-bold', style: { bottom: 'max(env(safe-area-inset-bottom), 90px)', background: 'var(--primary-container)', color: 'var(--on-primary-container)', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' } }, app.toastText) : null,
+            app.toastText ? e('div', { className: 'fixed left-1/2 -translate-x-1/2 z-[190] px-4 py-2 rounded-xl text-sm font-bold', style: { bottom: 'max(env(safe-area-inset-bottom), 90px)', ...primaryBtn, boxShadow: '0 4px 20px rgba(0,0,0,0.4)' } }, app.toastText) : null,
             app.confirmEl || null,
             e(BottomNavBar, { activeTab: 'food', onTabChange: app.onTabChange })
         );
