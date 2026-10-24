@@ -8,6 +8,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="CWA">
     <meta name="theme-color" content="#0b0e11">
+    <!-- The app is dark already: without this, browsers' automatic dark mode for web pages
+         (Chrome "Dark theme for sites", Samsung Internet dark mode, Android's forced dark)
+         "darkens" it and the lime buttons and active tabs turn into dark blanks. -->
+    <meta name="color-scheme" content="dark">
     <meta name="screen-orientation" content="portrait">
     <link rel="manifest" href="manifest.json">
     <title>CWA - Workout Tracker</title>
@@ -59,6 +63,7 @@
         }
 
         :root {
+            color-scheme: dark; /* see the color-scheme meta tag */
             --void: #0b0e11;
             --surface: #0b0e11;
             --surface-container-lowest: #000000;
@@ -262,14 +267,14 @@
     <div id="root"></div>
     <!-- Food tab (diary, Open Food Facts, scanning, food photos). Must load before the main
          script below, which renders it; keep ?v= in sync with APP_VERSION. -->
-    <script src="js/nutrition.js?v=3.27.0"></script>
-    <script src="js/coach.js?v=3.27.0"></script>
-    <script src="js/health.js?v=3.27.0"></script>
-    <script src="js/weight.js?v=3.27.0"></script>
-    <script src="js/watch.js?v=3.27.0"></script>
+    <script src="js/nutrition.js?v=3.27.1"></script>
+    <script src="js/coach.js?v=3.27.1"></script>
+    <script src="js/health.js?v=3.27.1"></script>
+    <script src="js/weight.js?v=3.27.1"></script>
+    <script src="js/watch.js?v=3.27.1"></script>
     <script>
         // Register service worker for PWA
-        const APP_VERSION = '3.27.0';
+        const APP_VERSION = '3.27.1';
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`).catch(() => {
